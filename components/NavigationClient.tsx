@@ -207,23 +207,8 @@ export default function NavigationClient() {
                 </Link>
                 <button
                   onClick={() => {
-                    // If not on home page, navigate to home with hash
-                    if (window.location.pathname !== '/') {
-                      router.push('/#create-account');
-                      // Wait for navigation, then scroll
-                      setTimeout(() => {
-                        const element = document.getElementById('create-account');
-                        if (element) {
-                          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                      }, 100);
-                    } else {
-                      // On home page, scroll directly
-                      const element = document.getElementById('create-account');
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }
-                    }
+                    const el = document.getElementById("create-account")
+                    if (el) el.scrollIntoView({ behavior: "smooth" })
                   }}
                   className="rounded-md bg-[#0088CB] px-4 py-2 text-sm font-medium text-white hover:bg-[#0077B3]"
                 >
