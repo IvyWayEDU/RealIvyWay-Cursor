@@ -1,0 +1,23 @@
+[
+  {
+    "id": "7ef29c66-f13f-4df2-87ae-ae8061527a4b",
+    "name": "Student 1",
+    "email": "student@gmail.com",
+    "passwordHash": "80d63856d0d55aad778235b1c320ef26:92dd428a257e97777cc95295edd171d281429a87a54d472597555259a20befc369ee2fdc3dc034984bd2bbcc6017c15a6c9b755853c14a281c354cf27335aa27",
+    "roles": [
+      "student"
+    ],
+    "createdAt": "2025-12-18T03:29:38.947Z"
+  },
+  {
+    "id": "9aa6c128-1360-4eb8-add3-b132ef2e0d09",
+    "name": "Provider 1",
+    "email": "provider@gmail.com",
+    "passwordHash": "9de9a73f05c489e9706f1baa10d39b9b:17ff055d3696a5711dab452cd5d79e75b9adea5f35c58483fb587320db094c106730bcaa38d3d9617403b0d3b0f365e1ce6b2bf053fa83edff03fa1d4c1d337b",
+    "roles": [
+      "tutor",
+      "counselor"
+    ],
+    "createdAt": "2025-12-18T03:31:35.102Z"
+  }
+]
