@@ -162,7 +162,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '',
-        providerId: userId,
+        providerId: 'provider-1',
         serviceTypeId: 'test-prep',
         sessionType: 'test-prep',
         subject: 'SAT',
