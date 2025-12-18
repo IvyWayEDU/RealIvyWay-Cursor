@@ -136,7 +136,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '',
-        providerId: userId,
+        providerId: 'provider-1',
         serviceTypeId: 'counseling',
         sessionType: 'counseling',
         scheduledStartTime: session3Date.toISOString(),
