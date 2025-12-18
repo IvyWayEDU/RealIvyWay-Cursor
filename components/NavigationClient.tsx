@@ -207,8 +207,7 @@ export default function NavigationClient() {
                 </Link>
                 <button
                   onClick={() => {
-                    const el = document.getElementById("create-account")
-                    if (el) el.scrollIntoView({ behavior: "smooth" })
+                    window.location.href = "/#create-account";
                   }}
                   className="rounded-md bg-[#0088CB] px-4 py-2 text-sm font-medium text-white hover:bg-[#0077B3]"
                 >
