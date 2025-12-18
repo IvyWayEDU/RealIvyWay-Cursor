@@ -109,7 +109,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '',
-        providerId: 'provider-1'
+        providerId: 'provider-1',
         serviceTypeId: 'tutoring',
         sessionType: 'tutoring',
         subject: 'Science',
