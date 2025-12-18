@@ -82,7 +82,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '', // Empty for available sessions
-        providerId: providerId, // Use logged-in provider's auth.user.id
+        providerId: "provider-1", // Use logged-in provider's auth.user.id
         serviceTypeId: 'tutoring',
         sessionType: 'tutoring',
         subject: 'Math',
@@ -109,7 +109,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '',
-        providerId: 'provider-1',
+        providerId: "provider-1",
         serviceTypeId: 'tutoring',
         sessionType: 'tutoring',
         subject: 'Science',
@@ -136,7 +136,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '',
-        providerId: 'provider-1',
+        providerId: "provider-1",
         serviceTypeId: 'counseling',
         sessionType: 'counseling',
         scheduledStartTime: session3Date.toISOString(),
@@ -162,7 +162,7 @@ export default function AutoSeedSessionsClient() {
       sessions.push({
         id: generateUUID(),
         studentId: '',
-        providerId: 'provider-1',
+        providerId: "provider-1",
         serviceTypeId: 'test-prep',
         sessionType: 'test-prep',
         subject: 'SAT',
