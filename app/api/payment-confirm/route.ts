@@ -2,13 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { getUserById } from '@/lib/auth/storage';
 import { createZoomMeetingForSession } from '@/lib/sessions/actions';
-import { updateDevSession } from '@/lib/devSessionStore';
+import { updateSession } from '@/lib/sessions/storage';
 import Stripe from 'stripe';
 
 const stripe = process.env.STRIPE_SECRET_KEY
-  ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2024-09-30.acacia',
-    })
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
   : null;
 
 /**
@@ -58,9 +56,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Update session status to paid
-    updateDevSession(sessionId, {
+    await updateSession(sessionId, {
       status: 'scheduled', // Use 'scheduled' status for confirmed bookings
-      updatedAt: new Date().toISOString(),
     });
 
     // Create Zoom meeting for the session
@@ -68,10 +65,9 @@ export async function POST(request: NextRequest) {
 
     if (zoomResult.success && zoomResult.zoomJoinUrl && zoomResult.zoomMeetingId) {
       // Update session with Zoom meeting data
-      updateDevSession(sessionId, {
+      await updateSession(sessionId, {
         zoomJoinUrl: zoomResult.zoomJoinUrl,
         zoomMeetingId: zoomResult.zoomMeetingId,
-        updatedAt: new Date().toISOString(),
       });
     } else {
       // Log error but don't fail the booking

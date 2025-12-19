@@ -12,7 +12,7 @@ type School = {
   normalizedName: string;
 } | null;
 type TimeSlot = string | null;
-type Provider = string | null;
+type SessionProvider = string | null;
 
 interface SelectedSession {
   date: Date;
@@ -94,7 +94,7 @@ interface BookingState {
   school: School;
   timeSlot: TimeSlot;
   selectedSessions: SelectedSession[];
-  provider: Provider;
+  provider: SessionProvider;
 }
 
 // Helper function to determine required number of sessions based on plan

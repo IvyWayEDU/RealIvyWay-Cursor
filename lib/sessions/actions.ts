@@ -304,6 +304,29 @@ export async function createZoomMeetingForSessionData(sessionData: Session): Pro
 }
 
 /**
+ * Create Zoom meeting for a session by session ID (server-side)
+ * This is a convenience wrapper that fetches the session and calls createZoomMeetingForSessionData
+ */
+export async function createZoomMeetingForSession(sessionId: string): Promise<{
+  success: boolean;
+  error?: string;
+  zoomJoinUrl?: string;
+  zoomMeetingId?: string;
+}> {
+  // Import storage functions
+  const { getSessionById } = await import('@/lib/sessions/storage');
+  
+  // Get the session by ID
+  const session = await getSessionById(sessionId);
+  if (!session) {
+    return { success: false, error: 'Session not found' };
+  }
+
+  // Call the existing function with session data
+  return createZoomMeetingForSessionData(session);
+}
+
+/**
  * Create sessions from booking state and create Zoom meetings for each
  * This is called after successful payment
  */
