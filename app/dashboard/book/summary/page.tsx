@@ -158,12 +158,19 @@ export default function BookingSummaryPage() {
 
       const data = await response.json();
 
-      if (data.url) {
-        // Redirect to Stripe Checkout
-        window.location.href = data.url;
-      } else {
+      // Log the response for debugging (only in development)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Checkout API response:', data);
+      }
+
+      // Validate that we received a checkout URL
+      if (!data.url || typeof data.url !== 'string') {
+        console.error('Invalid checkout response:', data);
         throw new Error('No checkout URL received');
       }
+
+      // Redirect to Stripe Checkout
+      window.location.href = data.url;
     } catch (err) {
       console.error('Checkout error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred. Please try again.');

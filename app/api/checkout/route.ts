@@ -73,12 +73,39 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // Validate that we received a checkout URL
+    if (!checkoutSession.url) {
+      console.error('Stripe Checkout Session created but no URL returned:', {
+        sessionId: checkoutSession.id,
+        session: checkoutSession,
+      });
+      throw new Error('Stripe Checkout Session created but no URL was returned');
+    }
+
+    console.log('Stripe Checkout Session created successfully:', {
+      sessionId: checkoutSession.id,
+      url: checkoutSession.url,
+    });
+
     return NextResponse.json({
       sessionId: checkoutSession.id,
       url: checkoutSession.url,
     });
   } catch (error) {
     console.error('Error creating Stripe Checkout Session:', error);
+    
+    // Log detailed error information for debugging
+    if (error instanceof Error) {
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+    }
+    
+    // If it's a Stripe error, log additional details
+    if (error && typeof error === 'object' && 'type' in error) {
+      console.error('Stripe error type:', (error as any).type);
+      console.error('Stripe error code:', (error as any).code);
+      console.error('Stripe error message:', (error as any).message);
+    }
     
     return NextResponse.json(
       { 
