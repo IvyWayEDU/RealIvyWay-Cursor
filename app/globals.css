@@ -14,19 +14,213 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* Removed dark mode media query - public pages should always be light */
+/* Dark mode can be added later for dashboard pages if needed using class-based approach */
 
 html {
   scroll-behavior: smooth;
+  height: auto;
+  overflow-y: auto;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: #ffffff;
+  color: #171717;
   font-family: Arial, Helvetica, sans-serif;
+  height: auto;
+  overflow-y: auto;
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+/* Hide Stripe's floating helper UI (Link popup and other floating elements) */
+/* These rules target Stripe's injected floating UI elements without affecting payment functionality */
+/* Payment Elements inside forms are NOT affected by these rules */
+
+/* Target Stripe Link iframes */
+iframe[src*="link.stripe.com"],
+iframe[src*="js.stripe.com"][src*="link"],
+iframe[src*="hooks.stripe.com"][src*="link"],
+iframe[src*="stripe.com"][title*="Link"],
+iframe[src*="stripe.com"][src*="link"],
+iframe[id*="stripe-link"],
+iframe[class*="stripe-link"],
+iframe[name*="stripe-link"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  z-index: -9999 !important;
+}
+
+/* Target Stripe Link floating UI containers */
+div[data-stripe-link],
+div[id*="stripe-link"],
+div[class*="stripe-link"],
+div[id*="StripeLink"],
+div[class*="StripeLink"],
+div[id^="stripe-link-"],
+div[class^="stripe-link-"],
+div[id*="__stripe-link"],
+div[class*="__stripe-link"],
+div[data-testid*="stripe-link"],
+div[aria-label*="Stripe Link"],
+div[aria-label*="stripe link"],
+div[role="button"][aria-label*="Link"],
+div[class*="StripeLinkButton"],
+div[id*="StripeLinkButton"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  z-index: -9999 !important;
+}
+
+/* Target Stripe Link floating button/helper elements */
+button[data-stripe-link],
+button[id*="stripe-link"],
+button[class*="stripe-link"],
+button[aria-label*="Stripe Link"],
+button[aria-label*="stripe link"],
+a[data-stripe-link],
+a[id*="stripe-link"],
+a[class*="stripe-link"],
+a[href*="stripe.com"][href*="link"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  z-index: -9999 !important;
+}
+
+/* Target any element with Stripe Link in its class or ID that's positioned fixed/floating */
+div[class*="stripe"][class*="link"][style*="position"],
+div[id*="stripe"][id*="link"][style*="position"],
+div[class*="Stripe"][class*="Link"][style*="position"],
+div[id*="Stripe"][id*="Link"][style*="position"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  z-index: -9999 !important;
+}
+
+/* Hide any fixed bottom element that contains Stripe Link indicators */
+/* This catches dynamically injected elements that use inline styles */
+div[style*="position: fixed"][style*="bottom"]:has(iframe[src*="stripe.com"][src*="link"]),
+div[style*="position:fixed"][style*="bottom"]:has(iframe[src*="stripe.com"][src*="link"]),
+div[style*="position: fixed"][style*="bottom"]:has([data-stripe-link]),
+div[style*="position:fixed"][style*="bottom"]:has([data-stripe-link]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -9999 !important;
+}
+
+/* Ensure Payment Elements inside forms are NOT affected */
+form .StripeElement,
+form [data-testid*="payment-element"],
+form [class*="StripeElement"],
+form [id*="payment-element"],
+form iframe[src*="js.stripe.com"]:not([src*="link"]),
+form iframe[src*="hooks.stripe.com"]:not([src*="link"]) {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  left: auto !important;
+  width: auto !important;
+  height: auto !important;
+  z-index: auto !important;
+}
+
+/* Ensure PaymentElement container allows full expansion and scrolling */
+form [data-testid*="payment-element"],
+form [id*="payment-element"],
+form [class*="PaymentElement"],
+div[data-testid*="payment-element"],
+div[id*="payment-element"] {
+  overflow: visible !important;
+  min-height: auto !important;
+  max-height: none !important;
+  height: auto !important;
+}
+
+/* Ensure Stripe Payment Element iframes can render fully */
+form iframe[src*="js.stripe.com"][src*="elements"],
+form iframe[src*="hooks.stripe.com"][src*="elements"],
+form iframe[src*="js.stripe.com"][src*="payment"],
+form iframe[src*="hooks.stripe.com"][src*="payment"] {
+  overflow: visible !important;
+  max-height: none !important;
+  height: auto !important;
+}
+/* ===============================
+   STRIPE CHECKOUT SCROLL FIX
+================================ */
+
+html,
+body {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow-y: auto !important;
+}
+
+* {
+  max-height: none !important;
+}
+
+.checkout-container {
+  padding-bottom: 180px !important;
+}
+
+iframe[src*="stripe"],
+div[class*="Stripe"],
+div[class*="stripe"] {
+  max-height: none !important;
+  overflow: visible !important;
+}
+/* STRIPE CHECKOUT FIX – DO NOT REMOVE */
+html, body {
+  height: auto !important;
+  min-height: 100%;
+  overflow-y: auto !important;
+}
+
+[data-stripe], 
+.StripeElement,
+iframe[src*="stripe"] {
+  max-height: none !important;
+  overflow: visible !important;
 }

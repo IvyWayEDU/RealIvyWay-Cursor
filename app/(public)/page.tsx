@@ -18,6 +18,19 @@ export default function Home() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Handle smooth scrolling when navigating to page with hash
+  useEffect(() => {
+    if (window.location.hash === '#create-account') {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        const element = document.getElementById('create-account');
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    }
+  }, []);
+
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };

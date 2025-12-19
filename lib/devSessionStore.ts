@@ -45,31 +45,70 @@ export function updateDevSession(id: string, patch: Partial<Session>) {
   setDevSessions(sessions);
 }
 
-export function getDevPendingSessionsByStudentId(studentId: string): Session[] {
-  const sessions = getDevSessions();
-  return sessions.filter(
-    s => s.studentId === studentId && s.status === 'pending'
-  );
-}
-
-export function getDevPendingSessionsByProviderId(providerId: string): Session[] {
-  const sessions = getDevSessions();
-  return sessions.filter(
-    s => s.providerId === providerId && s.status === 'pending'
-  );
-}
 
 export function getDevPaidSessionsByStudentId(studentId: string): Session[] {
   const sessions = getDevSessions();
+  // Include both 'scheduled' (automatically confirmed at booking) and 'paid' (legacy) statuses
   return sessions.filter(
-    s => s.studentId === studentId && s.status === 'paid'
+    s => s.studentId === studentId && (s.status === 'paid' || s.status === 'scheduled')
   );
 }
 
 export function getDevPaidSessionsByProviderId(providerId: string): Session[] {
   const sessions = getDevSessions();
+  // Include both 'scheduled' (automatically confirmed at booking) and 'paid' (legacy) statuses
   return sessions.filter(
-    s => s.providerId === providerId && s.status === 'paid'
+    s => s.providerId === providerId && (s.status === 'paid' || s.status === 'scheduled')
+  );
+}
+
+/**
+ * Get upcoming sessions for a student (scheduled sessions in the future)
+ */
+export function getDevUpcomingSessionsByStudentId(studentId: string): Session[] {
+  const sessions = getDevSessions();
+  const now = new Date();
+  return sessions.filter(
+    s => s.studentId === studentId 
+      && (s.status === 'paid' || s.status === 'scheduled')
+      && new Date(s.scheduledStartTime) > now
+  );
+}
+
+/**
+ * Get completed sessions for a student (completed or past scheduled sessions)
+ */
+export function getDevCompletedSessionsByStudentId(studentId: string): Session[] {
+  const sessions = getDevSessions();
+  const now = new Date();
+  return sessions.filter(
+    s => s.studentId === studentId 
+      && (s.status === 'completed' || (s.status === 'scheduled' && new Date(s.scheduledStartTime) <= now))
+  );
+}
+
+/**
+ * Get upcoming sessions for a provider (scheduled sessions in the future)
+ */
+export function getDevUpcomingSessionsByProviderId(providerId: string): Session[] {
+  const sessions = getDevSessions();
+  const now = new Date();
+  return sessions.filter(
+    s => s.providerId === providerId 
+      && (s.status === 'paid' || s.status === 'scheduled')
+      && new Date(s.scheduledStartTime) > now
+  );
+}
+
+/**
+ * Get past sessions for a provider (completed or past scheduled sessions)
+ */
+export function getDevPastSessionsByProviderId(providerId: string): Session[] {
+  const sessions = getDevSessions();
+  const now = new Date();
+  return sessions.filter(
+    s => s.providerId === providerId 
+      && (s.status === 'completed' || (s.status === 'scheduled' && new Date(s.scheduledStartTime) <= now))
   );
 }
 

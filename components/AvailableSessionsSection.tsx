@@ -105,9 +105,9 @@ export default function AvailableSessionsSection() {
         return;
       }
 
-      // Update the session: set status to pending and set studentId
+      // Update the session: set status to scheduled (automatically confirmed) and set studentId
       updateDevSession(session.id, {
-        status: 'pending',
+        status: 'scheduled',
         studentId: userId,
         bookedAt: new Date().toISOString(),
         bookedBy: userId,
@@ -117,7 +117,7 @@ export default function AvailableSessionsSection() {
       // Remove the booked session from the available sessions list
       setSessions(prevSessions => prevSessions.filter(s => s.id !== session.id));
       
-      // Refresh the page to show the new pending session
+      // Refresh the page to show the new scheduled session
       router.refresh();
     } catch (err) {
       setError('An unexpected error occurred');

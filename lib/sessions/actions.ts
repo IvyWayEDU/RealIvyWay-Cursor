@@ -4,11 +4,11 @@ console.log("STRIPE_SECRET_KEY:", process.env.STRIPE_SECRET_KEY);
 import { Session } from '@/lib/models/types';
 import { getSession } from '@/lib/auth/session';
 import { getUserById } from '@/lib/auth/storage';
-import { addDevSession, getDevPendingSessionsByStudentId, getDevPendingSessionsByProviderId, updateDevSession } from '@/lib/devSessionStore';
+import { addDevSession, updateDevSession, getDevSessions } from '@/lib/devSessionStore';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 
-export interface CreatePendingSessionResult {
+export interface CreateSessionResult {
   success: boolean;
   error?: string;
   sessionId?: string;
@@ -23,15 +23,16 @@ export interface SessionWithStudent extends Session {
 }
 
 /**
- * Create a pending session when a student clicks an available time slot
+ * Create a scheduled session when a student books an available time slot
+ * Sessions are automatically confirmed at booking time (no pending state)
  */
-export async function createPendingSession(
+export async function createScheduledSession(
   providerId: string,
   date: string, // ISO date string (YYYY-MM-DD)
   time: string, // Time string (HH:MM)
   sessionType: 'tutoring' | 'counseling' | 'test-prep',
   subject?: string
-): Promise<CreatePendingSessionResult> {
+): Promise<CreateSessionResult> {
   // Get current user session
   const session = await getSession();
   if (!session) {
@@ -63,23 +64,23 @@ export async function createPendingSession(
   const startTime = dateTime.toISOString();
   const endTime = new Date(dateTime.getTime() + 60 * 60 * 1000).toISOString(); // Default 1 hour
 
-  // Create the session
+  // Create the session - automatically confirmed (scheduled status)
   const newSession: Session = {
     id: crypto.randomUUID(),
     studentId,
     providerId,
-    serviceTypeId: 'pending', // Placeholder until service types are implemented
+    serviceTypeId: sessionType, // Use session type as service type ID
     sessionType,
     subject,
     scheduledStartTime: startTime,
     scheduledEndTime: endTime,
-    status: 'pending',
-    priceCents: 0, // No payment yet
+    status: 'scheduled', // Automatically confirmed at booking time
+    priceCents: 0, // Will be set based on service type
     amountChargedCents: 0,
     amountRefundedCents: 0,
     bookedAt: new Date().toISOString(),
     bookedBy: studentId,
-    availabilityId: 'pending', // Placeholder until availability system is implemented
+    availabilityId: `availability-${providerId}-${Date.now()}`, // Generate availability ID
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -89,76 +90,9 @@ export async function createPendingSession(
     addDevSession(newSession);
     return { success: true, sessionId: newSession.id };
   } catch (error) {
-    console.error('Error creating pending session:', error);
+    console.error('Error creating scheduled session:', error);
     return { success: false, error: 'Failed to create session. Please try again.' };
   }
-}
-
-/**
- * Get pending sessions for the current student
- */
-export async function getStudentPendingSessions(): Promise<Session[]> {
-  const session = await getSession();
-  if (!session) {
-    return [];
-  }
-
-  if (!session.roles.includes('student')) {
-    return [];
-  }
-
-  // Read from dev session store (temporary development-only solution)
-  return getDevPendingSessionsByStudentId(session.userId);
-}
-
-/**
- * Get pending sessions for the current provider
- * Returns sessions where providerId matches the authenticated provider and status is "pending"
- * Includes student information for display
- * 
- * Uses devSessionStore as the single source of truth (temporary development-only solution)
- * Filters by: providerId === current authenticated user id AND status === 'pending'
- * 
- * IMPORTANT: Uses session.userId from auth/session - no hardcoded provider IDs
- * This ensures both student and provider dashboards read from the same temporary session store.
- */
-export async function getProviderPendingSessions(): Promise<SessionWithStudent[]> {
-  const session = await getSession();
-  if (!session) {
-    return [];
-  }
-
-  // Check if user has provider role (tutor or counselor)
-  const hasProviderRole = session.roles.some(role => role === 'tutor' || role === 'counselor');
-  if (!hasProviderRole) {
-    return [];
-  }
-
-  // Get the authenticated provider's user ID from the session
-  // This ensures we only show sessions for the logged-in provider
-  const providerUserId = session.userId;
-  
-  if (!providerUserId) {
-    console.warn('Provider session missing userId');
-    return [];
-  }
-
-  // Read from dev session store (temporary development-only solution)
-  const pendingSessions = getDevPendingSessionsByProviderId(providerUserId);
-  
-  // Enrich sessions with student information
-  const sessionsWithStudent: SessionWithStudent[] = await Promise.all(
-    pendingSessions.map(async (s) => {
-      const student = await getUserById(s.studentId);
-      return {
-        ...s,
-        studentName: student?.name,
-        studentEmail: student?.email,
-      };
-    })
-  );
-  
-  return sessionsWithStudent;
 }
 
 /**
@@ -193,7 +127,24 @@ export async function getCurrentProviderId(): Promise<{ providerId: string | nul
 }
 
 /**
- * Create a Stripe Checkout session for a pending session
+ * Get user name by user ID
+ * Used by client components to display provider names
+ */
+export async function getUserNameById(userId: string): Promise<{ name: string | null; error?: string }> {
+  try {
+    const user = await getUserById(userId);
+    if (!user) {
+      return { name: null, error: 'User not found' };
+    }
+    return { name: user.name };
+  } catch (error) {
+    console.error('Error fetching user name:', error);
+    return { name: null, error: 'Failed to fetch user name' };
+  }
+}
+
+/**
+ * Create a Stripe Checkout session for a scheduled session
  * @param sessionId - The session ID to create checkout for
  * @param priceCents - The price in cents (passed from client since dev store is client-side only)
  * @param sessionType - The type of session (for display purposes)
@@ -293,5 +244,197 @@ export async function confirmSessionPayment(sessionId: string): Promise<{
   // For dev mode, this is a no-op since the client will update localStorage
   // We return success so the client can proceed with the update
   return { success: true };
+}
+
+/**
+ * Create Zoom meeting for a session (server-side)
+ * This accepts session data directly since we can't access localStorage server-side
+ */
+export async function createZoomMeetingForSessionData(sessionData: Session): Promise<{
+  success: boolean;
+  error?: string;
+  zoomJoinUrl?: string;
+  zoomMeetingId?: string;
+}> {
+  // Check if Zoom is configured
+  const { isZoomConfigured, createZoomMeeting } = await import('@/lib/zoom/api');
+  if (!isZoomConfigured()) {
+    console.warn('Zoom is not configured. Skipping Zoom meeting creation.');
+    return { success: false, error: 'Zoom is not configured' };
+  }
+
+  try {
+    // Get provider user to get their email
+    const provider = await getUserById(sessionData.providerId);
+    if (!provider) {
+      return { success: false, error: 'Provider not found' };
+    }
+
+    // Calculate duration in minutes
+    const startTime = new Date(sessionData.scheduledStartTime);
+    const endTime = new Date(sessionData.scheduledEndTime);
+    const durationMinutes = Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60));
+
+    // Create meeting topic based on session type
+    const topic = sessionData.subject
+      ? `${sessionData.sessionType} - ${sessionData.subject}`
+      : `${sessionData.sessionType} Session`;
+
+    // Create Zoom meeting
+    const zoomMeeting = await createZoomMeeting({
+      topic,
+      startTime: sessionData.scheduledStartTime,
+      duration: durationMinutes,
+      hostEmail: provider.email,
+    });
+
+    return {
+      success: true,
+      zoomJoinUrl: zoomMeeting.joinUrl,
+      zoomMeetingId: zoomMeeting.meetingId,
+    };
+  } catch (error) {
+    console.error('Error creating Zoom meeting for session:', error);
+    // Don't fail the booking if Zoom creation fails
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create Zoom meeting',
+    };
+  }
+}
+
+/**
+ * Create sessions from booking state and create Zoom meetings for each
+ * This is called after successful payment
+ */
+export async function createSessionsFromBookingState(bookingState: {
+  service: 'tutoring' | 'counseling' | 'test-prep' | 'virtual-tour' | null;
+  plan: string | null;
+  subject?: string | null;
+  topic?: string | null;
+  school?: { displayName: string; normalizedName: string } | null;
+  selectedSessions: Array<{ date: Date; time: string; displayString: string }>;
+  provider: string | null;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  sessions?: Session[];
+}> {
+  const session = await getSession();
+  if (!session) {
+    return { success: false, error: 'You must be logged in' };
+  }
+
+  if (!session.roles.includes('student')) {
+    return { success: false, error: 'Only students can create sessions' };
+  }
+
+  if (!bookingState.provider || !bookingState.service) {
+    return { success: false, error: 'Invalid booking state' };
+  }
+
+  const studentId = session.userId;
+  const providerId = bookingState.provider;
+  const createdSessions: Session[] = [];
+
+  try {
+    // Create a session for each selected time slot
+    for (const selectedSession of bookingState.selectedSessions) {
+      // Parse date and time to create ISO datetime strings
+      const [time, period] = selectedSession.time.split(' ');
+      const [hours, minutes] = time.split(':');
+      let hour24 = parseInt(hours, 10);
+      if (period === 'PM' && hour24 !== 12) hour24 += 12;
+      if (period === 'AM' && hour24 === 12) hour24 = 0;
+
+      const sessionDate = new Date(selectedSession.date);
+      sessionDate.setHours(hour24, parseInt(minutes, 10), 0, 0);
+      const startTime = sessionDate.toISOString();
+
+      // Determine duration based on plan
+      let durationMinutes = 60; // Default 1 hour
+      if (bookingState.plan === 'counseling-30min') {
+        durationMinutes = 30;
+      } else if (bookingState.plan === 'counseling-60min' || bookingState.plan === 'counseling-monthly') {
+        durationMinutes = 60;
+      }
+
+      const endTime = new Date(sessionDate.getTime() + durationMinutes * 60 * 1000).toISOString();
+
+      // Map service to session type
+      let sessionType: 'tutoring' | 'counseling' | 'test-prep' = 'tutoring';
+      if (bookingState.service === 'counseling' || bookingState.service === 'virtual-tour') {
+        sessionType = 'counseling';
+      } else if (bookingState.service === 'test-prep') {
+        sessionType = 'test-prep';
+      }
+
+      // Create the session
+      const newSession: Session = {
+        id: crypto.randomUUID(),
+        studentId,
+        providerId,
+        serviceTypeId: bookingState.service,
+        sessionType,
+        subject: bookingState.subject || undefined,
+        scheduledStartTime: startTime,
+        scheduledEndTime: endTime,
+        status: 'scheduled',
+        priceCents: 0, // Will be set based on service type
+        amountChargedCents: 0,
+        amountRefundedCents: 0,
+        bookedAt: new Date().toISOString(),
+        bookedBy: studentId,
+        availabilityId: `availability-${providerId}-${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Add to dev session store (client-side only in dev mode)
+      // Note: In production, this would be saved to database
+      // For now, we'll return the session data and let the client handle storage
+
+      createdSessions.push(newSession);
+
+      // Create Zoom meeting for this session (server-side)
+      try {
+        const zoomResult = await createZoomMeetingForSessionData(newSession);
+        if (zoomResult.success && zoomResult.zoomJoinUrl && zoomResult.zoomMeetingId) {
+          // Update session with Zoom data
+          newSession.zoomJoinUrl = zoomResult.zoomJoinUrl;
+          newSession.zoomMeetingId = zoomResult.zoomMeetingId;
+          newSession.updatedAt = new Date().toISOString();
+          
+          // Update in dev store if client-side
+          if (typeof window !== 'undefined') {
+            const { updateDevSession } = await import('@/lib/devSessionStore');
+            updateDevSession(newSession.id, {
+              zoomJoinUrl: zoomResult.zoomJoinUrl,
+              zoomMeetingId: zoomResult.zoomMeetingId,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } else {
+          console.warn(`Failed to create Zoom meeting for session ${newSession.id}:`, zoomResult.error);
+        }
+      } catch (zoomError) {
+        console.error(`Error creating Zoom meeting for session ${newSession.id}:`, zoomError);
+        // Don't fail the entire booking if Zoom creation fails
+      }
+    }
+
+    // Return sessions with Zoom data for client to store
+    // In production, sessions would already be in database
+    return { 
+      success: true, 
+      sessions: createdSessions,
+    };
+  } catch (error) {
+    console.error('Error creating sessions from booking state:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create sessions',
+    };
+  }
 }
 

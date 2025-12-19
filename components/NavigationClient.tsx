@@ -5,14 +5,15 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
 import { logout } from '@/lib/auth/actions';
-import { getDashboardRoute, getDisplayRole } from '@/lib/auth/utils';
-import { Session, UserRole } from '@/lib/auth/types';
+import { Session } from '@/lib/auth/types';
+import { getDashboardRoute } from '@/lib/auth/utils';
 
 export default function NavigationClient() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showServicesDropdown, setShowServicesDropdown] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -88,7 +89,6 @@ export default function NavigationClient() {
 
   const getDashboardLink = () => {
     if (!session) return null;
-    const userRole = getDisplayRole(session.roles);
     return getDashboardRoute(session.roles);
   };
 
@@ -97,15 +97,15 @@ export default function NavigationClient() {
   return (
     <nav className="border-b border-gray-200 bg-white shadow-sm">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-28 items-center justify-between">
+        <div className="flex h-32 items-center justify-between">
           <div className="flex items-center">
-            <Link href="/" className="flex items-center">
+            <Link href={session ? getDashboardRoute(session.roles) : "/"} className="flex items-center">
               <Image
                 src="/logo/ivyway-logo.png"
                 alt="IvyWay"
-                width={256}
-                height={92}
-                className="h-[92px] w-auto"
+                width={320}
+                height={115}
+                className="h-[92px] md:h-[115px] w-auto"
                 priority
               />
             </Link>
@@ -216,8 +216,148 @@ export default function NavigationClient() {
               </>
             )}
           </div>
+          {/* Mobile menu button */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setShowMobileMenu(!showMobileMenu)}
+              className="inline-flex items-center justify-center rounded-md p-2 text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#0088CB]"
+              aria-expanded="false"
+            >
+              <span className="sr-only">Open main menu</span>
+              {!showMobileMenu ? (
+                <svg
+                  className="block h-6 w-6"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              ) : (
+                <svg
+                  className="block h-6 w-6"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
+      {/* Mobile menu */}
+      {showMobileMenu && (
+        <div className="md:hidden border-t border-gray-200">
+          <div className="space-y-1 px-2 pb-3 pt-2">
+            <Link
+              href="/"
+              onClick={() => setShowMobileMenu(false)}
+              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              Home
+            </Link>
+            <button
+              onClick={() => {
+                scrollToSection('academic-tutoring');
+                setShowMobileMenu(false);
+              }}
+              className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              Tutoring
+            </button>
+            <button
+              onClick={() => {
+                scrollToSection('counseling-services');
+                setShowMobileMenu(false);
+              }}
+              className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              College
+            </button>
+            <button
+              onClick={() => {
+                scrollToSection('ivyway-ai');
+                setShowMobileMenu(false);
+              }}
+              className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              IvyWay AI
+            </button>
+            <Link
+              href="#pricing"
+              onClick={() => setShowMobileMenu(false)}
+              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="#faq"
+              onClick={() => setShowMobileMenu(false)}
+              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              FAQ
+            </Link>
+            <Link
+              href="#contact"
+              onClick={() => setShowMobileMenu(false)}
+              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+            >
+              Contact
+            </Link>
+            {!session && (
+              <>
+                <Link
+                  href="/auth/login"
+                  onClick={() => setShowMobileMenu(false)}
+                  className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+                >
+                  Log In
+                </Link>
+                <button
+                  onClick={() => {
+                    window.location.href = "/#create-account";
+                    setShowMobileMenu(false);
+                  }}
+                  className="block w-full text-left rounded-md bg-[#0088CB] px-3 py-2 text-base font-medium text-white hover:bg-[#0077B3]"
+                >
+                  Sign up
+                </button>
+              </>
+            )}
+            {session && (
+              <>
+                {dashboardLink && (
+                  <Link
+                    href={dashboardLink}
+                    onClick={() => setShowMobileMenu(false)}
+                    className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+                  >
+                    Dashboard
+                  </Link>
+                )}
+                <div className="border-t border-gray-200 pt-2">
+                  <div className="px-3 py-2 text-sm text-gray-700">{session.name}</div>
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setShowMobileMenu(false);
+                    }}
+                    className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   );
 }

@@ -227,18 +227,11 @@ export default function SignupPreview() {
             type="button"
             className="w-full rounded-md border border-gray-300 bg-white px-6 py-3.5 text-base font-medium text-black shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-300 transition-colors flex items-center justify-center gap-3"
           >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="#1877F2">
-              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-            </svg>
-            Continue with Facebook
-          </button>
-          <button
-            type="button"
-            className="w-full rounded-md border border-gray-300 bg-white px-6 py-3.5 text-base font-medium text-black shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-300 transition-colors flex items-center justify-center gap-3"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="#000000">
-              <path d="M12.152 6.896c-.94 0-2.4-1.29-3.99-1.29-1.74 0-3.16 1.01-4.2 2.51-1.8 2.46-1.54 6.11-.99 8.11.44 1.61 1.95 3.38 3.29 3.24 1.26-.14 1.74-.87 3.24-.87 1.48 0 1.9.87 3.24.85 1.36-.02 2.73-1.54 3.16-3.16.5-1.85.22-5.67-1.48-7.78-1.04-1.24-2.42-1.92-3.19-1.96zm-.01-4.9c.27-.03.58-.09.9-.19.47-.15.9-.38 1.28-.68.01.01.02.01.02.02.36-.25.79-.46 1.26-.62.5-.17 1.03-.26 1.58-.26.05 1.98-.68 3.7-1.8 4.95-.33.37-.71.68-1.12.93-.01-.01-.02-.01-.03-.02-.4.12-.82.2-1.25.24-.05-1.1.38-2.15 1.02-2.96z"/>
-            </svg>
+            <img
+              src="/apple-logo.svg"
+              alt="Apple"
+              className="h-5 w-5"
+            />
             Continue with Apple ID
           </button>
         </div>

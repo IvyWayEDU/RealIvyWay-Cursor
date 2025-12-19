@@ -201,14 +201,17 @@ export interface Availability {
 /**
  * Session Status
  * Represents the current state of a booking session
+ * 
+ * Note: 'pending' status has been removed. Sessions are automatically confirmed
+ * at booking time and use 'scheduled' status instead.
  */
 export type SessionStatus = 
   | 'available'     // Session is available for booking (development only)
-  | 'pending'       // Session is pending payment/confirmation
-  | 'paid'          // Session payment confirmed (student sees as Confirmed, provider sees as Upcoming)
-  | 'scheduled'      // Session is confirmed and scheduled
+  | 'paid'          // Session payment confirmed (legacy status, use 'scheduled' for new bookings)
+  | 'scheduled'     // Session is confirmed and scheduled (automatically set at booking time)
   | 'completed'     // Session has been completed
-  | 'cancelled'     // Session was cancelled
+  | 'cancelled'     // Session was cancelled (24+ hours before start time)
+  | 'cancelled-late' // Session was cancelled within 24 hours of start time (full charge applies)
   | 'no-show'       // Student or provider didn't show up
   | 'refunded';     // Session was refunded (after cancellation)
 
@@ -277,6 +280,10 @@ export interface Session {
   
   // Availability Reference
   availabilityId: string; // The availability slot this session was booked from
+  
+  // Zoom Meeting Information
+  zoomJoinUrl?: string; // Zoom meeting join URL for participants
+  zoomMeetingId?: string; // Zoom meeting ID
   
   // Timestamps
   createdAt: string;
