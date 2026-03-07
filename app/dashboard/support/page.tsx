@@ -1,15 +1,20 @@
-/**
- * Support Page
- * 
- * Simple page with heading only.
- */
+import { redirect } from 'next/navigation';
+import { getSession } from '@/lib/auth/session';
+import { getDisplayRole } from '@/lib/auth/utils';
+import SupportCenterClient from './SupportCenterClient';
 
-export default function SupportPage() {
+export default async function SupportPage() {
+  const session = await getSession();
+  if (!session) redirect('/auth/login');
+
+  const displayRole = getDisplayRole(session.roles);
+  const role = displayRole === 'provider' ? 'provider' : 'student';
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Support</h1>
-      </div>
-    </div>
+    <SupportCenterClient
+      role={role}
+    />
   );
 }
+
+

@@ -34,7 +34,7 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="#faq" className="text-sm text-gray-600 hover:text-gray-900">
+                <Link href="/pricing#payments-faq" className="text-sm text-gray-600 hover:text-gray-900">
                   FAQ
                 </Link>
               </li>
@@ -44,12 +44,12 @@ export default function Footer() {
             <h4 className="text-sm font-semibold text-gray-900">Support</h4>
             <ul className="mt-4 space-y-2">
               <li>
-                <Link href="#contact" className="text-sm text-gray-600 hover:text-gray-900">
+                <a href="mailto:support@ivyway.com" className="text-sm text-gray-600 hover:text-gray-900">
                   Contact
-                </Link>
+                </a>
               </li>
               <li>
-                <Link href="#faq" className="text-sm text-gray-600 hover:text-gray-900">
+                <Link href="/pricing#payments-faq" className="text-sm text-gray-600 hover:text-gray-900">
                   Help Center
                 </Link>
               </li>

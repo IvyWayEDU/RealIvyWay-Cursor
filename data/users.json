@@ -7,7 +7,10 @@
     "roles": [
       "student"
     ],
-    "createdAt": "2025-12-18T03:29:38.947Z"
+    "createdAt": "2025-12-18T03:29:38.947Z",
+    "updatedAt": "2026-01-31T22:01:50.848Z",
+    "isSuspended": false,
+    "status": "active"
   },
   {
     "id": "9aa6c128-1360-4eb8-add3-b132ef2e0d09",
@@ -15,9 +18,156 @@
     "email": "provider@gmail.com",
     "passwordHash": "9de9a73f05c489e9706f1baa10d39b9b:17ff055d3696a5711dab452cd5d79e75b9adea5f35c58483fb587320db094c106730bcaa38d3d9617403b0d3b0f365e1ce6b2bf053fa83edff03fa1d4c1d337b",
     "roles": [
-      "tutor",
-      "counselor"
+      "provider",
+      "admin"
     ],
-    "createdAt": "2025-12-18T03:31:35.102Z"
+    "createdAt": "2025-12-18T03:31:35.102Z",
+    "updatedAt": "2026-01-14T18:33:36.818Z",
+    "services": [
+      "college_counseling"
+    ],
+    "subjects": [],
+    "schoolId": "harvard_university",
+    "schoolName": "Harvard University",
+    "offersVirtualTours": true,
+    "profileImageUrl": null,
+    "schoolIds": [
+      "harvard_university"
+    ],
+    "schoolNames": [
+      "Harvard University"
+    ],
+    "onboardingCompleted": true,
+    "school_id": "harvard_university",
+    "school_name": "Harvard University",
+    "isSuspended": false,
+    "status": "active"
+  },
+  {
+    "id": "71f5e4c9-1ef1-4f92-a716-f85c03db5ba6",
+    "name": "New Student",
+    "email": "newstudent@gmail.com",
+    "passwordHash": "81eb6e639b6534ddc4e33a21cfca4182:576fbdeeff54168b39e3ace67a65497fb0d31f4d37cbd634bc5871866b8cdd0e6786b20cd397770085a95086bba588e5e2a5d8e1963797a2d1d949f0418eeed7",
+    "roles": [
+      "student"
+    ],
+    "createdAt": "2026-01-14T07:38:15.884Z",
+    "updatedAt": "2026-01-14T07:38:15.884Z",
+    "isSuspended": false,
+    "status": "active"
+  },
+  {
+    "id": "e64fe0e6-5341-4a82-aa22-cda4d78ca01f",
+    "name": "new provider",
+    "email": "newprovider@gmail.com",
+    "passwordHash": "46b4301fa8bbfc68f0b358a09aa170eb:6964ab6ed8e35df25cc10fbacc5e3b85346cfa18705b26131b0f05b475e12fcfae836b1b9a974f42d2ed47ba898e99bb16da490b9dd76b529f2cb07c1f8f9a20",
+    "roles": [
+      "student"
+    ],
+    "createdAt": "2026-01-14T07:38:56.225Z",
+    "updatedAt": "2026-01-14T07:38:56.225Z",
+    "isSuspended": false,
+    "status": "active"
+  },
+  {
+    "id": "42591073-c2f9-477f-a7dd-c2788fd71348",
+    "name": "provider test",
+    "email": "providertest@gmail.com",
+    "passwordHash": "7fc14339a4fd3f412260379d451a39b2:98dccbbbf4a7aaae21685b621a57b7fbd6c02fe466dce573e9f7c2417fa33cc8e0bdafcb6ff06013d44c5609c69128896aaebe5ab38da2867fb07405c611f219",
+    "roles": [
+      "provider"
+    ],
+    "createdAt": "2026-01-14T08:01:16.911Z",
+    "updatedAt": "2026-01-14T08:04:38.581Z",
+    "services": [
+      "college_counseling",
+      "tutoring"
+    ],
+    "subjects": [
+      "Math",
+      "Test Prep"
+    ],
+    "school": "Harvard",
+    "offersVirtualTours": true,
+    "profileImageUrl": null,
+    "onboardingCompleted": true,
+    "schoolIds": [
+      "harvard_university"
+    ],
+    "schoolNames": [
+      "Harvard University"
+    ],
+    "school_id": "harvard_university",
+    "school_name": "Harvard University",
+    "isSuspended": false,
+    "status": "active"
+  },
+  {
+    "id": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "name": "test2 provider",
+    "email": "providertest2@gmail.com",
+    "passwordHash": "e0da07165105047af5a21e12caf388d4:f5191eabb92d455107e29539b0b2df9fbba69c7cbec29736c9ea7cb98ad249df94d9664849d77f05b81c08760e0606e56ffb35590a677018ad97f27bf10bf7b8",
+    "roles": [
+      "provider"
+    ],
+    "createdAt": "2026-01-14T08:10:30.459Z",
+    "updatedAt": "2026-01-25T03:10:44.933Z",
+    "services": [
+      "tutoring",
+      "college_counseling"
+    ],
+    "subjects": [
+      "Math",
+      "Test Prep"
+    ],
+    "schoolId": "harvard_university",
+    "schoolName": "Harvard University",
+    "offersVirtualTours": true,
+    "profileImageUrl": null,
+    "schoolIds": [
+      "michigan_state_university"
+    ],
+    "schoolNames": [
+      "Michigan State University"
+    ],
+    "onboardingCompleted": true,
+    "profilePhotoUrl": "",
+    "isTutor": true,
+    "isCounselor": true,
+    "phoneNumber": "",
+    "school_id": "michigan_state_university",
+    "school_name": "Michigan State University",
+    "isSuspended": false,
+    "status": "active"
+  },
+  {
+    "id": "9c6a491b-2a01-4278-9db7-52f4f5accb72",
+    "name": "student 01",
+    "email": "studenttester@gmail.com",
+    "passwordHash": "3b395fdb63c2cb4586a2804d180df22b:147a3df9a02dd43a5b0212be0f4d13a8ae8af7e083c0ddd715b3970ad3959530521507d870f744b4e8cce9af5a97de127794b70b35eb888d417ce15c8d66bd1b",
+    "roles": [
+      "student"
+    ],
+    "createdAt": "2026-01-14T08:36:15.038Z",
+    "updatedAt": "2026-01-14T08:36:15.038Z",
+    "isSuspended": false,
+    "status": "active"
+  },
+  {
+    "id": "01090057-226e-424e-9637-e85e29dd6173",
+    "name": "students",
+    "email": "studenttest2@gmail.com",
+    "passwordHash": "49928db08ecab92684f91d5564689769:428690fe243eb2240894d662ec5d48353115f489faf600fc216e6a74ecd12f9b7881297122b35afa0da283aa42aeb46ca26547344db0da084f0db2e23471e7d8",
+    "roles": [
+      "student"
+    ],
+    "createdAt": "2026-01-14T18:10:26.188Z",
+    "updatedAt": "2026-01-27T21:53:27.250Z",
+    "stripeCustomerId": "cus_Ts4LT8q9tvCoHI",
+    "stripeCustomerEmail": "studenttest2@gmail.com",
+    "stripeCustomerName": "students",
+    "stripeCustomerCreatedAt": "2026-01-27T21:53:27.248Z",
+    "isSuspended": false,
+    "status": "active"
   }
 ]

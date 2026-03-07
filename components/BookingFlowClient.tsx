@@ -1,69 +1,57 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { SCHOOLS, School, searchSchools } from '@/data/schools';
+import { getUserDisplayInfoById } from '@/lib/sessions/actions';
+import { PRICING_CATALOG, formatUsdFromCents } from '@/lib/pricing/catalog';
+import { Star } from 'lucide-react';
 
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
 type Plan = string | null;
 type Subject = string | null;
 type Topic = string | null;
-type School = {
-  displayName: string;
-  normalizedName: string;
-} | null;
+type SelectedSchool = School | null;
 type TimeSlot = string | null;
-type Provider = string | null;
+type ProviderId = string | null;
 
 interface SelectedSession {
+  // Canonical slot identity (UTC)
+  startTimeUTC: string;
+  endTimeUTC: string;
+  providerId: string | null;
+  // For UI/calendar convenience
   date: Date;
-  time: string;
+  displayTime: string;
   displayString: string;
 }
 
-// Normalization utilities for school names
-function normalizeSchoolName(name: string): string {
-  return name.trim().toLowerCase();
-}
-
-function createSchool(displayName: string): School {
-  const trimmed = displayName.trim();
-  if (!trimmed) return null;
-  return {
-    displayName: trimmed,
-    normalizedName: normalizeSchoolName(trimmed),
-  };
-}
-
-// Check if two school names match (case-insensitive, partial matching)
-function schoolsMatch(school1: School, school2: School): boolean {
+// Check if two schools match by ID
+function schoolsMatch(school1: SelectedSchool, school2: SelectedSchool): boolean {
   if (!school1 || !school2) return false;
-  return school1.normalizedName === school2.normalizedName;
-}
-
-// Check if a query matches a school (partial, case-insensitive)
-function queryMatchesSchool(query: string, school: School): boolean {
-  if (!school) return false;
-  const normalizedQuery = normalizeSchoolName(query);
-  return school.normalizedName.includes(normalizedQuery) || normalizedQuery.includes(school.normalizedName);
+  return school1.id === school2.id;
 }
 
 // Check if there are any providers available for a given school
-// For virtual tours: Only providers tagged with the school (strict matching, no fallback)
+// For virtual tours: Only providers tagged with the school (strict matching by schoolId, no fallback)
 // For counseling: Providers tagged with the school OR general counselors (fallback allowed)
-function hasProviderForSchool(school: School, service: Service): boolean {
+function hasProviderForSchool(school: SelectedSchool, service: Service): boolean {
   if (!school) return false;
   
   if (service === 'virtual-tour') {
-    // STRICT: Virtual tours require exact school match, no fallback
+    // STRICT: Virtual tours require exact schoolId match, no fallback
     return MOCK_PROVIDERS.some((provider) => {
       // Must be a Counselor (virtual tour guides are counselors)
       if (provider.role !== 'Counselor') return false;
       // Must be tagged for virtual tours
       if (normalizeSubjectName(provider.subject) !== 'virtual tour') return false;
-      // Check if provider is tagged with this school
+      // Check if provider is tagged with this school by schoolId
+      // Provider schoolTags should contain school IDs from the canonical list
       if (!provider.schoolTags || provider.schoolTags.length === 0) return false;
       return provider.schoolTags.some((tag) => {
-        return normalizeSchoolName(tag) === school.normalizedName;
+        // Try to match by schoolId (canonical ID)
+        const tagSchool = SCHOOLS.find(s => s.id === tag || s.name === tag);
+        return tagSchool && tagSchool.id === school.id;
       });
     });
   } else if (service === 'counseling') {
@@ -77,8 +65,10 @@ function hasProviderForSchool(school: School, service: Service): boolean {
       if (!provider.schoolTags || provider.schoolTags.length === 0) {
         return true; // General counselor (fallback)
       }
+      // Match by schoolId
       return provider.schoolTags.some((tag) => {
-        return normalizeSchoolName(tag) === school.normalizedName;
+        const tagSchool = SCHOOLS.find(s => s.id === tag || s.name === tag);
+        return tagSchool && tagSchool.id === school.id;
       });
     });
   }
@@ -91,10 +81,13 @@ interface BookingState {
   plan: Plan;
   subject: Subject;
   topic: Topic;
-  school: School;
+  school: SelectedSchool;
+  // Explicit school identity for counseling flows (more reliable than relying solely on nested `school`)
+  schoolId: string | null;
+  schoolName: string | null;
   timeSlot: TimeSlot;
   selectedSessions: SelectedSession[];
-  provider: Provider;
+  provider: ProviderId;
 }
 
 // Helper function to determine required number of sessions based on plan
@@ -102,13 +95,8 @@ function getRequiredSessionsCount(plan: Plan): number {
   if (!plan) return 1;
   
   // Monthly plans requiring 4 sessions
-  if (plan === 'tutoring-monthly' || plan === 'test-prep-monthly') {
+  if (plan === 'tutoring-monthly' || plan === 'test-prep-monthly' || plan === 'counseling-monthly') {
     return 4;
-  }
-  
-  // Monthly Counseling Plan requiring 2 sessions
-  if (plan === 'counseling-monthly') {
-    return 2;
   }
   
   // All other plans (single sessions)
@@ -304,6 +292,55 @@ const TEST_PREP_SUBJECTS = [
   'Other',
 ];
 
+function normalizeServiceQueryParam(raw: string | null): Service {
+  if (!raw) return null;
+  const v = raw
+    .trim()
+    .toLowerCase()
+    // Allow pretty labels like "Test Prep" / "Virtual Tour" / "College Counseling"
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+  switch (v) {
+    case 'tutoring':
+    case 'tutoring_services':
+    case 'tutoring_service':
+      return 'tutoring';
+    case 'test_prep':
+    case 'testprep':
+    case 'test_prep_services':
+    case 'test_prep_service':
+    case 'test_prep_tutoring':
+    case 'test_prep_session':
+      return 'test-prep';
+    case 'college_counseling':
+    case 'counseling':
+    case 'college-counseling':
+    case 'college_counseling_services':
+    case 'college_counseling_service':
+    case 'college_counseling_session':
+    case 'college_counseling_1_1':
+    case 'college':
+      return 'counseling';
+    case 'virtual_tour':
+    case 'virtual-tour':
+    case 'virtual_tours':
+    case 'virtual_tour_services':
+    case 'virtual_tour_service':
+    case 'virtual_college_tour':
+      return 'virtual-tour';
+    default:
+      return null;
+  }
+}
+
+function normalizeSubjectParam(raw: string | null, allowed: string[]): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const match = allowed.find((s) => s.toLowerCase() === trimmed.toLowerCase());
+  return match ?? null;
+}
+
 const TIME_SLOTS = [
   'Monday, Jan 15 - 10:00 AM',
   'Monday, Jan 15 - 2:00 PM',
@@ -440,21 +477,120 @@ export default function BookingFlowClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
+  const appliedQueryPrefillRef = useRef<string>('');
+  // Prevent initial localStorage persistence from clobbering query-driven "Book Again" prefills.
+  const didInitRef = useRef<boolean>(false);
   const [bookingState, setBookingState] = useState<BookingState>({
     service: null,
     plan: null,
     subject: null,
     topic: null,
     school: null,
+    schoolId: null,
+    schoolName: null,
     timeSlot: null,
     selectedSessions: [],
     provider: null,
   });
 
+  // Virtual Tours: provider count check after school selection (prevents proceeding to Step 4 with 0 providers)
+  const [virtualTourProviderCheck, setVirtualTourProviderCheck] = useState<{
+    status: 'idle' | 'loading' | 'loaded' | 'error';
+    count: number | null;
+    suggestedSchools: School[];
+    notifyRequested: boolean;
+  }>({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+
   const totalSteps = 5;
 
-  // Load booking state from localStorage on mount
+  // Contextual rebooking: if `service`/`serviceType` query param exists, prefill state and skip Step 1 UI.
+  // IMPORTANT: this must run BEFORE any localStorage hydration/reset to avoid clobbering "Book Again" state.
   useEffect(() => {
+    const serviceRaw = searchParams.get('service') || searchParams.get('serviceType');
+    const normalizedService = normalizeServiceQueryParam(serviceRaw);
+    if (!normalizedService) return;
+
+    // Avoid re-applying and clobbering user input on subsequent renders.
+    const fingerprint = [
+      `service=${serviceRaw || ''}`,
+      `subject=${searchParams.get('subject') || ''}`,
+      `topic=${searchParams.get('topic') || ''}`,
+      `schoolId=${searchParams.get('schoolId') || ''}`,
+      `schoolName=${searchParams.get('schoolName') || ''}`,
+      `providerId=${searchParams.get('providerId') || ''}`,
+    ].join('&');
+    if (appliedQueryPrefillRef.current === fingerprint) return;
+    appliedQueryPrefillRef.current = fingerprint;
+
+    const explicitStepParam = searchParams.get('step');
+    const subjectParam = searchParams.get('subject');
+    const topicParam = searchParams.get('topic');
+    const schoolIdParam = searchParams.get('schoolId');
+    const schoolNameParam = searchParams.get('schoolName');
+
+    const normalizedSubject =
+      normalizedService === 'tutoring'
+        ? normalizeSubjectParam(subjectParam, TUTORING_SUBJECTS)
+        : normalizedService === 'test-prep'
+          ? normalizeSubjectParam(subjectParam, TEST_PREP_SUBJECTS)
+          : null;
+
+    const schoolId = typeof schoolIdParam === 'string' && schoolIdParam.trim() ? schoolIdParam.trim() : null;
+    const schoolName = typeof schoolNameParam === 'string' && schoolNameParam.trim() ? schoolNameParam.trim() : null;
+    const resolvedSchool =
+      schoolId || schoolName
+        ? (SCHOOLS.find((s) => (schoolId ? s.id === schoolId : false)) ||
+            SCHOOLS.find((s) => (schoolName ? s.name.toLowerCase() === schoolName.toLowerCase() : false)) ||
+            (schoolId && schoolName ? ({ id: schoolId, name: schoolName } as School) : null))
+        : null;
+
+    setBookingState((prev) => ({
+      ...prev,
+      service: normalizedService,
+      // Do not force a plan selection; user still chooses plan normally.
+      // Clear dependent fields unless they are provided by query params.
+      subject:
+        normalizedService === 'tutoring' || normalizedService === 'test-prep' ? (normalizedSubject ?? null) : null,
+      topic:
+        normalizedService === 'tutoring' || normalizedService === 'test-prep'
+          ? (topicParam && topicParam.trim() ? topicParam.trim() : null)
+          : null,
+      school:
+        normalizedService === 'counseling' || normalizedService === 'virtual-tour' ? (resolvedSchool ?? null) : null,
+      schoolId:
+        normalizedService === 'counseling' || normalizedService === 'virtual-tour'
+          ? (resolvedSchool?.id ?? schoolId ?? null)
+          : null,
+      schoolName:
+        normalizedService === 'counseling' || normalizedService === 'virtual-tour'
+          ? (resolvedSchool?.name ?? schoolName ?? null)
+          : null,
+      // Always reset downstream selection for a clean rebooking flow.
+      selectedSessions: [],
+      provider: null,
+      timeSlot: null,
+    }));
+
+    // Skip service selection UI unless an explicit step is requested (e.g., summary edit links).
+    if (!explicitStepParam && currentStep === 1) {
+      setCurrentStep(2);
+    }
+    didInitRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Load booking state from localStorage on mount (but do NOT override query-prefilled rebooking state).
+  useEffect(() => {
+    const serviceRaw = searchParams.get('service') || searchParams.get('serviceType');
+    const hasPrefill = !!normalizeServiceQueryParam(serviceRaw);
+
+    if (hasPrefill) {
+      // Query params are the source of truth for "Book Again" entry.
+      // We still consider initialization done so persistence can proceed on the next render.
+      didInitRef.current = true;
+      return;
+    }
+
     if (typeof window !== 'undefined') {
       try {
         const stored = localStorage.getItem('ivyway_booking_state');
@@ -467,12 +603,43 @@ export default function BookingFlowClient() {
               date: new Date(session.date),
             }));
           }
+
+          // Normalize school fields so checkout never "forgets" the selected school
+          const parsedSchool = parsed?.school as any;
+          const parsedSchoolId =
+            (typeof parsed?.schoolId === 'string' ? parsed.schoolId : '') ||
+            (typeof parsedSchool?.id === 'string' ? parsedSchool.id : '');
+          const parsedSchoolName =
+            (typeof parsed?.schoolName === 'string' ? parsed.schoolName : '') ||
+            (typeof parsedSchool?.name === 'string' ? parsedSchool.name : '');
+
+          // If we have id/name but `school` object is missing, reconstruct it (canonical shape).
+          if (!parsedSchool && (parsedSchoolId || parsedSchoolName)) {
+            let resolved: School | undefined;
+            if (parsedSchoolId) resolved = SCHOOLS.find((s) => s.id === parsedSchoolId);
+            if (!resolved && parsedSchoolName) {
+              resolved = SCHOOLS.find((s) => s.name.toLowerCase() === parsedSchoolName.toLowerCase());
+            }
+            parsed.school =
+              resolved || (parsedSchoolId && parsedSchoolName ? { id: parsedSchoolId, name: parsedSchoolName } : null);
+          }
+
+          // Always keep top-level `schoolId`/`schoolName` in sync for downstream payloads.
+          const finalSchool = parsed?.school as any;
+          parsed.schoolId = (typeof finalSchool?.id === 'string' ? finalSchool.id : '') || (parsedSchoolId || null);
+          parsed.schoolName =
+            (typeof finalSchool?.name === 'string' ? finalSchool.name : '') || (parsedSchoolName || null);
+
           setBookingState(parsed);
         }
       } catch (error) {
         console.error('Error loading booking state:', error);
       }
     }
+
+    didInitRef.current = true;
+    // We only want to decide "prefill vs storage" once on entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Handle step from URL params
@@ -488,6 +655,7 @@ export default function BookingFlowClient() {
 
   // Persist booking state to localStorage whenever it changes
   useEffect(() => {
+    if (!didInitRef.current) return;
     if (typeof window !== 'undefined') {
       try {
         localStorage.setItem('ivyway_booking_state', JSON.stringify(bookingState));
@@ -498,6 +666,10 @@ export default function BookingFlowClient() {
   }, [bookingState]);
 
   const canProceed = () => {
+    const resolvedSchool: SelectedSchool =
+      bookingState.school ||
+      (bookingState.schoolId && bookingState.schoolName ? { id: bookingState.schoolId, name: bookingState.schoolName } : null);
+
     switch (currentStep) {
       case 1:
         return bookingState.service !== null;
@@ -522,19 +694,22 @@ export default function BookingFlowClient() {
           
           return hasAvailability;
         }
-        // For test prep, subject is required AND tutor must be available
+        // For test prep, subject + topic are required (topic is for context/preparation)
+        // Availability logic remains subject-only.
         if (bookingState.service === 'test-prep') {
-          const hasSubject = bookingState.subject !== null;
+          const hasSubjectAndTopic = bookingState.subject !== null && bookingState.topic !== null;
           const hasAvailability = bookingState.subject !== null && hasTutorAvailableForSubject(bookingState.service, bookingState.subject);
-          return hasSubject && hasAvailability;
+          return hasSubjectAndTopic && hasAvailability;
         }
-        // For counseling, school is required AND must have at least one provider available (fallback to general counselors allowed)
+        // For counseling, school is required (availability is enforced in Step 4 via backend filtering).
         if (bookingState.service === 'counseling') {
-          return bookingState.school !== null && hasProviderForSchool(bookingState.school, bookingState.service);
+          return resolvedSchool !== null;
         }
-        // For virtual tours, school is required AND must have at least one provider available (strict, no fallback)
+        // For virtual tours, school is required (availability is enforced in Step 4 via backend filtering).
         if (bookingState.service === 'virtual-tour') {
-          return bookingState.school !== null && hasProviderForSchool(bookingState.school, bookingState.service);
+          // IMPORTANT: also gate on provider existence so users never reach the calendar with an empty state.
+          // Block progression while we are checking, and when count is 0.
+          return resolvedSchool !== null && virtualTourProviderCheck.status === 'loaded' && (virtualTourProviderCheck.count || 0) > 0;
         }
         return false;
       case 4:
@@ -583,7 +758,14 @@ export default function BookingFlowClient() {
       case 2:
         return <Step2ChoosePlan bookingState={bookingState} updateBookingState={updateBookingState} />;
       case 3:
-        return <Step3ChooseSubjectOrSchool bookingState={bookingState} updateBookingState={updateBookingState} />;
+        return (
+          <Step3ChooseSubjectOrSchool
+            bookingState={bookingState}
+            updateBookingState={updateBookingState}
+            virtualTourProviderCheck={virtualTourProviderCheck}
+            setVirtualTourProviderCheck={setVirtualTourProviderCheck}
+          />
+        );
       case 4:
         return <Step4ChooseTimeSlot bookingState={bookingState} updateBookingState={updateBookingState} />;
       case 5:
@@ -704,7 +886,18 @@ function Step1ChooseService({
         {SERVICES.map((service) => (
           <button
             key={service.id}
-            onClick={() => updateBookingState({ service: service.id, plan: null, subject: null, topic: null, school: null, selectedSessions: [] })}
+            onClick={() =>
+              updateBookingState({
+                service: service.id,
+                plan: null,
+                subject: null,
+                topic: null,
+                school: null,
+                schoolId: null,
+                schoolName: null,
+                selectedSessions: [],
+              })
+            }
             className={`p-6 rounded-lg border-2 transition-all text-left ${
               bookingState.service === service.id
                 ? 'border-[#0088CB] bg-blue-50'
@@ -756,13 +949,13 @@ function Step2ChoosePlan({
             id: 'tutoring-single',
             title: 'Single Tutoring Session',
             details: '1 hour session',
-            price: '$69',
+            price: formatUsdFromCents(PRICING_CATALOG.tutoring_single.purchase_price_cents),
           },
           {
             id: 'tutoring-monthly',
             title: 'Monthly Tutoring Plan',
             details: '4 sessions per month',
-            price: '$249',
+            price: formatUsdFromCents(PRICING_CATALOG.tutoring_monthly.purchase_price_cents),
           },
         ];
       case 'test-prep':
@@ -771,34 +964,28 @@ function Step2ChoosePlan({
             id: 'test-prep-single',
             title: 'Single Test Prep Session',
             details: '1 hour session',
-            price: '$149',
+            price: formatUsdFromCents(PRICING_CATALOG.test_prep_single.purchase_price_cents),
           },
           {
             id: 'test-prep-monthly',
             title: 'Monthly Test Prep Bundle',
             details: '4 sessions per month',
-            price: '$499',
+            price: formatUsdFromCents(PRICING_CATALOG.test_prep_monthly.purchase_price_cents),
           },
         ];
       case 'counseling':
         return [
           {
-            id: 'counseling-30min',
-            title: '30 Minute Counseling Session',
-            details: '30 minutes',
-            price: '$49',
-          },
-          {
-            id: 'counseling-60min',
-            title: '60 Minute Counseling Session',
+            id: 'counseling-single',
+            title: 'College Counseling',
             details: '60 minutes',
-            price: '$89',
+            price: formatUsdFromCents(PRICING_CATALOG.counseling_single.purchase_price_cents),
           },
           {
             id: 'counseling-monthly',
             title: 'Monthly Counseling Plan',
-            details: '2 sessions per month',
-            price: '$159',
+            details: '4 sessions per month',
+            price: formatUsdFromCents(PRICING_CATALOG.counseling_monthly.purchase_price_cents),
           },
         ];
       case 'virtual-tour':
@@ -807,7 +994,7 @@ function Step2ChoosePlan({
             id: 'virtual-tour-single',
             title: 'Virtual College Tour',
             details: 'Live guided tour with a current student',
-            price: '$124',
+            price: formatUsdFromCents(PRICING_CATALOG.virtual_tour_single.purchase_price_cents),
           },
         ];
       default:
@@ -874,18 +1061,34 @@ function Step2ChoosePlan({
 function Step3ChooseSubjectOrSchool({
   bookingState,
   updateBookingState,
+  virtualTourProviderCheck,
+  setVirtualTourProviderCheck,
 }: {
   bookingState: BookingState;
   updateBookingState: (updates: Partial<BookingState>) => void;
+  virtualTourProviderCheck: {
+    status: 'idle' | 'loading' | 'loaded' | 'error';
+    count: number | null;
+    suggestedSchools: School[];
+    notifyRequested: boolean;
+  };
+  setVirtualTourProviderCheck: Dispatch<
+    SetStateAction<{
+      status: 'idle' | 'loading' | 'loaded' | 'error';
+      count: number | null;
+      suggestedSchools: School[];
+      notifyRequested: boolean;
+    }>
+  >;
 }) {
-  // Initialize search query with selected school display name if it exists
-  const [searchQuery, setSearchQuery] = useState(bookingState.school?.displayName || '');
+  // Initialize search query with selected school name if it exists
+  const [searchQuery, setSearchQuery] = useState(bookingState.schoolName || bookingState.school?.name || '');
   const [isConfirmed, setIsConfirmed] = useState(!!bookingState.school);
-  const [recentSchools, setRecentSchools] = useState<string[]>(() => {
-    // Load recent schools from localStorage if available
+  const [recentSchoolIds, setRecentSchoolIds] = useState<string[]>(() => {
+    // Load recent school IDs from localStorage if available
     if (typeof window !== 'undefined') {
       try {
-        const stored = localStorage.getItem('ivyway_recent_schools');
+        const stored = localStorage.getItem('ivyway_recent_school_ids');
         return stored ? JSON.parse(stored) : [];
       } catch {
         return [];
@@ -901,10 +1104,10 @@ function Step3ChooseSubjectOrSchool({
   const isVirtualTour = bookingState.service === 'virtual-tour';
   const availableTopics = bookingState.subject && isTutoring ? TUTORING_TOPICS[bookingState.subject] || [] : [];
   
-  // Check if selected school has providers available (for virtual tours and counseling)
-  const hasProviderAvailable = (isVirtualTour || bookingState.service === 'counseling') && bookingState.school 
-    ? hasProviderForSchool(bookingState.school, bookingState.service!)
-    : true; // Always true for services that don't require school matching
+  // Virtual Tours: enforce provider existence BEFORE Step 4 to avoid empty calendar UX.
+  const virtualTourNoProviders =
+    isVirtualTour && virtualTourProviderCheck.status === 'loaded' && virtualTourProviderCheck.count === 0;
+  const virtualTourChecking = isVirtualTour && virtualTourProviderCheck.status === 'loading';
   
   // Check if tutor is available for selected subject/test (for Tutoring and Test Prep only)
   // For Foreign Languages and Computer Science, availability requires topic to be selected
@@ -928,26 +1131,104 @@ function Step3ChooseSubjectOrSchool({
   useEffect(() => {
     if (bookingState.school) {
       setIsConfirmed(true);
-      setSearchQuery(bookingState.school.displayName);
+      setSearchQuery(bookingState.schoolName || bookingState.school.name);
     } else {
       setIsConfirmed(false);
     }
   }, [bookingState.school]);
+
+  // Virtual Tours: provider-count check after school selection.
+  // This prevents proceeding to Step 4 (calendar) when a school has zero providers.
+  useEffect(() => {
+    if (!isVirtualTour) {
+      // Reset when switching away from virtual tours
+      if (virtualTourProviderCheck.status !== 'idle') {
+        setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+      }
+      return;
+    }
+
+    const selectedSchoolId =
+      (bookingState.school && bookingState.school.id) ||
+      (typeof bookingState.schoolId === 'string' ? bookingState.schoolId : '') ||
+      '';
+
+    if (!selectedSchoolId) {
+      setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setVirtualTourProviderCheck({ status: 'loading', count: null, suggestedSchools: [], notifyRequested: false });
+      try {
+        const res = await fetch(
+          `/api/providers?serviceType=virtual_tour&schoolId=${encodeURIComponent(selectedSchoolId)}`,
+          { cache: 'no-store' }
+        );
+        const json = await res.json();
+        const providers: any[] = Array.isArray(json) ? json : Array.isArray((json as any)?.providers) ? (json as any).providers : [];
+        const count = providers.length;
+
+        if (cancelled) return;
+
+        if (count === 0) {
+          // Optional suggestions: other schools that have virtual tour providers.
+          let suggestedSchools: School[] = [];
+          try {
+            const resAll = await fetch(`/api/providers?serviceType=virtual_tour`, { cache: 'no-store' });
+            const jsonAll = await resAll.json();
+            const allProviders: any[] = Array.isArray(jsonAll)
+              ? jsonAll
+              : Array.isArray((jsonAll as any)?.providers)
+                ? (jsonAll as any).providers
+                : [];
+
+            const schoolIds = Array.from(
+              new Set(
+                allProviders
+                  .map((p) => String(p?.school_id || p?.schoolId || '').trim())
+                  .filter((id) => !!id && id !== selectedSchoolId)
+              )
+            );
+
+            suggestedSchools = schoolIds
+              .map((id) => SCHOOLS.find((s) => s.id === id))
+              .filter((s): s is School => !!s)
+              .slice(0, 3);
+          } catch {
+            // Best-effort only
+          }
+
+          setVirtualTourProviderCheck({ status: 'loaded', count: 0, suggestedSchools, notifyRequested: false });
+        } else {
+          setVirtualTourProviderCheck({ status: 'loaded', count, suggestedSchools: [], notifyRequested: false });
+        }
+      } catch {
+        if (cancelled) return;
+        setVirtualTourProviderCheck({ status: 'error', count: null, suggestedSchools: [], notifyRequested: false });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // We intentionally depend on canonical school identity to re-run checks on selection changes.
+  }, [isVirtualTour, bookingState.school?.id, bookingState.schoolId]);
 
   const handleSubjectChange = (subject: string | null) => {
     // When subject changes, clear the topic
     updateBookingState({ subject, topic: null });
   };
 
-  // Save school to recent selections (store display name)
+  // Save school to recent selections (store school ID)
   const saveRecentSchool = (school: School) => {
     if (!school) return;
-    const displayName = school.displayName;
-    setRecentSchools((prev) => {
-      const updated = [displayName, ...prev.filter((s) => normalizeSchoolName(s) !== school.normalizedName)].slice(0, 5); // Keep last 5
+    setRecentSchoolIds((prev) => {
+      const updated = [school.id, ...prev.filter((id) => id !== school.id)].slice(0, 5); // Keep last 5
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('ivyway_recent_schools', JSON.stringify(updated));
+          localStorage.setItem('ivyway_recent_school_ids', JSON.stringify(updated));
         } catch {
           // Ignore localStorage errors
         }
@@ -956,45 +1237,45 @@ function Step3ChooseSubjectOrSchool({
     });
   };
 
-  // Confirm school selection - locks it in
-  const confirmSchool = (schoolName: string) => {
-    const trimmed = schoolName.trim();
-    if (trimmed) {
-      const school = createSchool(trimmed);
-      if (school) {
-        updateBookingState({ school });
-        saveRecentSchool(school);
-        setIsConfirmed(true);
-        setShowSuggestions(false);
+  // Confirm school selection - locks it in (must be from canonical list)
+  const confirmSchool = (school: School) => {
+    if (school) {
+      updateBookingState({ school, schoolId: school.id, schoolName: school.name });
+      saveRecentSchool(school);
+      setIsConfirmed(true);
+      setShowSuggestions(false);
+    }
+  };
+
+  // Get filtered schools from canonical list
+  const filteredSchools = searchQuery.trim()
+    ? searchSchools(searchQuery)
+    : [];
+
+  // Get recent schools from IDs
+  const recentSchools = recentSchoolIds
+    .map(id => SCHOOLS.find(s => s.id === id))
+    .filter((s): s is School => s !== undefined);
+
+  // Get suggestions: recent schools + filtered schools (excluding already selected)
+  const getSuggestions = (): School[] => {
+    const allSuggestions: School[] = [];
+    
+    // Add recent schools first
+    recentSchools.forEach(school => {
+      if (!allSuggestions.find(s => s.id === school.id)) {
+        allSuggestions.push(school);
       }
-    }
-  };
-
-  // Handle Enter key to confirm
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && searchQuery.trim() && !isConfirmed) {
-      e.preventDefault();
-      confirmSchool(searchQuery);
-    }
-  };
-
-  // Get suggestions based on recent schools and current query (case-insensitive, partial matching)
-  const getSuggestions = (): string[] => {
-    if (!searchQuery.trim()) {
-      return recentSchools;
-    }
-    const normalizedQuery = normalizeSchoolName(searchQuery);
-    // Show recent schools that match the query (partial, case-insensitive)
-    const matchingRecent = recentSchools.filter((school) => {
-      const normalizedSchool = normalizeSchoolName(school);
-      return normalizedSchool.includes(normalizedQuery) || normalizedQuery.includes(normalizedSchool);
     });
-    // If current query doesn't match any recent, show it as an option
-    const currentQueryNormalized = normalizeSchoolName(searchQuery.trim());
-    if (!matchingRecent.some((s) => normalizeSchoolName(s) === currentQueryNormalized)) {
-      return [searchQuery.trim(), ...matchingRecent].slice(0, 5);
-    }
-    return matchingRecent.slice(0, 5);
+    
+    // Add filtered schools
+    filteredSchools.forEach(school => {
+      if (!allSuggestions.find(s => s.id === school.id)) {
+        allSuggestions.push(school);
+      }
+    });
+    
+    return allSuggestions.slice(0, 10); // Limit to 10 suggestions
   };
 
   // Handle input change - allow editing if not confirmed
@@ -1002,7 +1283,10 @@ function Step3ChooseSubjectOrSchool({
     if (isConfirmed) {
       // If confirmed, allow clearing to start over
       if (value === '') {
-        updateBookingState({ school: null });
+        updateBookingState({ school: null, schoolId: null, schoolName: null });
+        if (isVirtualTour) {
+          setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+        }
         setIsConfirmed(false);
         setSearchQuery('');
       } else {
@@ -1085,31 +1369,39 @@ function Step3ChooseSubjectOrSchool({
             )}
           </div>
 
-          {/* Topic Selection - Only for Tutoring, and only after subject is selected */}
-          {isTutoring && bookingState.subject && (
+          {/* Topic Input (free text) - Tutoring + Test Prep, and only after subject is selected */}
+          {(isTutoring || isTestPrep) && bookingState.subject && (
             <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700">Select a topic</label>
-              <select
+              <label className="block text-sm font-medium text-gray-700">What topic do you need help with?</label>
+              <input
+                type="text"
                 value={bookingState.topic || ''}
-                onChange={(e) => updateBookingState({ topic: e.target.value || null })}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  updateBookingState({ topic: v.trim() ? v.trim() : null });
+                }}
+                placeholder={
+                  isTestPrep
+                    ? 'e.g. SAT Reading, ACT Science, AP Biology FRQs'
+                    : 'e.g. Quadratic equations, Photosynthesis, Essay writing'
+                }
+                list={isTutoring ? 'ivyway-topic-suggestions' : undefined}
+                required
                 className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
-              >
-                <option value="">Select a topic...</option>
-                {availableTopics.map((topic) => (
-                  <option key={topic} value={topic}>
-                    {topic}
-                  </option>
-                ))}
-                <option value="Other">Other</option>
-              </select>
-              <p className="text-sm text-gray-500">
-                Please select a specific topic to continue
-              </p>
+              />
+              {isTutoring && availableTopics.length > 0 && (
+                <datalist id="ivyway-topic-suggestions">
+                  {availableTopics.map((t) => (
+                    <option key={t} value={t} />
+                  ))}
+                </datalist>
+              )}
+              <p className="text-sm text-gray-500">Required — type anything.</p>
             </div>
           )}
 
-          {/* Summary for Tutoring */}
-          {isTutoring && bookingState.subject && bookingState.topic && (
+          {/* Summary for Tutoring/Test Prep */}
+          {(isTutoring || isTestPrep) && bookingState.subject && bookingState.topic && (
             <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-start gap-2">
                 <svg className="w-5 h-5 text-[#0088CB] mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1119,7 +1411,7 @@ function Step3ChooseSubjectOrSchool({
                   <p className="text-sm font-medium text-gray-900">Selected:</p>
                   <p className="text-sm text-gray-700">
                     <span className="font-semibold">{bookingState.subject}</span>
-                    {' → '}
+                    {' — '}
                     <span className="font-semibold">{bookingState.topic}</span>
                   </p>
                 </div>
@@ -1135,9 +1427,8 @@ function Step3ChooseSubjectOrSchool({
               <input
                 type="text"
                 placeholder={isConfirmed ? "School confirmed - clear to change" : "Type any college or university name (e.g., Harvard, Oxford)..."}
-                value={isConfirmed ? bookingState.school?.displayName || '' : searchQuery}
+                value={isConfirmed ? bookingState.school?.name || '' : searchQuery}
                 onChange={(e) => handleInputChange(e.target.value)}
-                onKeyDown={handleKeyDown}
                 onFocus={() => {
                   if (!isConfirmed) {
                     setShowSuggestions(true);
@@ -1154,18 +1445,21 @@ function Step3ChooseSubjectOrSchool({
                     : 'border-gray-300 bg-white'
                 }`}
               />
-              {!isConfirmed && searchQuery.trim() && (
+              {!isConfirmed && filteredSchools.length === 1 && (
                 <button
-                  onClick={() => confirmSchool(searchQuery)}
+                  onClick={() => confirmSchool(filteredSchools[0])}
                   className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 bg-[#0088CB] text-white rounded-md text-sm font-medium hover:bg-[#0077B3] transition-colors"
                 >
-                  Confirm
+                  Select
                 </button>
               )}
               {isConfirmed && (
                 <button
                   onClick={() => {
-                    updateBookingState({ school: null });
+                    updateBookingState({ school: null, schoolId: null, schoolName: null });
+                    if (isVirtualTour) {
+                      setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+                    }
                     setSearchQuery('');
                     setIsConfirmed(false);
                   }}
@@ -1179,46 +1473,113 @@ function Step3ChooseSubjectOrSchool({
             <p className="text-sm text-gray-500">
               {isConfirmed
                 ? 'School confirmed. Click "Change" to select a different school.'
-                : 'Type any college or university name (partial names work). Press Enter or click Confirm to select.'}
+                : 'Search for your school. Select from the dropdown to continue.'}
             </p>
             
-            {/* Error message for Virtual College Tours when no providers available */}
-            {isVirtualTour && isConfirmed && bookingState.school && !hasProviderAvailable && (
-              <div className="mt-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-sm font-medium text-amber-900">
-                    Whoops, looks like we don't have any counselors active at this school. Try another.
-                  </p>
-                </div>
+            {/* Virtual Tours: provider count check + error state (blocks Next) */}
+            {isVirtualTour && isConfirmed && bookingState.school && (
+              <div className="mt-3 space-y-3">
+                {virtualTourChecking && (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <svg className="w-5 h-5 text-[#0088CB] mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-sm font-medium text-blue-900">Checking provider availability…</p>
+                    </div>
+                  </div>
+                )}
+
+                {virtualTourProviderCheck.status === 'error' && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-sm font-medium text-amber-900">Unable to check providers right now. Please try again.</p>
+                    </div>
+                  </div>
+                )}
+
+                {virtualTourNoProviders && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-4">
+                    <div className="flex items-start gap-3">
+                      <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-amber-900">
+                          We currently do not have any providers available at this school.
+                        </p>
+                        {virtualTourProviderCheck.notifyRequested && (
+                          <p className="text-sm text-amber-800">Thanks — we’ll reach out when providers are available.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateBookingState({ school: null, schoolId: null, schoolName: null });
+                          setSearchQuery('');
+                          setIsConfirmed(false);
+                          setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+                        }}
+                        className="px-4 py-2 rounded-md bg-white border border-amber-200 text-amber-900 hover:bg-amber-100 transition-colors text-sm font-medium"
+                      >
+                        Browse other schools
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVirtualTourProviderCheck((prev) => ({ ...prev, notifyRequested: true }));
+                        }}
+                        className="px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors text-sm font-medium"
+                      >
+                        Notify me when available
+                      </button>
+                    </div>
+
+                    {virtualTourProviderCheck.suggestedSchools.length > 0 && (
+                      <div className="pt-2 border-t border-amber-200">
+                        <p className="text-sm font-medium text-amber-900">Providers are available at:</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {virtualTourProviderCheck.suggestedSchools.map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => confirmSchool(s)}
+                              className="px-3 py-1.5 rounded-full bg-white border border-amber-200 text-amber-900 hover:bg-amber-100 transition-colors text-sm"
+                            >
+                              {s.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
-          {/* Suggestions Dropdown - Show recent selections and current query (only when not confirmed) */}
-          {!isConfirmed && showSuggestions && (searchQuery.trim() || recentSchools.length > 0) && (
+          {/* Suggestions Dropdown - Show schools from canonical list (only when not confirmed) */}
+          {!isConfirmed && showSuggestions && getSuggestions().length > 0 && (
             <div className="mt-2 space-y-1 max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
-              {getSuggestions().map((school, index) => {
-                const normalizedSchool = normalizeSchoolName(school);
-                const normalizedQuery = normalizeSchoolName(searchQuery.trim());
-                const isCurrentQuery = normalizedSchool === normalizedQuery;
-                const isRecent = recentSchools.some((s) => normalizeSchoolName(s) === normalizedSchool) && !isCurrentQuery;
+              {getSuggestions().map((school) => {
+                const isRecent = recentSchoolIds.includes(school.id);
                 return (
                   <button
-                    key={`${school}-${index}`}
+                    key={school.id}
                     onClick={() => confirmSchool(school)}
                     className="w-full p-3 rounded-md text-left transition-all hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-900">{school}</span>
+                        <span className="font-medium text-gray-900">{school.name}</span>
                         {isRecent && (
                           <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">Recent</span>
-                        )}
-                        {isCurrentQuery && searchQuery.trim() && (
-                          <span className="text-xs text-[#0088CB] bg-blue-50 px-2 py-0.5 rounded">Press Enter</span>
                         )}
                       </div>
                       <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1230,16 +1591,25 @@ function Step3ChooseSubjectOrSchool({
               })}
             </div>
           )}
+          
+          {/* No results message */}
+          {!isConfirmed && showSuggestions && searchQuery.trim() && filteredSchools.length === 0 && (
+            <div className="mt-2 p-4 bg-amber-50 border border-amber-200 rounded-md">
+              <p className="text-sm text-amber-900">
+                No schools found matching &quot;{searchQuery}&quot;. Please select from the dropdown suggestions.
+              </p>
+            </div>
+          )}
 
           {/* Selected School Summary - Show confirmed school */}
           {isConfirmed && bookingState.school && (
             <div className={`mt-4 p-4 rounded-lg border-2 ${
-              isVirtualTour && !hasProviderAvailable
+              isVirtualTour && virtualTourNoProviders
                 ? 'bg-amber-50 border-amber-300'
                 : 'bg-blue-50 border-[#0088CB]'
             }`}>
               <div className="flex items-start gap-2">
-                {isVirtualTour && !hasProviderAvailable ? (
+                {isVirtualTour && virtualTourNoProviders ? (
                   <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
@@ -1250,16 +1620,19 @@ function Step3ChooseSubjectOrSchool({
                 )}
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-900">Confirmed School:</p>
-                  <p className="text-sm text-gray-700 font-semibold mt-1">{bookingState.school.displayName}</p>
-                  {isVirtualTour && !hasProviderAvailable ? (
-                    <p className="text-xs text-amber-700 mt-1">No active counselors available at this school</p>
+                  <p className="text-sm text-gray-700 font-semibold mt-1">{bookingState.school.name}</p>
+                  {isVirtualTour && virtualTourNoProviders ? (
+                    <p className="text-xs text-amber-700 mt-1">No providers available for virtual tours at this school</p>
                   ) : (
                     <p className="text-xs text-gray-500 mt-1">You can proceed to the next step</p>
                   )}
                 </div>
                 <button
                   onClick={() => {
-                    updateBookingState({ school: null });
+                    updateBookingState({ school: null, schoolId: null, schoolName: null });
+                    if (isVirtualTour) {
+                      setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+                    }
                     setSearchQuery('');
                     setIsConfirmed(false);
                   }}
@@ -1289,15 +1662,28 @@ function Step4ChooseTimeSlot({
 }) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-
-  // Placeholder time slots
-  const timeSlots = ['10:00 AM', '1:00 PM', '4:00 PM'];
+  // IMPORTANT: Each slot is provider-specific (slot includes providerId). Do not group by time
+  // or we'll lose the exact slot→provider mapping needed for correct booking validation.
+  const [availableSlots, setAvailableSlots] = useState<
+    Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }>
+  >([]);
+  const [counselingProviders, setCounselingProviders] = useState<
+    Array<{
+      providerId: string;
+      providerName: string;
+      providerSchoolName: string | null;
+      matchesRequestedSchool: boolean;
+    }>
+  >([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [slotsError, setSlotsError] = useState<string | null>(null);
 
   const today = new Date();
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const requiredSessions = getRequiredSessionsCount(bookingState.plan);
   const selectedCount = bookingState.selectedSessions.length;
+  const nextSessionNumber = Math.min(requiredSessions, selectedCount + 1);
 
   const monthNames = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -1343,17 +1729,10 @@ function Step4ChooseTimeSlot({
     });
   };
 
-  // Check if a date+time combination is already selected
-  const isTimeSlotSelected = (day: number, time: string): boolean => {
-    const date = new Date(year, month, day);
-    return bookingState.selectedSessions.some(session => {
-      return (
-        session.date.getDate() === date.getDate() &&
-        session.date.getMonth() === date.getMonth() &&
-        session.date.getFullYear() === date.getFullYear() &&
-        session.time === time
-      );
-    });
+  const isSlotSelected = (startTimeUTC: string, endTimeUTC: string, providerId: string): boolean => {
+    return bookingState.selectedSessions.some(
+      (s) => s.startTimeUTC === startTimeUTC && s.endTimeUTC === endTimeUTC && s.providerId === providerId
+    );
   };
 
   const handleDateClick = (day: number) => {
@@ -1361,40 +1740,41 @@ function Step4ChooseTimeSlot({
     setSelectedDate(date);
   };
 
-  const handleTimeSlotClick = (time: string) => {
-    if (!selectedDate) return;
+  const handleTimeSlotClick = (slot: { startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }) => {
+    const slotDate = new Date(slot.startTimeUTC);
+    if (isNaN(slotDate.getTime())) return;
 
-    // Check if this date+time is already selected
-    const existingIndex = bookingState.selectedSessions.findIndex(session => {
-      return (
-        session.date.getDate() === selectedDate.getDate() &&
-        session.date.getMonth() === selectedDate.getMonth() &&
-        session.date.getFullYear() === selectedDate.getFullYear() &&
-        session.time === time
-      );
-    });
+    const existingIndex = bookingState.selectedSessions.findIndex(
+      (s) =>
+        s.startTimeUTC === slot.startTimeUTC && s.endTimeUTC === slot.endTimeUTC && s.providerId === slot.providerId
+    );
 
     if (existingIndex !== -1) {
       // Remove if already selected
       const updatedSessions = bookingState.selectedSessions.filter((_, index) => index !== existingIndex);
-      updateBookingState({ selectedSessions: updatedSessions });
+      // Any time changes require re-confirming provider.
+      updateBookingState({ selectedSessions: updatedSessions, provider: null });
     } else {
       // Add if not at limit and not already selected
       if (selectedCount < requiredSessions) {
         const newSession: SelectedSession = {
-          date: new Date(selectedDate),
-          time,
-          displayString: formatDateString(selectedDate, time),
+          providerId: slot.providerId,
+          startTimeUTC: slot.startTimeUTC,
+          endTimeUTC: slot.endTimeUTC,
+          date: slotDate,
+          displayTime: slot.displayTime,
+          displayString: formatDateString(slotDate, slot.displayTime),
         };
         const updatedSessions = [...bookingState.selectedSessions, newSession];
-        updateBookingState({ selectedSessions: updatedSessions });
+        // Any time changes require re-confirming provider.
+        updateBookingState({ selectedSessions: updatedSessions, provider: null });
       }
     }
   };
 
   const handleRemoveSession = (index: number) => {
     const updatedSessions = bookingState.selectedSessions.filter((_, i) => i !== index);
-    updateBookingState({ selectedSessions: updatedSessions });
+    updateBookingState({ selectedSessions: updatedSessions, provider: null });
   };
 
   const goToPreviousMonth = () => {
@@ -1435,12 +1815,110 @@ function Step4ChooseTimeSlot({
     return date < todayStart;
   };
 
+  // Fetch available slots when date is selected
+  useEffect(() => {
+    if (!selectedDate) {
+      setAvailableSlots([]);
+      setCounselingProviders([]);
+      return;
+    }
+
+    // Build API request
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    
+    // Determine serviceType for API
+    let serviceType: string | null = null;
+    if (bookingState.service === 'tutoring') {
+      serviceType = 'tutoring';
+    } else if (bookingState.service === 'test-prep') {
+      serviceType = 'test_prep';
+    } else if (bookingState.service === 'counseling') {
+      serviceType = 'college_counseling';
+    } else if (bookingState.service === 'virtual-tour') {
+      serviceType = 'virtual_tour';
+    }
+
+    // Build query params
+    const schoolId = bookingState.school?.id || bookingState.schoolId || '';
+    const schoolName = bookingState.school?.name || bookingState.schoolName || '';
+    const params = new URLSearchParams({
+      date: dateStr,
+      ...(serviceType && { serviceType }),
+      ...(bookingState.subject && { subject: bookingState.subject }),
+      ...((schoolId || schoolName) && { schoolId, schoolName }),
+    });
+
+    // Counseling is 60 minutes only; pass duration so API returns correct endTimeUTC.
+    if (bookingState.service === 'counseling') {
+      params.set('durationMinutes', '60');
+    }
+
+    // Fetch slots from API
+    setLoadingSlots(true);
+    setSlotsError(null);
+    fetch(`/api/availability/all-slots?${params.toString()}`)
+      .then(res => {
+        if (!res.ok) {
+          return res.json().then(err => {
+            throw new Error(err.error || 'Failed to fetch available slots');
+          });
+        }
+        return res.json();
+      })
+      .then(data => {
+        // Convert API slots to display format. Keep providerId on each slot (no re-matching later).
+        const rawSlots: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }> = (data.slots || [])
+          .map((slot: any) => {
+          const startDate = new Date(slot.startTimeUTC);
+          const formatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+          return {
+            startTimeUTC: slot.startTimeUTC,
+            endTimeUTC: slot.endTimeUTC,
+            displayTime: formatter.format(startDate),
+            providerId: slot.providerId,
+          };
+          })
+          .filter((s: { providerId: string }) => typeof s.providerId === 'string' && s.providerId.length > 0);
+
+        setAvailableSlots(rawSlots);
+
+        // College Counseling: show ordered provider list + badges (school match influences ordering only).
+        if (bookingState.service === 'counseling') {
+          const rawProviders: any[] = Array.isArray(data?.providers) ? data.providers : [];
+          const normalizedProviders = rawProviders
+            .map((p) => ({
+              providerId: String(p?.providerId || ''),
+              providerName: typeof p?.providerName === 'string' && p.providerName.trim() ? p.providerName.trim() : 'Provider',
+              providerSchoolName:
+                typeof p?.providerSchoolName === 'string' && p.providerSchoolName.trim() ? p.providerSchoolName.trim() : null,
+              matchesRequestedSchool: p?.matchesRequestedSchool === true,
+            }))
+            .filter((p) => !!p.providerId);
+          setCounselingProviders(normalizedProviders);
+        } else {
+          setCounselingProviders([]);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching slots:', err);
+        setSlotsError(err.message || 'Failed to load available time slots');
+        setAvailableSlots([]);
+        setCounselingProviders([]);
+      })
+      .finally(() => {
+        setLoadingSlots(false);
+      });
+  }, [selectedDate, bookingState.service, bookingState.subject, bookingState.school, year, month]);
+
   // Get helper text based on plan
   const getHelperText = (): string => {
     if (requiredSessions === 1) {
       return 'Select 1 session time';
-    } else if (requiredSessions === 2) {
-      return 'Select 2 session times for your counseling plan';
     } else if (requiredSessions === 4) {
       return 'Select 4 session times for your monthly plan';
     }
@@ -1449,16 +1927,26 @@ function Step4ChooseTimeSlot({
 
   const isComplete = selectedCount === requiredSessions;
   const shouldShowCounter = requiredSessions > 1 || (requiredSessions === 1 && selectedCount > 0);
+  const isCounseling = bookingState.service === 'counseling';
+  const requestedSchoolId = bookingState.school?.id || bookingState.schoolId || '';
+  const counselingHasNoSchoolMatches =
+    isCounseling &&
+    !!requestedSchoolId &&
+    counselingProviders.length > 0 &&
+    counselingProviders.every((p) => p.matchesRequestedSchool !== true);
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-gray-900">Choose a Time</h2>
+        <h2 className="text-2xl font-semibold text-gray-900">
+          {requiredSessions > 1 && selectedCount < requiredSessions
+            ? `Select Session ${nextSessionNumber} of ${requiredSessions}`
+            : 'Choose a Time'}
+        </h2>
         <p className="mt-1 text-sm text-gray-600">{getHelperText()}</p>
         {/* Session Selection Progress Counter */}
         {shouldShowCounter && (
           <div className="mt-3 flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Selected Sessions:</span>
             <span
               className={`inline-flex items-center px-3 py-1 rounded-md text-sm font-semibold transition-colors ${
                 isComplete
@@ -1558,39 +2046,92 @@ function Step4ChooseTimeSlot({
           <h3 className="text-lg font-semibold text-gray-900">
             Available times for {monthNames[month]} {selectedDate.getDate()}, {year}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {timeSlots.map((time) => {
-              const isSelectedTime = isTimeSlotSelected(selectedDate.getDate(), time);
-              const isDisabled = selectedCount >= requiredSessions && !isSelectedTime;
 
-              return (
-                <button
-                  key={time}
-                  onClick={() => handleTimeSlotClick(time)}
-                  disabled={isDisabled}
-                  className={`p-4 rounded-lg border-2 transition-all text-center ${
-                    isDisabled
-                      ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : isSelectedTime
-                      ? 'border-[#0088CB] bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300 bg-white'
-                  }`}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span className="font-medium text-gray-900">{time}</span>
-                    {isSelectedTime && (
-                      <svg className="w-5 h-5 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
+          {/* College Counseling provider list (school match = ordering + messaging only) */}
+          {isCounseling && counselingProviders.length > 0 ? (
+            <div className="space-y-3">
+              {counselingHasNoSchoolMatches ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <p className="text-sm font-medium text-blue-900">
+                    Oops, we currently don’t have any counselors at this school. Check out these other counselors instead.
+                  </p>
+                </div>
+              ) : null}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {counselingProviders.map((p) => (
+                  <div key={p.providerId} className="rounded-lg border border-gray-200 bg-white p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-gray-900 truncate">{p.providerName}</div>
+                        {p.providerSchoolName ? (
+                          <div className="mt-0.5 text-xs text-gray-500 truncate">{p.providerSchoolName}</div>
+                        ) : null}
+                      </div>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold border ${
+                          p.matchesRequestedSchool
+                            ? 'bg-green-50 text-green-800 border-green-200'
+                            : 'bg-gray-50 text-gray-700 border-gray-200'
+                        }`}
+                      >
+                        {p.matchesRequestedSchool ? 'Attends this school' : 'General College Counselor'}
+                      </span>
+                    </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {loadingSlots ? (
+            <div className="text-center py-8">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#0088CB]"></div>
+              <p className="mt-4 text-sm text-gray-500">Loading available time slots...</p>
+            </div>
+          ) : slotsError ? (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-800">{slotsError}</p>
+            </div>
+          ) : availableSlots.length === 0 ? (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="text-sm text-amber-800">No available time slots for this date. Please select another date.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {availableSlots.map((slot) => {
+                const isSelectedTime = isSlotSelected(slot.startTimeUTC, slot.endTimeUTC, slot.providerId);
+                const isDisabled = selectedCount >= requiredSessions && !isSelectedTime;
+
+                return (
+                  <button
+                    key={`${slot.startTimeUTC}|${slot.endTimeUTC}|${slot.providerId}`}
+                    onClick={() => handleTimeSlotClick(slot)}
+                    disabled={isDisabled}
+                    className={`p-4 rounded-lg border-2 transition-all text-center ${
+                      isDisabled
+                        ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : isSelectedTime
+                        ? 'border-[#0088CB] bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center gap-2">
+                      <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="font-medium text-gray-900">{slot.displayTime}</span>
+                      {isSelectedTime && (
+                        <svg className="w-5 h-5 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1649,287 +2190,187 @@ function Step5SelectProvider({
   bookingState: BookingState;
   updateBookingState: (updates: Partial<BookingState>) => void;
 }) {
-  // Helper function to check if a provider's school matches the selected school
-  const providerSchoolMatches = (providerSchool: string, selectedSchool: School): boolean => {
-    if (!selectedSchool) return false;
-    const providerSchoolNormalized = normalizeSchoolName(providerSchool);
-    return providerSchoolNormalized === selectedSchool.normalizedName;
-  };
+  const [eligibleProviders, setEligibleProviders] = useState<
+    Array<{
+      userId: string;
+      displayName: string;
+      profileImageUrl: string | null;
+      ratingAverage?: number | null;
+      reviewCount?: number;
+      schoolName?: string | null;
+    }>
+  >([]);
+  const [loadingProviders, setLoadingProviders] = useState(false);
+  const [providersError, setProvidersError] = useState<string | null>(null);
+  const selectedProviderId = bookingState.provider;
 
-  // STRICT PROVIDER FILTERING: Enforce role-based matching with no cross-subject/service leakage
-  let matchedProviders: typeof MOCK_PROVIDERS = [];
-  let generalProviders: typeof MOCK_PROVIDERS = [];
+  useEffect(() => {
+    let cancelled = false;
 
-  if (bookingState.service === 'tutoring') {
-    // TUTORING: Only Tutors with exact subject match
-    if (!bookingState.subject) {
-      matchedProviders = [];
-    } else {
-      const normalizedSubject = normalizeSubjectName(bookingState.subject);
-      const isForeignLanguages = normalizedSubject === 'foreign languages';
-      const isComputerScience = normalizedSubject === 'computer science';
-      
-      if (isForeignLanguages) {
-        // Foreign Languages: STRICT matching by subject AND topic (language)
-        if (bookingState.topic) {
-          const normalizedTopic = normalizeSubjectName(bookingState.topic);
-          matchedProviders = MOCK_PROVIDERS.filter((provider) => {
-            // Must be a Tutor
-            if (provider.role !== 'Tutor') return false;
-            // Must teach Foreign Languages
-            if (normalizeSubjectName(provider.subject) !== 'foreign languages') return false;
-            // Must teach the specific language
-            if (!provider.languages || provider.languages.length === 0) return false;
-            return provider.languages.some((lang) => normalizeSubjectName(lang) === normalizedTopic);
-          });
-        } else {
-          matchedProviders = [];
+    const load = async () => {
+      setProvidersError(null);
+      setEligibleProviders([]);
+
+      setLoadingProviders(true);
+      try {
+        const selectedSlots = bookingState.selectedSessions || [];
+        if (selectedSlots.length === 0) {
+          setProvidersError('Please select at least one time slot.');
+          return;
         }
-      } else if (isComputerScience) {
-        // Computer Science: STRICT matching by subject AND topic
-        if (bookingState.topic) {
-          const normalizedTopic = normalizeSubjectName(bookingState.topic);
-          matchedProviders = MOCK_PROVIDERS.filter((provider) => {
-            // Must be a Tutor
-            if (provider.role !== 'Tutor') return false;
-            // Must teach Computer Science
-            if (normalizeSubjectName(provider.subject) !== 'computer science') return false;
-            // Must teach the specific CS topic
-            if (!provider.topics || provider.topics.length === 0) return false;
-            return provider.topics.some((csTopic) => normalizeSubjectName(csTopic) === normalizedTopic);
-          });
-        } else {
-          matchedProviders = [];
+
+        // Slot → Provider matching MUST be exact: use providerId already attached to each selected slot.
+        const providerIds = selectedSlots.map((s) => s.providerId).filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+        if (providerIds.length !== selectedSlots.length) {
+          setProvidersError('Missing provider for one or more selected slots. Please go back and re-select your times.');
+          return;
         }
-      } else {
-        // Math, Science, History, English: STRICT subject-only matching (topic is for context only)
-        matchedProviders = MOCK_PROVIDERS.filter((provider) => {
-          // Must be a Tutor
-          if (provider.role !== 'Tutor') return false;
-          // Exact subject match (case-insensitive)
-          const providerSubjectNormalized = normalizeSubjectName(provider.subject);
-          return providerSubjectNormalized === normalizedSubject;
-        });
-      }
-    }
-  } else if (bookingState.service === 'test-prep') {
-    // TEST PREP: Only Tutors with exact test match
-    if (!bookingState.subject) {
-      matchedProviders = [];
-    } else {
-      const normalizedSubject = normalizeSubjectName(bookingState.subject);
-      matchedProviders = MOCK_PROVIDERS.filter((provider) => {
-        // Must be a Tutor
-        if (provider.role !== 'Tutor') return false;
-        // Exact test match (case-insensitive)
-        const providerSubjectNormalized = normalizeSubjectName(provider.subject);
-        return providerSubjectNormalized === normalizedSubject;
-      });
-    }
-  } else if (bookingState.service === 'counseling') {
-    // COLLEGE COUNSELING: Only Counselors tagged with the selected school (with fallback to general counselors)
-    if (!bookingState.school) {
-      matchedProviders = [];
-    } else {
-      // First, find counselors tagged with the selected school
-      matchedProviders = MOCK_PROVIDERS.filter((provider) => {
-        // Must be a Counselor
-        if (provider.role !== 'Counselor') return false;
-        // Must be tagged for college counseling
-        if (normalizeSubjectName(provider.subject) !== 'college counseling') return false;
-        // Check if provider is tagged with this school
-        if (!provider.schoolTags || provider.schoolTags.length === 0) return false;
-        return provider.schoolTags.some((tag) => {
-          return normalizeSchoolName(tag) === bookingState.school!.normalizedName;
-        });
-      });
 
-      // If no school-specific matches, show general counselors (fallback)
-      if (matchedProviders.length === 0) {
-        generalProviders = MOCK_PROVIDERS.filter((provider) => {
-          // Must be a Counselor
-          if (provider.role !== 'Counselor') return false;
-          // Must be tagged for college counseling
-          if (normalizeSubjectName(provider.subject) !== 'college counseling') return false;
-          // General counselor (no specific school tags)
-          return !provider.schoolTags || provider.schoolTags.length === 0;
-        });
-      }
-    }
-  } else if (bookingState.service === 'virtual-tour') {
-    // VIRTUAL COLLEGE TOURS: Only providers tagged with the selected school (STRICT, no fallback)
-    if (!bookingState.school) {
-      matchedProviders = [];
-    } else {
-      matchedProviders = MOCK_PROVIDERS.filter((provider) => {
-        // Must be a Counselor (virtual tour guides are counselors)
-        if (provider.role !== 'Counselor') return false;
-        // Must be tagged for virtual tours
-        if (normalizeSubjectName(provider.subject) !== 'virtual tour') return false;
-        // Must be tagged with this school (STRICT matching, no fallback)
-        if (!provider.schoolTags || provider.schoolTags.length === 0) return false;
-        return provider.schoolTags.some((tag) => {
-          return normalizeSchoolName(tag) === bookingState.school!.normalizedName;
-        });
-      });
-    }
-  } else {
-    // Unknown service: show no providers
-    matchedProviders = [];
-  }
-
-  const hasNoMatches = matchedProviders.length === 0 && generalProviders.length === 0;
-  const hasNoSchoolMatches = (bookingState.service === 'counseling' || bookingState.service === 'virtual-tour') &&
-    bookingState.school &&
-    matchedProviders.length === 0;
-
-  const renderProviderCard = (provider: typeof MOCK_PROVIDERS[0]) => (
-    <button
-      key={provider.id}
-      onClick={() => updateBookingState({ provider: provider.id })}
-      className={`w-full p-6 rounded-lg border-2 transition-all text-left ${
-        bookingState.provider === provider.id
-          ? 'border-[#0088CB] bg-blue-50'
-          : 'border-gray-200 hover:border-gray-300 bg-white'
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex items-start gap-4 flex-1">
-          <div className="flex-shrink-0 w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center">
-            <span className="text-lg font-semibold text-gray-700">
-              {provider.name.split(' ').map((n) => n[0]).join('')}
-            </span>
-          </div>
-          <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-900">{provider.name}</h3>
-            <p className="mt-1 text-sm text-gray-600">
-              {bookingState.service === 'tutoring' || bookingState.service === 'test-prep'
-                ? provider.subject
-                : provider.school}
-            </p>
-            <div className="mt-2 flex items-center gap-1">
-              <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-              </svg>
-              <span className="text-sm font-medium text-gray-900">{provider.rating}</span>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {bookingState.provider === provider.id && (
-            <svg className="w-6 h-6 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-          <span
-            className={`px-4 py-2 rounded-md font-medium transition-colors ${
-              bookingState.provider === provider.id
-                ? 'bg-[#0088CB] text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Select
-          </span>
-        </div>
-      </div>
-    </button>
-  );
-
-  // Determine error message based on service type
-  const getErrorMessage = (): string => {
-    if (bookingState.service === 'tutoring') {
-      if (bookingState.subject) {
-        const normalizedSubject = normalizeSubjectName(bookingState.subject);
-        if (normalizedSubject === 'foreign languages') {
-          return "Whoops, looks like we don't have any tutors available for this language right now. Try another.";
+        // Only enforce “Same Provider” rule when bundle > 1. Skip entirely for a single session.
+        const uniqueProviders = new Set(providerIds);
+        if (selectedSlots.length > 1 && uniqueProviders.size > 1) {
+          setProvidersError('No single provider is available for all selected times. Please go back and adjust your times.');
+          return;
         }
-        if (normalizedSubject === 'computer science') {
-          return "Whoops, looks like we don't have any tutors available for this Computer Science topic right now. Try another.";
+
+        const providerId = providerIds[0];
+        if (!cancelled && bookingState.provider !== providerId) {
+          updateBookingState({ provider: providerId });
         }
-        return `Whoops, looks like we don't have any tutors available for ${bookingState.subject} right now. Try another subject.`;
+
+        const info = await getUserDisplayInfoById(providerId);
+        if (!cancelled) {
+          const reviewCount = typeof (info as any)?.reviewCount === 'number' ? (info as any).reviewCount : 0;
+          const ratingAverageRaw = typeof (info as any)?.ratingAverage === 'number' ? (info as any).ratingAverage : null;
+
+          // Safety: never pass ratingAverage to UI when there are zero reviews.
+          const ratingAverage = reviewCount === 0 ? null : ratingAverageRaw;
+
+          setEligibleProviders([
+            {
+              userId: providerId,
+              displayName: info.displayName || 'Provider',
+              profileImageUrl: info.profileImageUrl ? String(info.profileImageUrl) : null,
+              schoolName: typeof (info as any)?.schoolName === 'string' ? String((info as any).schoolName) : null,
+              ratingAverage,
+              reviewCount,
+            },
+          ]);
+        }
+      } catch (e) {
+        if (!cancelled) setProvidersError(e instanceof Error ? e.message : 'Failed to load providers');
+      } finally {
+        if (!cancelled) setLoadingProviders(false);
       }
-      return "Please select a subject to see available tutors.";
-    }
-    if (bookingState.service === 'test-prep') {
-      if (bookingState.subject) {
-        return `Whoops, looks like we don't have any tutors available for ${bookingState.subject} right now. Try another test.`;
-      }
-      return "Please select a test to see available tutors.";
-    }
-    if (bookingState.service === 'counseling') {
-      if (bookingState.school) {
-        return "Whoops, looks like we don't have any counselors at this school. Try another school.";
-      }
-      return "Please select a school to see available counselors.";
-    }
-    if (bookingState.service === 'virtual-tour') {
-      if (bookingState.school) {
-        return "Whoops, looks like we don't have any tour guides available for this school. Try another school.";
-      }
-      return "Please select a school to see available tour guides.";
-    }
-    return "No providers available for this service.";
-  };
+    };
+
+    load().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [bookingState.selectedSessions, bookingState.service, bookingState.subject, bookingState.school, bookingState.plan]);
+
+  // Keep provider cards consistent across ALL services (college counseling UI is the reference).
+  const showProviderSchool = true;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-gray-900">Select a Provider</h2>
-        <p className="mt-1 text-sm text-gray-600">Choose your preferred tutor or counselor</p>
+        <h2 className="text-2xl font-semibold text-gray-900">Confirm Provider</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          We’ll use the provider attached to your selected time{bookingState.selectedSessions.length === 1 ? '' : 's'}.
+        </p>
       </div>
 
-      {/* No matches at all - show error message */}
-      {hasNoMatches ? (
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-          <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <p className="text-sm font-medium text-amber-900">
-              {getErrorMessage()}
-            </p>
-          </div>
+      {loadingProviders ? (
+        <div className="text-center py-8">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#0088CB]"></div>
+          <p className="mt-4 text-sm text-gray-500">Loading eligible providers...</p>
         </div>
-      ) : hasNoSchoolMatches && generalProviders.length > 0 ? (
-        /* Counseling: No school-specific matches, show general counselors (fallback) */
-        <div className="space-y-6">
-          {/* Friendly message */}
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-            <div className="flex items-start gap-3">
-              <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <p className="text-sm font-medium text-amber-900">
-                Whoops! We currently don't have any counselors at this school.
-              </p>
-            </div>
-          </div>
-
-          {/* General counselors section */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">Available counselors for general college guidance</h3>
-            <div className="space-y-4">
-              {generalProviders.map(renderProviderCard)}
-            </div>
-          </div>
+      ) : providersError ? (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-800">{providersError}</p>
+        </div>
+      ) : eligibleProviders.length === 0 ? (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <p className="text-sm text-amber-800">No eligible providers found. Please go back and adjust your selection.</p>
         </div>
       ) : (
-        /* Regular provider list - matched providers */
-        <div className="space-y-4">
-          {matchedProviders.length > 0 ? (
-            matchedProviders.map(renderProviderCard)
-          ) : (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="flex items-start gap-3">
-                <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-sm font-medium text-amber-900">
-                  {getErrorMessage()}
-                </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {eligibleProviders.map((p) => {
+            const selected = selectedProviderId === p.userId;
+            const reviewCount = typeof p.reviewCount === 'number' ? p.reviewCount : 0;
+            const ratingAverage = typeof p.ratingAverage === 'number' ? p.ratingAverage : null;
+            const isNewProvider = reviewCount === 0;
+            const isHighlyRated = !isNewProvider && typeof ratingAverage === 'number' && ratingAverage >= 4.8;
+            return (
+              <div
+                key={p.userId}
+                className={`w-full text-left p-5 rounded-lg border-2 transition-all ${
+                  selected
+                    ? 'border-[#0088CB] bg-[#0088CB]/10 shadow-sm'
+                    : 'border-gray-200 bg-white hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex-shrink-0">
+                    {p.profileImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.profileImageUrl}
+                        alt={p.displayName}
+                        className="w-12 h-12 rounded-full object-cover border border-gray-200"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-sm font-semibold text-gray-600">
+                        {p.displayName.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-base font-semibold text-gray-900">{p.displayName}</div>
+                        {showProviderSchool && typeof p.schoolName === 'string' && p.schoolName.trim() ? (
+                          <div className="mt-0.5 text-sm text-gray-500">{p.schoolName.trim()}</div>
+                        ) : null}
+
+                        <div className="mt-2 flex items-center gap-2 text-sm text-gray-700">
+                          {isNewProvider ? (
+                            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">
+                              New Provider
+                            </span>
+                          ) : isHighlyRated ? (
+                            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                              <span className="inline-flex items-center gap-1">
+                                Highly Rated
+                                <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                              </span>
+                            </span>
+                          ) : typeof ratingAverage === 'number' ? (
+                            <span className="inline-flex items-center gap-1 text-sm font-medium text-gray-700">
+                              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                              {ratingAverage.toFixed(1)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {selected ? (
+                        <div className="w-6 h-6 rounded-full bg-[#0088CB] flex items-center justify-center flex-shrink-0">
+                          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })}
         </div>
       )}
     </div>

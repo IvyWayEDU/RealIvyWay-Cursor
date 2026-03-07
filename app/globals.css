@@ -31,6 +31,32 @@ body {
   overflow-y: auto;
 }
 
+/* ===============================
+   NAV: GLASS DROPDOWN MENU (HERO)
+   Reusable frosted-glass panel + menu item styles
+================================ */
+
+.ivyway-glass-menu {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.ivyway-glass-menu-item {
+  color: #ffffff;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.ivyway-glass-menu-item:hover {
+  color: #0f8bff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 @keyframes slide-up {
   from {
     opacity: 0;
@@ -223,4 +249,185 @@ html, body {
 iframe[src*="stripe"] {
   max-height: none !important;
   overflow: visible !important;
+}
+
+/* ===============================
+   LANDING: COLLEGE LOGO MARQUEE
+   Scoped to LogoMarquee.tsx classnames
+================================ */
+
+.ivyway-trusted-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: transparent;
+}
+
+.ivyway-trusted-text {
+  text-align: center;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.8); /* gray-900 w/ opacity */
+  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
+}
+
+.ivyway-trusted-section--dark .ivyway-trusted-text {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.ivyway-logo-marquee {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.5rem 0;
+  background: transparent;
+  /* subtle edge fade (preferred). Works on modern mobile + desktop browsers. */
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
+}
+
+.ivyway-logo-marquee-track {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2.5rem;
+  width: max-content;
+  will-change: transform;
+  animation: ivyway-marquee 38s linear infinite;
+}
+
+.ivyway-logo-marquee-logo {
+  display: block;
+  max-width: 180px;
+  opacity: 1;
+  filter: none;
+  transition: transform 200ms ease;
+  user-select: none;
+  -webkit-user-drag: none;
+  background: transparent;
+  object-fit: contain;
+}
+
+.ivyway-logo-marquee-logo:hover {
+  transform: scale(1.05);
+}
+
+@keyframes ivyway-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* We render two copies of the same logo list; shifting by 50% loops seamlessly */
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 640px) {
+  .ivyway-trusted-text {
+    font-size: 0.9rem;
+  }
+
+  .ivyway-logo-marquee-track {
+    gap: 1.75rem;
+    animation-duration: 30s;
+  }
+
+  .ivyway-logo-marquee-logo {
+    max-width: 140px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep this marquee moving (per product requirement). */
+}
+
+/* ===============================
+   LANDING: SCHOOL CAROUSEL (HERO)
+   Scoped to SchoolCarousel.tsx classnames
+================================ */
+
+.hero-logos-overlay {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(1200px, 92%);
+  padding: 14px 28px 18px;
+  border-radius: 18px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  text-align: center;
+  z-index: 5;
+}
+
+.hero-logos-title {
+  color: white;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.hero-logos-carousel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.hero-logos-logo,
+.hero-logos-carousel img {
+  height: 42px;
+  width: auto;
+  object-fit: contain;
+  opacity: 0.9;
+  transition: opacity 0.3s ease;
+  background: transparent;
+}
+
+.hero-logos-logo:hover,
+.hero-logos-carousel img:hover {
+  opacity: 1;
+}
+
+.ivyway-school-carousel-viewport {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  padding: 0.25rem 0;
+  background: transparent;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
+}
+
+.ivyway-school-carousel-track {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 48px;
+  width: max-content;
+  will-change: transform;
+  animation: scroll 28s linear infinite;
+}
+
+@keyframes scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* We render two copies of the same logo list; shifting by 50% loops seamlessly */
+    transform: translateX(-50%);
+  }
+}
+
+@media (max-width: 640px) {
+  .ivyway-school-carousel-track {
+    gap: 48px;
+    animation-duration: 28s;
+  }
 }

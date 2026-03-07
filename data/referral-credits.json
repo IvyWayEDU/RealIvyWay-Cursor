@@ -1,0 +1,29 @@
+[
+  {
+    "id": "credit_1766453431786_muzw447nn",
+    "userId": "00326fe0-3b6b-4ea8-ad2f-994149bf1018",
+    "amountCents": 1500,
+    "usedAmountCents": 0,
+    "remainingAmountCents": 1500,
+    "issuedAt": "2025-12-23T01:30:31.786Z",
+    "expiresAt": "2026-01-23T01:30:31.786Z",
+    "status": "active",
+    "createdAt": "2025-12-23T01:30:31.786Z",
+    "updatedAt": "2025-12-23T01:30:31.786Z"
+  },
+  {
+    "id": "credit_1766453431789_spltww2ga",
+    "userId": "5da29f0e-3d2c-40c1-85f3-18778cd13331",
+    "amountCents": 1000,
+    "usedAmountCents": 1000,
+    "remainingAmountCents": 0,
+    "issuedAt": "2025-12-23T01:30:31.789Z",
+    "expiresAt": "2026-01-23T01:30:31.789Z",
+    "status": "used",
+    "referredByUserId": "00326fe0-3b6b-4ea8-ad2f-994149bf1018",
+    "createdAt": "2025-12-23T01:30:31.789Z",
+    "updatedAt": "2025-12-23T01:37:59.315Z",
+    "usedAt": "2025-12-23T01:37:59.315Z",
+    "lastUsedAt": "2025-12-23T01:37:59.315Z"
+  }
+]

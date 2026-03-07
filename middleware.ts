@@ -5,6 +5,9 @@ import { UserRole } from './lib/auth/types';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const requestHeaders = new Headers(request.headers);
+  // Used by server layouts to determine current path (e.g. admin login bypass).
+  requestHeaders.set('x-pathname', pathname);
 
   // Protect all dashboard routes
   if (pathname.startsWith('/dashboard')) {
@@ -48,7 +51,11 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return NextResponse.next();
+  return NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
 }
 
 function getRoleFromPath(pathname: string): 'student' | 'provider' | 'admin' | null {
@@ -59,6 +66,6 @@ function getRoleFromPath(pathname: string): 'student' | 'provider' | 'admin' | n
 }
 
 export const config = {
-  matcher: '/dashboard/:path*',
+  matcher: ['/dashboard/:path*', '/admin/:path*'],
 };
 

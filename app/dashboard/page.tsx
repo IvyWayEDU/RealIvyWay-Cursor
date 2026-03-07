@@ -21,3 +21,4 @@ export default async function DashboardHome() {
   const dashboardRoute = getDashboardRoute(session.roles);
   redirect(dashboardRoute);
 }
+

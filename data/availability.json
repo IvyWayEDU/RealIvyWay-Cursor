@@ -1,0 +1,178 @@
+{
+  "9aa6c128-1360-4eb8-add3-b132ef2e0d09:college_counseling": {
+    "providerId": "9aa6c128-1360-4eb8-add3-b132ef2e0d09",
+    "serviceType": "college_counseling",
+    "timezone": "America/New_York",
+    "updatedAt": "2026-01-08T02:47:43.118Z",
+    "blocks": []
+  },
+  "272cc2af-4054-4263-8da3-b0e487d409af:tutoring": {
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "serviceType": "tutoring",
+    "timezone": "America/New_York",
+    "updatedAt": "2026-01-31T20:12:20.065Z",
+    "blocks": [
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 75,
+        "endMinutes": 120
+      },
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 180,
+        "endMinutes": 240
+      },
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 300,
+        "endMinutes": 1425
+      },
+      {
+        "dayOfWeek": 5,
+        "startMinutes": 750,
+        "endMinutes": 1439
+      },
+      {
+        "dayOfWeek": 6,
+        "startMinutes": 915,
+        "endMinutes": 1425
+      }
+    ],
+    "days": [
+      {
+        "dayOfWeek": 0,
+        "enabled": true,
+        "timeRanges": [
+          {
+            "startMinutes": 75,
+            "endMinutes": 120
+          },
+          {
+            "startMinutes": 180,
+            "endMinutes": 240
+          },
+          {
+            "startMinutes": 300,
+            "endMinutes": 1425
+          }
+        ]
+      },
+      {
+        "dayOfWeek": 1,
+        "enabled": false,
+        "timeRanges": []
+      },
+      {
+        "dayOfWeek": 2,
+        "enabled": false,
+        "timeRanges": []
+      },
+      {
+        "dayOfWeek": 3,
+        "enabled": false,
+        "timeRanges": []
+      },
+      {
+        "dayOfWeek": 4,
+        "enabled": false,
+        "timeRanges": []
+      },
+      {
+        "dayOfWeek": 5,
+        "enabled": true,
+        "timeRanges": [
+          {
+            "startMinutes": 750,
+            "endMinutes": 1439
+          }
+        ]
+      },
+      {
+        "dayOfWeek": 6,
+        "enabled": true,
+        "timeRanges": [
+          {
+            "startMinutes": 915,
+            "endMinutes": 1425
+          }
+        ]
+      }
+    ]
+  },
+  "272cc2af-4054-4263-8da3-b0e487d409af:college_counseling": {
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "serviceType": "college_counseling",
+    "timezone": "America/New_York",
+    "updatedAt": "2026-01-24T20:58:31.583Z",
+    "blocks": [
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 75,
+        "endMinutes": 120
+      },
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 180,
+        "endMinutes": 240
+      },
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 300,
+        "endMinutes": 1425
+      },
+      {
+        "dayOfWeek": 5,
+        "startMinutes": 750,
+        "endMinutes": 1439
+      },
+      {
+        "dayOfWeek": 6,
+        "startMinutes": 720,
+        "endMinutes": 960
+      },
+      {
+        "dayOfWeek": 6,
+        "startMinutes": 1380,
+        "endMinutes": 1425
+      }
+    ]
+  },
+  "272cc2af-4054-4263-8da3-b0e487d409af:virtual_tour": {
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "serviceType": "virtual_tour",
+    "timezone": "America/New_York",
+    "updatedAt": "2026-01-24T20:58:31.585Z",
+    "blocks": [
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 75,
+        "endMinutes": 120
+      },
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 180,
+        "endMinutes": 240
+      },
+      {
+        "dayOfWeek": 0,
+        "startMinutes": 300,
+        "endMinutes": 1425
+      },
+      {
+        "dayOfWeek": 5,
+        "startMinutes": 750,
+        "endMinutes": 1439
+      },
+      {
+        "dayOfWeek": 6,
+        "startMinutes": 720,
+        "endMinutes": 960
+      },
+      {
+        "dayOfWeek": 6,
+        "startMinutes": 1380,
+        "endMinutes": 1425
+      }
+    ]
+  }
+}

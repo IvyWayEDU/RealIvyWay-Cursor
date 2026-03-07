@@ -8,3 +8,4 @@ import BookingFlowClient from '@/components/BookingFlowClient';
 export default function BookPage() {
   return <BookingFlowClient />;
 }
+

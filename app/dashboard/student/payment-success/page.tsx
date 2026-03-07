@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { updateDevSession } from '@/lib/devSessionStore';
-import { confirmSessionPayment } from '@/lib/sessions/actions';
 
 export default function PaymentSuccessPage() {
   const searchParams = useSearchParams();
@@ -21,16 +19,8 @@ export default function PaymentSuccessPage() {
       }
 
       try {
-        // Confirm payment on server (for future database integration)
-        await confirmSessionPayment(sessionId);
-
-        // Update session status in localStorage (dev mode)
-        updateDevSession(sessionId, {
-          status: 'paid',
-          amountChargedCents: 0, // Will be updated from Stripe webhook in production
-          updatedAt: new Date().toISOString(),
-        });
-
+        // Session persistence happens server-side via Stripe webhook.
+        // This page is just a UX confirmation.
         setStatus('success');
         
         // Redirect to dashboard after 2 seconds
@@ -113,4 +103,5 @@ export default function PaymentSuccessPage() {
     </div>
   );
 }
+
 

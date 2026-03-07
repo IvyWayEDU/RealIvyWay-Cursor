@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 
 import Sidebar from './Sidebar';
 import DashboardHeader from './DashboardHeader';
-import SupportChatWidget from './SupportChatWidget';
 import { Session } from '@/lib/auth/types';
 
 type Role = 'student' | 'provider' | 'admin';
@@ -21,12 +20,14 @@ interface DashboardLayoutClientProps {
   children: React.ReactNode;
   session: Session;
   userRole: Role;
+  userProfilePhotoUrl?: string | null;
 }
 
 export default function DashboardLayoutClient({
   children,
   session,
   userRole,
+  userProfilePhotoUrl,
 }: DashboardLayoutClientProps) {
   const pathname = usePathname() || '';
   const roleFromPath = getRoleFromPath(pathname);
@@ -39,16 +40,6 @@ export default function DashboardLayoutClient({
     return (
       <div className="min-h-screen bg-gray-50">
         <main className="min-h-screen overflow-visible">{children}</main>
-      </div>
-    );
-  }
-
-  if (isCheckoutPage) {
-    return (
-      <div className="bg-gray-100">
-        <main className="p-8">
-          {children}
-        </main>
       </div>
     );
   }

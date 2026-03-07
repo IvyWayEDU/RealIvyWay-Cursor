@@ -1,6 +1,7 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Session } from '@/lib/auth/types';
 
 interface DashboardHeaderProps {
@@ -23,6 +24,7 @@ function getPageTitle(pathname: string): string {
     '/dashboard/earnings': 'Earnings',
     '/dashboard/profile': 'Profile',
     '/dashboard/support': 'Support',
+    '/dashboard/admin/support-inbox': 'Support Inbox',
   };
 
   // Check exact match first
@@ -43,7 +45,12 @@ function getPageTitle(pathname: string): string {
 
 export default function DashboardHeader({ session }: DashboardHeaderProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const pageTitle = getPageTitle(pathname);
+  const [isDevClearing, setIsDevClearing] = useState(false);
+
+  const showDevClearAllSessions =
+    process.env.NODE_ENV === 'development' && (pathname || '').startsWith('/dashboard/provider');
 
   return (
     <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6">
@@ -52,6 +59,28 @@ export default function DashboardHeader({ session }: DashboardHeaderProps) {
       </div>
       
       <div className="flex items-center gap-4">
+        {showDevClearAllSessions && (
+          <button
+            type="button"
+            disabled={isDevClearing}
+            onClick={async () => {
+              if (!confirm('Dev: Clear ALL sessions? This will delete upcoming + completed sessions and join tracking.')) {
+                return;
+              }
+              try {
+                setIsDevClearing(true);
+                await fetch('/api/dev/clear-sessions', { method: 'POST' });
+              } finally {
+                setIsDevClearing(false);
+                router.push('/dashboard');
+                router.refresh();
+              }
+            }}
+            className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {isDevClearing ? 'Clearing…' : 'Dev: Clear All Sessions'}
+          </button>
+        )}
         <div className="flex items-center gap-3">
           <div className="text-right">
             <p className="text-sm font-medium text-gray-900">{session.name}</p>
@@ -67,3 +96,4 @@ export default function DashboardHeader({ session }: DashboardHeaderProps) {
     </header>
   );
 }
+

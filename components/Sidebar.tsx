@@ -66,11 +66,27 @@ const getNavigationItems = (role: 'student' | 'provider' | 'admin'): NavItem[] =
     );
   }
 
+  if (role === 'admin') {
+    baseItems.push({
+      name: 'Support',
+      href: '/admin/support',
+      icon: (
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M7.5 8.25h9m-9 3h6m5.25 6.75V6a2.25 2.25 0 00-2.25-2.25H7.5A2.25 2.25 0 005.25 6v12a2.25 2.25 0 002.25 2.25h6l3-3h2.25z"
+          />
+        </svg>
+      ),
+    });
+  }
+
   // Common items for all roles
   baseItems.push(
     {
       name: 'Sessions',
-      href: '/dashboard/sessions',
+      href: role === 'student' ? '/dashboard/student/sessions' : '/dashboard/sessions',
       icon: (
         <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />

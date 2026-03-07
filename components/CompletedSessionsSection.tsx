@@ -1,11 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Session } from '@/lib/models/types';
-import { getDevCompletedSessionsByStudentId } from '@/lib/devSessionStore';
-import { getCurrentUserId, getUserNameById } from '@/lib/sessions/actions';
 import { getReviewBySessionId, submitReview, hasReviewForSession } from '@/lib/reviewStore';
 import { useRouter } from 'next/navigation';
+import { getSessionEndTimeMs, isSessionCompleted } from '@/lib/sessions/lifecycle';
+import {
+  formatServiceTypeLabel,
+  getCanonicalServiceType,
+  getCanonicalTopicLabel,
+} from '@/lib/sessions/sessionDisplay';
 
 interface StarRatingProps {
   rating: number;
@@ -46,9 +50,36 @@ function StarRating({ rating, onRatingChange, disabled = false }: StarRatingProp
 interface CompletedSessionCardProps {
   session: Session;
   providerName: string;
+  providerProfileImageUrl?: string | null;
 }
 
-function CompletedSessionCard({ session, providerName }: CompletedSessionCardProps) {
+function ProviderAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
+  const [imageError, setImageError] = useState(false);
+  const initials =
+    name
+      ?.split(' ')
+      ?.filter((n) => n.length > 0)
+      ?.map((n) => n[0])
+      ?.join('')
+      ?.toUpperCase()
+      ?.slice(0, 2) || 'P';
+
+  const showImage = !!imageUrl && !imageError;
+  return showImage ? (
+    <img
+      src={imageUrl as string}
+      alt={name}
+      className="h-10 w-10 rounded-full object-cover"
+      onError={() => setImageError(true)}
+    />
+  ) : (
+    <div className="h-10 w-10 rounded-full bg-[#0088CB] flex items-center justify-center">
+      <span className="text-white text-sm font-semibold">{initials}</span>
+    </div>
+  );
+}
+
+function CompletedSessionCard({ session, providerName, providerProfileImageUrl }: CompletedSessionCardProps) {
   const router = useRouter();
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
@@ -77,7 +108,7 @@ function CompletedSessionCard({ session, providerName }: CompletedSessionCardPro
 
     setIsSubmitting(true);
     try {
-      const { userId } = await getCurrentUserId();
+      const userId = (session as any)?.studentId;
       if (!userId) {
         alert('You must be logged in to submit a review.');
         return;
@@ -102,17 +133,14 @@ function CompletedSessionCard({ session, providerName }: CompletedSessionCardPro
   };
 
   const handleBookAgain = () => {
-    // Build query params for preselection
-    const params = new URLSearchParams();
-    params.set('providerId', session.providerId);
-    params.set('serviceType', session.sessionType);
-    if (session.subject) {
-      params.set('subject', session.subject);
-    }
-    if (session.gradeLevel) {
-      params.set('gradeLevel', session.gradeLevel);
-    }
-    
+    const params = new URLSearchParams({
+      serviceType: String((session as any)?.serviceType ?? ''),
+      subject: String((session as any)?.subject ?? ''),
+      topic: String((session as any)?.topic ?? ''),
+      schoolId: String((session as any)?.schoolId ?? ''),
+      schoolName: String((session as any)?.schoolName ?? (session as any)?.school ?? ''),
+    });
+
     router.push(`/dashboard/book?${params.toString()}`);
   };
 
@@ -135,18 +163,13 @@ function CompletedSessionCard({ session, providerName }: CompletedSessionCardPro
     });
   };
 
-  const getSessionTypeLabel = (type: string): string => {
-    switch (type) {
-      case 'tutoring':
-        return 'Tutoring';
-      case 'counseling':
-        return 'Counseling';
-      case 'test-prep':
-        return 'Test Prep';
-      default:
-        return type;
-    }
-  };
+  const serviceType = getCanonicalServiceType(session);
+  const serviceTypeLabel = formatServiceTypeLabel(serviceType);
+  const topicLabel = getCanonicalTopicLabel(session);
+  const subjectRaw = (session as any)?.subject;
+  const subject = typeof subjectRaw === 'string' && subjectRaw.trim() ? subjectRaw.trim() : '';
+  const topicRaw = (session as any)?.topic;
+  const topic = typeof topicRaw === 'string' && topicRaw.trim() ? topicRaw.trim() : '';
 
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-md transition-shadow">
@@ -157,18 +180,25 @@ function CompletedSessionCard({ session, providerName }: CompletedSessionCardPro
               Completed
             </span>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-              {getSessionTypeLabel(session.sessionType)}
+              {serviceTypeLabel}
             </span>
-            {session.subject && (
+            {topicLabel && (
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                {session.subject}
+                {topicLabel}
               </span>
             )}
           </div>
           
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">
-            {providerName}
-          </h3>
+          <div className="mb-2 flex items-center gap-3">
+            <ProviderAvatar name={providerName} imageUrl={providerProfileImageUrl ?? undefined} />
+            <h3 className="text-lg font-semibold text-gray-900">{providerName}</h3>
+          </div>
+          {(subject || topic) && (
+            <div className="space-y-0.5">
+              {subject && <div className="text-sm text-gray-700">{`${serviceTypeLabel} • ${subject}`}</div>}
+              {topic && <span className="text-sm text-gray-600">Topic: {topic}</span>}
+            </div>
+          )}
           
           <div className="mt-2 flex items-center gap-4 text-sm text-gray-600">
             <div className="flex items-center gap-1">
@@ -290,50 +320,55 @@ function CompletedSessionCard({ session, providerName }: CompletedSessionCardPro
 export default function CompletedSessionsSection() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
-  const [providerNames, setProviderNames] = useState<Record<string, string>>({});
+  const lastJsonRef = useRef<string>('');
+  const didInitialLoadRef = useRef<boolean>(false);
 
   useEffect(() => {
     const fetchSessions = async () => {
-      setLoading(true);
       try {
-        const { userId } = await getCurrentUserId();
-        if (!userId) {
-          setSessions([]);
-          setLoading(false);
+        const res = await fetch('/api/sessions/all?role=student', { method: 'GET' });
+        if (!res.ok) {
+          if (!didInitialLoadRef.current) setSessions([]);
           return;
         }
+        const data = await res.json();
+        const allFromApi = Array.isArray(data?.sessions) ? (data.sessions as any[]) : [];
+        const getStartMs = (s: any) => {
+          const iso = s?.scheduledStartTime || s?.scheduledStart;
+          const t = iso ? new Date(iso).getTime() : NaN;
+          return Number.isFinite(t) ? t : 0;
+        };
+        const nowMs = Date.now();
+        const completedSessions = allFromApi
+          .filter((s) => isSessionCompleted(s, nowMs))
+          .sort((a, b) => {
+            const ea = getSessionEndTimeMs(a) ?? 0;
+            const eb = getSessionEndTimeMs(b) ?? 0;
+            if (eb !== ea) return eb - ea;
+            return getStartMs(b) - getStartMs(a);
+          });
 
-        const allCompletedSessions = getDevCompletedSessionsByStudentId(userId);
-        // Filter to only show sessions with status 'completed' per requirements
-        const completedSessions = allCompletedSessions.filter(s => s.status === 'completed');
-        setSessions(completedSessions);
-
-        // Fetch provider names
-        const names: Record<string, string> = {};
-        for (const session of completedSessions) {
-          if (!names[session.providerId]) {
-            try {
-              const { name } = await getUserNameById(session.providerId);
-              names[session.providerId] = name || 'Unknown Provider';
-            } catch (error) {
-              console.error(`Error fetching provider ${session.providerId}:`, error);
-              names[session.providerId] = 'Unknown Provider';
-            }
-          }
+        const nextStr = JSON.stringify(completedSessions);
+        const changed = nextStr !== lastJsonRef.current;
+        if (changed) {
+          lastJsonRef.current = nextStr;
+          setSessions(completedSessions);
         }
-        setProviderNames(names);
       } catch (error) {
         console.error('Error fetching completed sessions:', error);
-        setSessions([]);
+        if (!didInitialLoadRef.current) setSessions([]);
       } finally {
-        setLoading(false);
+        if (!didInitialLoadRef.current) {
+          didInitialLoadRef.current = true;
+          setLoading(false);
+        }
       }
     };
 
-    fetchSessions();
+    fetchSessions().catch(() => {});
     
-    // Refresh every second to catch updates
-    const interval = setInterval(fetchSessions, 1000);
+    // Refresh periodically to catch updates
+    const interval = setInterval(fetchSessions, 20000);
     return () => clearInterval(interval);
   }, []);
 
@@ -345,7 +380,7 @@ export default function CompletedSessionsSection() {
           Review and rebook your past sessions
         </p>
       </div>
-      <div className="p-6">
+      <div className="p-6 min-h-[220px]">
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
@@ -374,12 +409,13 @@ export default function CompletedSessionsSection() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[520px] overflow-auto">
             {sessions.map((session) => (
               <CompletedSessionCard
                 key={session.id}
                 session={session}
-                providerName={providerNames[session.providerId] || 'Unknown Provider'}
+                providerName={String((session as any)?.providerName || '')}
+                providerProfileImageUrl={(session as any)?.providerProfileImage ?? null}
               />
             ))}
           </div>

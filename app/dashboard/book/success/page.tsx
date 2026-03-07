@@ -3,8 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { addDevSession } from '@/lib/devSessionStore';
-import { Session } from '@/lib/models/types';
+import { formatUsdFromCents } from '@/lib/pricing/catalog';
 
 export default function BookingSuccessPage() {
   const searchParams = useSearchParams();
@@ -13,57 +12,37 @@ export default function BookingSuccessPage() {
   const [error, setError] = useState<string | null>(null);
   const sessionId = searchParams.get('session_id');
   const paymentIntentId = searchParams.get('payment_intent');
+  const [checkoutBreakdown, setCheckoutBreakdown] = useState<{
+    amount_subtotal: number | null;
+    tax_amount: number | null;
+    amount_total: number | null;
+    currency: string | null;
+  } | null>(null);
 
   useEffect(() => {
     const handlePaymentSuccess = async () => {
       try {
-        // Load booking state from localStorage
-        const stored = localStorage.getItem('ivyway_booking_state');
-        if (!stored) {
-          console.warn('No booking state found');
-          setStatus('success');
-          return;
+        // Clear booking state; session persistence happens server-side via Stripe webhook
+        localStorage.removeItem('ivyway_booking_state');
+        // If we have a Checkout Session id, fetch Stripe-calculated tax breakdown for display.
+        if (sessionId) {
+          try {
+            const res = await fetch(`/api/checkout-session?session_id=${encodeURIComponent(sessionId)}`, {
+              method: 'GET',
+            });
+            if (res.ok) {
+              const data = await res.json();
+              setCheckoutBreakdown({
+                amount_subtotal: typeof data?.amount_subtotal === 'number' ? data.amount_subtotal : null,
+                tax_amount: typeof data?.tax_amount === 'number' ? data.tax_amount : null,
+                amount_total: typeof data?.amount_total === 'number' ? data.amount_total : null,
+                currency: typeof data?.currency === 'string' ? data.currency : null,
+              });
+            }
+          } catch {
+            // ignore (we still show success)
+          }
         }
-
-        const bookingState = JSON.parse(stored);
-        
-        // Convert date strings back to Date objects
-        if (bookingState.selectedSessions) {
-          bookingState.selectedSessions = bookingState.selectedSessions.map((session: any) => ({
-            ...session,
-            date: new Date(session.date),
-          }));
-        }
-
-        // Create sessions and Zoom meetings via API
-        const response = await fetch('/api/create-sessions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ bookingState }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          console.error('Failed to create sessions:', errorData);
-          // Don't fail the payment success page, just log the error
-          setStatus('success');
-          return;
-        }
-
-        const data = await response.json();
-        
-        if (data.success && data.sessions) {
-          // Store sessions in localStorage
-          data.sessions.forEach((session: Session) => {
-            addDevSession(session);
-          });
-
-          // Clear booking state
-          localStorage.removeItem('ivyway_booking_state');
-        }
-
         setStatus('success');
       } catch (err) {
         console.error('Error processing payment success:', err);
@@ -117,6 +96,41 @@ export default function BookingSuccessPage() {
             <p className="text-sm text-gray-600 mb-6">
               Your booking has been confirmed. You will receive a confirmation email shortly.
             </p>
+
+            {checkoutBreakdown && (
+              <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-left">
+                <div className="text-sm font-semibold text-gray-900 mb-2">Receipt</div>
+                <div className="space-y-2 text-sm text-gray-700">
+                  <div className="flex items-center justify-between">
+                    <span>Service price</span>
+                    <span>
+                      {typeof checkoutBreakdown.amount_subtotal === 'number'
+                        ? formatUsdFromCents(checkoutBreakdown.amount_subtotal)
+                        : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Tax</span>
+                    <span>
+                      {typeof checkoutBreakdown.tax_amount === 'number'
+                        ? formatUsdFromCents(checkoutBreakdown.tax_amount)
+                        : 'Calculated at checkout'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-gray-200 pt-2 mt-2 font-semibold text-gray-900">
+                    <span>Total</span>
+                    <span>
+                      {typeof checkoutBreakdown.amount_total === 'number'
+                        ? formatUsdFromCents(checkoutBreakdown.amount_total)
+                        : (typeof checkoutBreakdown.amount_subtotal === 'number'
+                          ? formatUsdFromCents(checkoutBreakdown.amount_subtotal)
+                          : '—')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3">
               <Link
                 href="/dashboard/book"
@@ -175,3 +189,4 @@ export default function BookingSuccessPage() {
     </div>
   );
 }
+

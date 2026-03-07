@@ -39,7 +39,6 @@ interface CreateZoomMeetingParams {
   topic: string;
   startTime: string; // ISO 8601 datetime string
   duration: number; // Duration in minutes
-  hostEmail: string; // Provider's email address
 }
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -104,12 +103,8 @@ async function getZoomAccessToken(): Promise<string> {
  */
 export async function createZoomMeeting(
   params: CreateZoomMeetingParams
-): Promise<{ joinUrl: string; meetingId: string }> {
+): Promise<{ joinUrl: string; startUrl: string; meetingId: string }> {
   const accessToken = await getZoomAccessToken();
-
-  // Get the host user ID from their email
-  // Note: In production, you might want to cache this mapping
-  const hostUserId = await getZoomUserIdByEmail(params.hostEmail, accessToken);
 
   const meetingData = {
     topic: params.topic,
@@ -120,7 +115,8 @@ export async function createZoomMeeting(
     settings: {
       host_video: true,
       participant_video: true,
-      join_before_host: false,
+      // Single IvyWay Zoom account: participants must be able to join without the host.
+      join_before_host: true,
       mute_upon_entry: false,
       watermark: false,
       approval_type: 0, // Automatically approve
@@ -130,7 +126,9 @@ export async function createZoomMeeting(
   };
 
   try {
-    const response = await fetch(`https://api.zoom.us/v2/users/${hostUserId}/meetings`, {
+    // Always create meetings under the authenticated Zoom account owner.
+    // We explicitly do NOT map IvyWay providers to Zoom users.
+    const response = await fetch(`https://api.zoom.us/v2/users/me/meetings`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -148,50 +146,11 @@ export async function createZoomMeeting(
 
     return {
       joinUrl: meeting.join_url,
+      startUrl: meeting.start_url,
       meetingId: meeting.id.toString(),
     };
   } catch (error) {
     console.error('Error creating Zoom meeting:', error);
-    throw error;
-  }
-}
-
-/**
- * Get Zoom user ID by email address
- * This is needed to create meetings on behalf of the host
- */
-async function getZoomUserIdByEmail(email: string, accessToken: string): Promise<string> {
-  try {
-    const response = await fetch(`https://api.zoom.us/v2/users/${encodeURIComponent(email)}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      // If user lookup fails, try using the account ID as fallback
-      // Some Zoom setups allow creating meetings directly with account ID
-      const accountId = process.env.ZOOM_ACCOUNT_ID;
-      if (accountId) {
-        console.warn(`Could not find Zoom user for email ${email}, using account ID as fallback`);
-        return accountId;
-      }
-      const errorText = await response.text();
-      throw new Error(`Failed to get Zoom user ID: ${response.status} ${errorText}`);
-    }
-
-    const user = await response.json();
-    return user.id;
-  } catch (error) {
-    console.error('Error getting Zoom user ID:', error);
-    // Fallback to account ID if available
-    const accountId = process.env.ZOOM_ACCOUNT_ID;
-    if (accountId) {
-      console.warn(`Using account ID as fallback for email ${email}`);
-      return accountId;
-    }
     throw error;
   }
 }

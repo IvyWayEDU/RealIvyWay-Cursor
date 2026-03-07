@@ -2,7 +2,7 @@
 
 import { useSearchParams, useRouter } from "next/navigation"
 import Image from "next/image"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { login } from "@/lib/auth/actions"
 import Link from "next/link"
 
@@ -10,8 +10,15 @@ export default function LoginClient() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const next = searchParams.get("next")
+  const errorParam = searchParams.get("error")
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (errorParam === "suspended") {
+      setError("This account has been suspended. Please contact support for assistance.")
+    }
+  }, [errorParam])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()

@@ -1,14 +1,23 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Session } from '@/lib/auth/types';
+import { useSearchParams } from 'next/navigation';
+import { getUserDisplayInfoById } from '@/lib/sessions/actions';
+import {
+  getConversationMessages,
+  getInboxConversations,
+  sendMessage,
+} from '@/lib/messages/actions';
 
 interface Message {
   id: string;
+  conversationId: string;
   senderId: string;
-  senderName: string;
+  recipientId: string;
+  createdAt: string;
   text: string;
-  timestamp: Date;
+  senderName: string;
 }
 
 interface Conversation {
@@ -25,147 +34,6 @@ interface MessagesClientProps {
   session: Session;
   userRole: 'student' | 'provider';
 }
-
-// Mock conversations data
-const getMockConversations = (userId: string, userRole: 'student' | 'provider'): Conversation[] => {
-  if (userRole === 'student') {
-    return [
-      {
-        id: '1',
-        participantId: 'tutor1',
-        participantName: 'Dr. Sarah Chen',
-        serviceType: 'Tutoring',
-        lastMessage: 'Great work on the practice problems! Let\'s review the next chapter.',
-        lastMessageTime: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-        unreadCount: 0,
-      },
-      {
-        id: '2',
-        participantId: 'counselor1',
-        participantName: 'Michael Rodriguez',
-        serviceType: 'Counseling',
-        lastMessage: 'I\'ve reviewed your application materials. They look strong!',
-        lastMessageTime: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-        unreadCount: 2,
-      },
-      {
-        id: '3',
-        participantId: 'tutor2',
-        participantName: 'Prof. James Wilson',
-        serviceType: 'Test Prep',
-        lastMessage: 'The SAT practice test results are in. We can go over them in our next session.',
-        lastMessageTime: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-        unreadCount: 0,
-      },
-    ];
-  } else {
-    // Provider view
-    return [
-      {
-        id: '1',
-        participantId: 'student1',
-        participantName: 'Emma Thompson',
-        serviceType: 'Tutoring',
-        lastMessage: 'Thank you for the help with calculus! I understand it much better now.',
-        lastMessageTime: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1 hour ago
-        unreadCount: 0,
-      },
-      {
-        id: '2',
-        participantId: 'student2',
-        participantName: 'Alex Johnson',
-        serviceType: 'Test Prep',
-        lastMessage: 'Can we schedule an extra session before the exam?',
-        lastMessageTime: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
-        unreadCount: 1,
-      },
-      {
-        id: '3',
-        participantId: 'student3',
-        participantName: 'Maya Patel',
-        serviceType: 'Counseling',
-        lastMessage: 'I have a question about the essay requirements.',
-        lastMessageTime: new Date(Date.now() - 12 * 60 * 60 * 1000), // 12 hours ago
-        unreadCount: 0,
-      },
-    ];
-  }
-};
-
-// Mock messages for a conversation
-const getMockMessages = (conversationId: string, userId: string, participantId: string, userRole: 'student' | 'provider'): Message[] => {
-  const isStudent = userRole === 'student';
-  const messages: Message[] = [
-    {
-      id: '1',
-      senderId: participantId,
-      senderName: conversationId === '1' ? (isStudent ? 'Dr. Sarah Chen' : 'Emma Thompson') : 'Michael Rodriguez',
-      text: conversationId === '1' 
-        ? 'Hello! I\'m looking forward to working with you.' 
-        : 'Hi there! How can I help you today?',
-      timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // 7 days ago
-    },
-    {
-      id: '2',
-      senderId: userId,
-      senderName: 'You',
-      text: conversationId === '1'
-        ? 'Thank you! I\'m excited to get started.'
-        : 'I have some questions about my application.',
-      timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), // 6 days ago
-    },
-    {
-      id: '3',
-      senderId: participantId,
-      senderName: conversationId === '1' ? (isStudent ? 'Dr. Sarah Chen' : 'Emma Thompson') : 'Michael Rodriguez',
-      text: conversationId === '1'
-        ? 'Great! Let\'s schedule our first session. What times work best for you?'
-        : 'Of course! I\'d be happy to help. What would you like to know?',
-      timestamp: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
-    },
-    {
-      id: '4',
-      senderId: userId,
-      senderName: 'You',
-      text: conversationId === '1'
-        ? 'I\'m available most afternoons after 3 PM.'
-        : 'I\'m wondering about the essay requirements and deadlines.',
-      timestamp: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000), // 4 days ago
-    },
-    {
-      id: '5',
-      senderId: participantId,
-      senderName: conversationId === '1' ? (isStudent ? 'Dr. Sarah Chen' : 'Emma Thompson') : 'Michael Rodriguez',
-      text: conversationId === '1'
-        ? 'Perfect! I have availability this Thursday at 4 PM. Does that work?'
-        : 'The essay requirements are detailed in the application portal. The deadline is typically in early January.',
-      timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
-    },
-    {
-      id: '6',
-      senderId: userId,
-      senderName: 'You',
-      text: conversationId === '1'
-        ? 'Yes, that works perfectly! See you then.'
-        : 'Thank you for the information. I\'ll check the portal.',
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-    },
-  ];
-
-  // Add the last message from the conversation
-  const conversation = getMockConversations(userId, userRole).find(c => c.id === conversationId);
-  if (conversation) {
-    messages.push({
-      id: '7',
-      senderId: conversation.participantId,
-      senderName: conversation.participantName,
-      text: conversation.lastMessage,
-      timestamp: conversation.lastMessageTime,
-    });
-  }
-
-  return messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-};
 
 const formatTime = (date: Date): string => {
   const now = new Date();
@@ -204,45 +72,253 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const conversations = getMockConversations(session.userId, userRole);
+  const searchParams = useSearchParams();
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [participantImageUrls, setParticipantImageUrls] = useState<Record<string, string | null>>({});
+  const [draftParticipantId, setDraftParticipantId] = useState<string | null>(null);
+  const [draftParticipantName, setDraftParticipantName] = useState<string>('User');
+  const [draftParticipantImageUrl, setDraftParticipantImageUrl] = useState<string | null>(null);
+  const isRefreshingRef = useRef(false);
+  const lastSelectedRef = useRef<string | null>(null);
+
+  function UserAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
+    const [imageError, setImageError] = useState(false);
+    const initial = (name?.trim()?.[0] || 'U').toUpperCase();
+    const showImage = !!imageUrl && !imageError;
+
+    return showImage ? (
+      <img
+        src={imageUrl as string}
+        alt={name}
+        className="h-8 w-8 rounded-full object-cover"
+        onError={() => setImageError(true)}
+      />
+    ) : (
+      <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
+        <span className="text-gray-700 text-sm font-semibold">{initial}</span>
+      </div>
+    );
+  }
+
+  // Keep local conversations in sync with role/user changes (UI-only)
+  useEffect(() => {
+    setSelectedConversationId(null);
+    setMessages([]);
+    setDraftParticipantId(null);
+    setParticipantImageUrls({});
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const inbox = await getInboxConversations(session.userId);
+        if (cancelled) return;
+        setConversations(
+          inbox.map((c) => ({
+            id: c.id,
+            participantId: c.participantId,
+            participantName: c.participantName,
+            serviceType: c.serviceType,
+            lastMessage: c.lastMessage,
+            lastMessageTime: new Date(c.lastMessageTime),
+            unreadCount: c.unreadCount,
+          }))
+        );
+      } catch {
+        // keep empty state
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session.userId, userRole]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleConversationSelect = (conversationId: string) => {
+  // Hydrate participant avatars (best-effort, UI-only)
+  useEffect(() => {
+    const ids = Array.from(new Set(conversations.map((c) => c.participantId).filter(Boolean)));
+    if (ids.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      const next: Record<string, string | null> = {};
+      for (const id of ids) {
+        try {
+          const { profileImageUrl } = await getUserDisplayInfoById(id);
+          next[id] = profileImageUrl ?? null;
+        } catch {
+          next[id] = null;
+        }
+      }
+      if (!cancelled) setParticipantImageUrls((prev) => ({ ...prev, ...next }));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversations]);
+
+  const refreshInboxAndMaybeMessages = useCallback(
+    async (opts?: { refreshMessagesForConversationId?: string | null }) => {
+      if (isRefreshingRef.current) return;
+      isRefreshingRef.current = true;
+      try {
+        const inbox = await getInboxConversations(session.userId);
+        setConversations(
+          inbox.map((c) => ({
+            id: c.id,
+            participantId: c.participantId,
+            participantName: c.participantName,
+            serviceType: c.serviceType,
+            lastMessage: c.lastMessage,
+            lastMessageTime: new Date(c.lastMessageTime),
+            unreadCount: c.unreadCount,
+          }))
+        );
+
+        const convoId = opts?.refreshMessagesForConversationId ?? null;
+        if (convoId) {
+          const dto = await getConversationMessages(convoId);
+          const convo = inbox.find((c) => c.id === convoId);
+          const participantName = convo?.participantName || 'User';
+          setMessages(
+            dto.map((m) => ({
+              id: m.id,
+              conversationId: m.conversationId,
+              senderId: m.senderId,
+              recipientId: m.recipientId,
+              createdAt: m.createdAt,
+              text: m.text,
+              senderName: m.senderId === session.userId ? 'You' : participantName,
+            }))
+          );
+        }
+      } finally {
+        isRefreshingRef.current = false;
+      }
+    },
+    [session.userId]
+  );
+
+  // Light polling so both sides see updates without a full refresh.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const active = lastSelectedRef.current;
+      refreshInboxAndMaybeMessages({ refreshMessagesForConversationId: active });
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [refreshInboxAndMaybeMessages]);
+
+  const handleConversationSelect = async (conversationId: string) => {
     setSelectedConversationId(conversationId);
+    lastSelectedRef.current = conversationId;
+    setDraftParticipantId(null);
     const conversation = conversations.find(c => c.id === conversationId);
     if (conversation) {
-      const conversationMessages = getMockMessages(conversationId, session.userId, conversation.participantId, userRole);
-      setMessages(conversationMessages);
+      try {
+        const dto = await getConversationMessages(conversationId);
+        setMessages(
+          dto.map((m) => ({
+            id: m.id,
+            conversationId: m.conversationId,
+            senderId: m.senderId,
+            recipientId: m.recipientId,
+            createdAt: m.createdAt,
+            text: m.text,
+            senderName: m.senderId === session.userId ? 'You' : conversation.participantName,
+          }))
+        );
+      } catch {
+        setMessages([]);
+      }
     }
   };
 
-  const handleSendMessage = () => {
-    if (!inputValue.trim() || !selectedConversationId) return;
+  // If /dashboard/messages?userId=<otherUserId> is provided, auto-open that conversation (or open a draft).
+  useEffect(() => {
+    const targetUserId = (searchParams?.get('userId') || '').trim();
+    if (!targetUserId) return;
 
-    const conversation = conversations.find(c => c.id === selectedConversationId);
-    if (!conversation) return;
+    const existing = conversations.find((c) => c.participantId === targetUserId);
+    if (existing) {
+      if (selectedConversationId !== existing.id) handleConversationSelect(existing.id);
+      return;
+    }
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
+    // No existing conversation: open a draft chat UI; do NOT create a conversation until first send.
+    if (draftParticipantId !== targetUserId) {
+      setSelectedConversationId(null);
+      setMessages([]);
+      setDraftParticipantId(targetUserId);
+      setDraftParticipantName('User');
+      setDraftParticipantImageUrl(null);
+
+      (async () => {
+        try {
+          const { displayName, profileImageUrl } = await getUserDisplayInfoById(targetUserId);
+          setDraftParticipantName(displayName || 'User');
+          setDraftParticipantImageUrl(profileImageUrl ?? null);
+        } catch {
+          // ignore; keep fallback UI
+        }
+      })();
+    }
+  }, [searchParams, conversations, selectedConversationId, draftParticipantId]);
+
+  const handleSendMessage = async () => {
+    if (!inputValue.trim()) return;
+
+    const text = inputValue.trim();
+    const recipientId = selectedConversationId
+      ? conversations.find((c) => c.id === selectedConversationId)?.participantId
+      : draftParticipantId;
+
+    if (!recipientId) return;
+
+    setSendError(null);
+
+    // Optimistic UI append
+    const optimisticId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const optimisticCreatedAt = new Date().toISOString();
+    const optimisticConversationId = selectedConversationId || `pending_${recipientId}`;
+    const optimistic: Message = {
+      id: optimisticId,
+      conversationId: optimisticConversationId,
       senderId: session.userId,
+      recipientId,
+      createdAt: optimisticCreatedAt,
+      text,
       senderName: 'You',
-      text: inputValue.trim(),
-      timestamp: new Date(),
     };
-
-    setMessages([...messages, newMessage]);
+    setMessages((prev) => [...prev, optimistic]);
     setInputValue('');
 
-    // Update the conversation's last message
-    const updatedConversation = conversations.find(c => c.id === selectedConversationId);
-    if (updatedConversation) {
-      updatedConversation.lastMessage = inputValue.trim();
-      updatedConversation.lastMessageTime = new Date();
+    try {
+      const res = await sendMessage({ senderId: session.userId, recipientId, text });
+      const actualConversationId = res.conversationId;
+
+      if (!selectedConversationId) {
+        setSelectedConversationId(actualConversationId);
+        lastSelectedRef.current = actualConversationId;
+        setDraftParticipantId(null);
+      }
+
+      // Revalidate inbox + messages so both users converge on the same persisted state.
+      await refreshInboxAndMaybeMessages({ refreshMessagesForConversationId: actualConversationId });
+    } catch (err: any) {
+      // Remove the optimistic message so blocked sends don't linger (draft chats won't auto-reconcile).
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      setInputValue(text);
+      const msg =
+        (typeof err?.message === 'string' && err.message.trim()) ||
+        'Message could not be sent. Please try again.';
+      setSendError(msg);
     }
   };
 
@@ -256,6 +332,17 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
   const selectedConversation = selectedConversationId
     ? conversations.find(c => c.id === selectedConversationId)
     : null;
+
+  const activeParticipantName = selectedConversation
+    ? selectedConversation.participantName
+    : draftParticipantId
+      ? draftParticipantName
+      : null;
+  const activeParticipantImageUrl = selectedConversation
+    ? participantImageUrls[selectedConversation.participantId]
+    : draftParticipantId
+      ? draftParticipantImageUrl
+      : null;
 
   return (
     <div className="h-[calc(100vh-16rem)] flex rounded-lg bg-white shadow-sm border border-gray-200 overflow-hidden">
@@ -279,31 +366,34 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
             <div className="divide-y divide-gray-200">
               {conversations.map((conversation) => {
                 const isSelected = selectedConversationId === conversation.id;
+                const unreadCount = Number(conversation.unreadCount ?? 0) || 0;
                 return (
                   <button
                     key={conversation.id}
                     onClick={() => handleConversationSelect(conversation.id)}
-                    className={`w-full px-6 py-4 text-left hover:bg-gray-50 transition-colors ${
-                      isSelected ? 'bg-[#0088CB] bg-opacity-10 border-l-4 border-[#0088CB]' : ''
+                    className={`w-full px-6 py-4 text-left transition-colors border-l-4 ${
+                      isSelected
+                        ? 'bg-gray-50 border-[#0088CB]'
+                        : 'border-transparent hover:bg-gray-50'
                     }`}
                   >
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <UserAvatar
+                        name={conversation.participantName}
+                        imageUrl={participantImageUrls[conversation.participantId]}
+                      />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <h3 className={`text-sm font-semibold truncate ${
-                            isSelected ? 'text-[#0088CB]' : 'text-gray-900'
-                          }`}>
+                          <h3 className="text-sm font-semibold truncate text-gray-900">
                             {conversation.participantName}
                           </h3>
-                          {conversation.unreadCount && conversation.unreadCount > 0 && !isSelected && (
+                          {unreadCount > 0 && !isSelected && (
                             <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#0088CB] text-white text-xs font-medium flex items-center justify-center">
-                              {conversation.unreadCount}
+                              {unreadCount}
                             </span>
                           )}
                         </div>
-                        <p className={`mt-1 text-xs font-medium ${
-                          isSelected ? 'text-[#0088CB]' : 'text-gray-500'
-                        }`}>
+                        <p className="mt-1 text-xs font-medium text-gray-500">
                           {conversation.serviceType}
                         </p>
                         <p className={`mt-2 text-sm truncate ${
@@ -328,14 +418,21 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
 
       {/* Right Panel - Chat Window */}
       <div className="flex-1 flex flex-col">
-        {selectedConversation ? (
+        {selectedConversation || draftParticipantId ? (
           <>
             {/* Chat Header */}
             <div className="px-6 py-4 border-b border-gray-200 bg-white">
               <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">{selectedConversation.participantName}</h3>
-                  <p className="text-sm text-gray-500">{selectedConversation.serviceType}</p>
+                <div className="flex items-center gap-3">
+                  <UserAvatar name={activeParticipantName || 'User'} imageUrl={activeParticipantImageUrl} />
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {activeParticipantName || 'User'}
+                    </h3>
+                    <p className="text-sm text-gray-500">
+                      {selectedConversation ? selectedConversation.serviceType : 'New conversation'}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -348,7 +445,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                   const showAvatar = index === 0 || messages[index - 1].senderId !== message.senderId;
                   const showTime = index === messages.length - 1 || 
                     messages[index + 1].senderId !== message.senderId ||
-                    new Date(messages[index + 1].timestamp).getTime() - new Date(message.timestamp).getTime() > 5 * 60 * 1000; // 5 minutes
+                    new Date(messages[index + 1].createdAt).getTime() - new Date(message.createdAt).getTime() > 5 * 60 * 1000; // 5 minutes
 
                   return (
                     <div
@@ -385,7 +482,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                           <span className={`text-xs mt-1 ${
                             isOwnMessage ? 'text-gray-500' : 'text-gray-400'
                           }`}>
-                            {formatMessageTime(message.timestamp)}
+                            {formatMessageTime(new Date(message.createdAt))}
                           </span>
                         )}
                       </div>
@@ -409,6 +506,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                     value={inputValue}
                     onChange={(e) => {
                       setInputValue(e.target.value);
+                      if (sendError) setSendError(null);
                       // Auto-resize textarea
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
@@ -419,6 +517,11 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent resize-none text-sm overflow-y-auto"
                     style={{ minHeight: '44px', maxHeight: '120px' }}
                   />
+                  {sendError && (
+                    <p className="mt-2 text-sm text-red-600">
+                      {sendError}
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={handleSendMessage}

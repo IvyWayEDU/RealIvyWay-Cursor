@@ -20,6 +20,48 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Pricing + Stripe (Source of Truth)
+
+- Pricing/payouts are defined **only** in `lib/pricing/catalog.ts` (integer cents).
+- Checkout selects Stripe **Price IDs** by pricing key and must use Stripe Tax so the customer pays: **service price (catalog)** + **Stripe-calculated tax**.
+- Stripe `amount_subtotal` must match `purchase_price_cents` from the catalog (base price), while `amount_total` includes tax.
+- Provider earnings are derived from **`provider_payout_cents`** (never from Stripe charge minus fees).
+
+### Required environment variables
+
+- `STRIPE_SECRET_KEY`: Stripe secret key
+- `STRIPE_WEBHOOK_SECRET`: Stripe webhook secret
+- `STRIPE_PRICE_IDS_JSON`: JSON map from pricing key → Stripe `price_...` id.
+- `NEXT_PUBLIC_BASE_URL`: Base URL for redirects (e.g. `http://localhost:3000` in dev, your production URL in prod)
+- `STRIPE_TAX_CODE_EDUCATION` (optional): Stripe Tax code to apply to education services products.
+- `STRIPE_TAX_CODE_DIGITAL` (optional): Stripe Tax code to apply to digital services products (AI plans).
+
+Example:
+
+`STRIPE_PRICE_IDS_JSON='{"counseling_single":"price_123","counseling_monthly":"price_456","tutoring_single":"price_789"}'`
+
+### Rebuild Stripe Products/Prices (one-time)
+
+Run (with network access):
+
+```bash
+npm run stripe:rebuild-prices
+```
+
+This prints an updated `STRIPE_PRICE_IDS_JSON=...` value to paste into your environment.
+
+### Validate pricing (local)
+
+```bash
+npm run pricing:validate
+```
+
+### Backfill historical session money fields (one-time)
+
+```bash
+npm run pricing:backfill
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

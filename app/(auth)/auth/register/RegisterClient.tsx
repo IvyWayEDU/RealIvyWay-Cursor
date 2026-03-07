@@ -11,21 +11,27 @@ export default function RegisterClient() {
   const router = useRouter()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [selectedRole, setSelectedRole] = useState<'student' | 'provider' | null>(null)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setIsSubmitting(true)
     setError(null)
 
+    if (!selectedRole) {
+      setError('Please select a role')
+      setIsSubmitting(false)
+      return
+    }
+
     const formData = new FormData(e.currentTarget)
     const name = formData.get("name") as string
     const email = formData.get("email") as string
     const password = formData.get("password") as string
 
-    // Default to student role for simplicity - can be enhanced later
-    const roles: UserRole[] = ["student"]
+    const roles: UserRole[] = [selectedRole]
 
-    const result = await signup(name, email, password, roles)
+    const result = await signup(name, email, password, roles, selectedRole)
 
     if (result.success && result.redirectTo) {
       router.push(result.redirectTo)
@@ -144,6 +150,39 @@ export default function RegisterClient() {
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
                     placeholder="Enter your email"
                   />
+                </div>
+              </div>
+
+              {/* Role Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  I am a... <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-3">
+                  <label className="flex items-center p-3 border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="role"
+                      value="student"
+                      checked={selectedRole === 'student'}
+                      onChange={(e) => setSelectedRole(e.target.value as 'student' | 'provider')}
+                      className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300"
+                      required
+                    />
+                    <span className="ml-3 text-base text-gray-900">Student</span>
+                  </label>
+                  <label className="flex items-center p-3 border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="radio"
+                      name="role"
+                      value="provider"
+                      checked={selectedRole === 'provider'}
+                      onChange={(e) => setSelectedRole(e.target.value as 'student' | 'provider')}
+                      className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300"
+                      required
+                    />
+                    <span className="ml-3 text-base text-gray-900">Tutor or Counselor</span>
+                  </label>
                 </div>
               </div>
 

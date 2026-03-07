@@ -1,0 +1,20 @@
+[
+  {
+    "id": "notif_1766453431788_4qgz0mabz",
+    "userId": "00326fe0-3b6b-4ea8-ad2f-994149bf1018",
+    "message": "You earned $15 in referral credits!",
+    "type": "success",
+    "createdAt": "2025-12-23T01:30:31.788Z",
+    "dismissed": true,
+    "dismissedAt": "2025-12-23T01:42:35.954Z"
+  },
+  {
+    "id": "notif_1766453431791_oj3331j6d",
+    "userId": "5da29f0e-3d2c-40c1-85f3-18778cd13331",
+    "message": "You received $10 in referral credits!",
+    "type": "success",
+    "createdAt": "2025-12-23T01:30:31.791Z",
+    "dismissed": true,
+    "dismissedAt": "2025-12-23T01:37:09.105Z"
+  }
+]

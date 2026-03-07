@@ -6,14 +6,23 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pricing:validate": "tsc -p tsconfig.scripts.json && node .scripts-build/scripts/validate-pricing.js",
+    "pricing:backfill": "tsc -p tsconfig.scripts.json && node .scripts-build/scripts/backfill-pricing.js",
+    "stripe:rebuild-prices": "tsc -p tsconfig.scripts.json && node .scripts-build/scripts/stripe-rebuild-prices.js",
+    "tax:validate-booking": "tsc -p tsconfig.scripts.json && node .scripts-build/scripts/validate-tax-booking.js",
+    "schools:audit-providers": "tsc -p tsconfig.scripts.json && node .scripts-build/scripts/audit-provider-schools.js",
+    "schools:fix-providers": "tsc -p tsconfig.scripts.json && node .scripts-build/scripts/audit-provider-schools.js --fix"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^5.4.1",
     "@stripe/stripe-js": "^8.6.0",
+    "lucide-react": "^0.542.0",
     "next": "16.0.10",
+    "openai": "^4.104.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
+    "resend": "^4.8.0",
     "stripe": "^20.1.0"
   },
   "devDependencies": {

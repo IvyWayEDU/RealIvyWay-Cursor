@@ -15,50 +15,55 @@ function safeParse(json: string | null): Session[] {
 
 export function getDevSessions(): Session[] {
   if (typeof window === 'undefined') return [];
-  return safeParse(window.localStorage.getItem(STORAGE_KEY));
+  // STRICT BOOKING FLOW / FULL RESET:
+  // Do not use localStorage for session storage. Sessions are persisted server-side via Stripe webhook.
+  // We also proactively wipe any leftover dev sessions so the app behaves like zero sessions exist.
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+  return [];
 }
 
 export function setDevSessions(sessions: Session[]) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+  // Disabled (see getDevSessions)
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 export function addDevSession(session: Session) {
-  const sessions = getDevSessions();
-  sessions.push(session);
-  setDevSessions(sessions);
+  // Disabled (see getDevSessions)
+  void session;
 }
 
 export function upsertDevSession(session: Session) {
-  const sessions = getDevSessions();
-  const idx = sessions.findIndex(s => s.id === session.id);
-  if (idx >= 0) sessions[idx] = session;
-  else sessions.push(session);
-  setDevSessions(sessions);
+  // Disabled (see getDevSessions)
+  void session;
 }
 
 export function updateDevSession(id: string, patch: Partial<Session>) {
-  const sessions = getDevSessions();
-  const idx = sessions.findIndex(s => s.id === id);
-  if (idx < 0) return;
-  sessions[idx] = { ...sessions[idx], ...patch };
-  setDevSessions(sessions);
+  // Disabled (see getDevSessions)
+  void id;
+  void patch;
 }
 
 
 export function getDevPaidSessionsByStudentId(studentId: string): Session[] {
   const sessions = getDevSessions();
-  // Include both 'scheduled' (automatically confirmed at booking) and 'paid' (legacy) statuses
   return sessions.filter(
-    s => s.studentId === studentId && (s.status === 'paid' || s.status === 'scheduled')
+    s => s.studentId === studentId && s.status === 'upcoming'
   );
 }
 
 export function getDevPaidSessionsByProviderId(providerId: string): Session[] {
   const sessions = getDevSessions();
-  // Include both 'scheduled' (automatically confirmed at booking) and 'paid' (legacy) statuses
   return sessions.filter(
-    s => s.providerId === providerId && (s.status === 'paid' || s.status === 'scheduled')
+    s => s.providerId === providerId && s.status === 'upcoming'
   );
 }
 
@@ -67,11 +72,9 @@ export function getDevPaidSessionsByProviderId(providerId: string): Session[] {
  */
 export function getDevUpcomingSessionsByStudentId(studentId: string): Session[] {
   const sessions = getDevSessions();
-  const now = new Date();
   return sessions.filter(
     s => s.studentId === studentId 
-      && (s.status === 'paid' || s.status === 'scheduled')
-      && new Date(s.scheduledStartTime) > now
+      && s.status === 'upcoming'
   );
 }
 
@@ -92,11 +95,9 @@ export function getDevCompletedSessionsByStudentId(studentId: string): Session[]
  */
 export function getDevUpcomingSessionsByProviderId(providerId: string): Session[] {
   const sessions = getDevSessions();
-  const now = new Date();
   return sessions.filter(
     s => s.providerId === providerId 
-      && (s.status === 'paid' || s.status === 'scheduled')
-      && new Date(s.scheduledStartTime) > now
+      && s.status === 'upcoming'
   );
 }
 

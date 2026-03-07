@@ -65,21 +65,6 @@ export default function NavigationClient() {
     };
   }, [showServicesDropdown]);
 
-  const scrollToSection = (sectionId: string) => {
-    setShowServicesDropdown(false);
-    // If not on home page, navigate to home first
-    if (window.location.pathname !== '/') {
-      router.push(`/#${sectionId}`);
-      // After navigation, scroll will happen automatically via hash
-      return;
-    }
-    // Otherwise, scroll to section smoothly
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
   async function handleLogout() {
     await logout();
     setSession(null);
@@ -133,19 +118,28 @@ export default function NavigationClient() {
                   >
                     <div className="bg-gray-50 rounded-lg py-2 space-y-1 shadow-lg">
                       <button
-                        onClick={() => scrollToSection('academic-tutoring')}
+                        onClick={() => {
+                          setShowServicesDropdown(false);
+                          router.push('/pricing#tutoring-plans');
+                        }}
                         className="block w-full text-left px-4 py-2 text-sm text-black hover:text-[#0088CB] hover:underline transition-colors"
                       >
                         Tutoring
                       </button>
                       <button
-                        onClick={() => scrollToSection('counseling-services')}
+                        onClick={() => {
+                          setShowServicesDropdown(false);
+                          router.push('/pricing#college-counseling');
+                        }}
                         className="block w-full text-left px-4 py-2 text-sm text-black hover:text-[#0088CB] hover:underline transition-colors"
                       >
                         College
                       </button>
                       <button
-                        onClick={() => scrollToSection('ivyway-ai')}
+                        onClick={() => {
+                          setShowServicesDropdown(false);
+                          router.push('/pricing#ai-tools');
+                        }}
                         className="block w-full text-left px-4 py-2 text-sm text-black hover:text-[#0088CB] hover:underline transition-colors"
                       >
                         IvyWay AI
@@ -155,23 +149,23 @@ export default function NavigationClient() {
                 )}
               </div>
               <Link
-                href="#pricing"
+                href="/pricing"
                 className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
               >
                 Pricing
               </Link>
               <Link
-                href="#faq"
+                href="/pricing#payments-faq"
                 className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
               >
                 FAQ
               </Link>
-              <Link
-                href="#contact"
+              <a
+                href="mailto:support@ivyway.com"
                 className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
               >
                 Contact
-              </Link>
+              </a>
             </div>
           </div>
           <div className="flex items-center space-x-4">
@@ -264,8 +258,8 @@ export default function NavigationClient() {
             </Link>
             <button
               onClick={() => {
-                scrollToSection('academic-tutoring');
                 setShowMobileMenu(false);
+                router.push('/pricing#tutoring-plans');
               }}
               className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
             >
@@ -273,8 +267,8 @@ export default function NavigationClient() {
             </button>
             <button
               onClick={() => {
-                scrollToSection('counseling-services');
                 setShowMobileMenu(false);
+                router.push('/pricing#college-counseling');
               }}
               className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
             >
@@ -282,34 +276,34 @@ export default function NavigationClient() {
             </button>
             <button
               onClick={() => {
-                scrollToSection('ivyway-ai');
                 setShowMobileMenu(false);
+                router.push('/pricing#ai-tools');
               }}
               className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
             >
               IvyWay AI
             </button>
             <Link
-              href="#pricing"
+              href="/pricing"
               onClick={() => setShowMobileMenu(false)}
               className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
             >
               Pricing
             </Link>
             <Link
-              href="#faq"
+              href="/pricing#payments-faq"
               onClick={() => setShowMobileMenu(false)}
               className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
             >
               FAQ
             </Link>
-            <Link
-              href="#contact"
+            <a
+              href="mailto:support@ivyway.com"
               onClick={() => setShowMobileMenu(false)}
               className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
             >
               Contact
-            </Link>
+            </a>
             {!session && (
               <>
                 <Link

@@ -3,22 +3,37 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
+import { formatUsdFromCents, getSessionPricingCents, Plan as PricingPlan, ServiceType as PricingServiceType } from '@/lib/pricing/catalog';
 
 // Types matching BookingFlowClient
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
 type Plan = string | null;
 type Subject = string | null;
 type Topic = string | null;
-type School = {
-  displayName: string;
-  normalizedName: string;
-} | null;
+type School =
+  | {
+      // Canonical shape (BookingFlowClient)
+      id: string;
+      name: string;
+    }
+  | {
+      // Legacy shape (older summary versions)
+      displayName: string;
+      normalizedName: string;
+    }
+  | null;
 type Provider = string | null;
 
 interface SelectedSession {
   date: Date;
   time: string;
   displayString: string;
+  // Canonical UTC identity (used by /api/checkout validation/reservation)
+  startTimeUTC?: string;
+  endTimeUTC?: string;
+  providerId?: string | null;
+  displayTime?: string;
 }
 
 interface BookingState {
@@ -27,46 +42,11 @@ interface BookingState {
   subject: Subject;
   topic: Topic;
   school: School;
+  schoolId?: string | null;
+  schoolName?: string | null;
   selectedSessions: SelectedSession[];
   provider: Provider;
 }
-
-// Provider data (matching BookingFlowClient)
-const MOCK_PROVIDERS: Array<{
-  id: string;
-  name: string;
-  school: string;
-  rating: number;
-  role: 'Tutor' | 'Counselor';
-  subject: string;
-}> = [
-  { id: '1', name: 'Dr. Sarah Johnson', school: 'Harvard University', rating: 4.9, role: 'Tutor', subject: 'Math' },
-  { id: '2', name: 'Prof. Michael Chen', school: 'MIT', rating: 4.8, role: 'Tutor', subject: 'Science' },
-  { id: '3', name: 'Dr. Emily Rodriguez', school: 'Stanford University', rating: 4.9, role: 'Tutor', subject: 'SAT' },
-  { id: '4', name: 'Prof. David Kim', school: 'Yale University', rating: 4.7, role: 'Tutor', subject: 'ACT' },
-  { id: '5', name: 'Dr. Lisa Wang', school: 'Princeton University', rating: 4.9, role: 'Tutor', subject: 'History & Social Studies' },
-  { id: '6', name: 'Prof. James Wilson', school: 'Columbia University', rating: 4.8, role: 'Tutor', subject: 'English & Language Arts' },
-  { id: '7', name: 'Dr. Maria Garcia', school: 'UCLA', rating: 4.7, role: 'Tutor', subject: 'Foreign Languages' },
-  { id: '8', name: 'Prof. Robert Taylor', school: 'Carnegie Mellon', rating: 4.9, role: 'Tutor', subject: 'Computer Science' },
-  { id: '13', name: 'Dr. Amanda Foster', school: 'Harvard University', rating: 4.9, role: 'Counselor', subject: 'College Counseling' },
-  { id: '14', name: 'Prof. Mark Thompson', school: 'Stanford University', rating: 4.8, role: 'Counselor', subject: 'College Counseling' },
-  { id: '15', name: 'Dr. Patricia Martinez', school: 'Yale University', rating: 4.7, role: 'Counselor', subject: 'College Counseling' },
-  { id: '17', name: 'Campus Guide - Harvard', school: 'Harvard University', rating: 4.9, role: 'Counselor', subject: 'Virtual Tour' },
-  { id: '18', name: 'Campus Guide - Stanford', school: 'Stanford University', rating: 4.8, role: 'Counselor', subject: 'Virtual Tour' },
-  { id: '19', name: 'Campus Guide - MIT', school: 'MIT', rating: 4.9, role: 'Counselor', subject: 'Virtual Tour' },
-];
-
-// Plan pricing (matching BookingFlowClient)
-const PLAN_PRICING: Record<string, { price: number; name: string; sessionLength: string }> = {
-  'tutoring-single': { price: 69, name: 'Single Tutoring Session', sessionLength: '1 hour' },
-  'tutoring-monthly': { price: 249, name: 'Monthly Tutoring Plan', sessionLength: '1 hour' },
-  'test-prep-single': { price: 149, name: 'Single Test Prep Session', sessionLength: '1 hour' },
-  'test-prep-monthly': { price: 499, name: 'Monthly Test Prep Bundle', sessionLength: '1 hour' },
-  'counseling-30min': { price: 49, name: '30 Minute Counseling Session', sessionLength: '30 minutes' },
-  'counseling-60min': { price: 89, name: '60 Minute Counseling Session', sessionLength: '60 minutes' },
-  'counseling-monthly': { price: 159, name: 'Monthly Counseling Plan', sessionLength: '60 minutes' },
-  'virtual-tour-single': { price: 124, name: 'Virtual College Tour', sessionLength: 'Live guided tour' },
-};
 
 // Service display names
 const SERVICE_NAMES: Record<string, string> = {
@@ -76,7 +56,88 @@ const SERVICE_NAMES: Record<string, string> = {
   'virtual-tour': 'Virtual College Tour',
 };
 
-const TOTAL_PRICE = 73.83;
+function toPricingParams(service: Service, plan: Plan): {
+  service_type: PricingServiceType;
+  plan: PricingPlan;
+  duration_minutes: 60 | null;
+} | null {
+  if (!service) return null;
+
+  const svcNorm = String(service).trim().toLowerCase();
+  const planNorm = String(plan || '').trim().toLowerCase();
+
+  const service_type: PricingServiceType | null =
+    svcNorm === 'tutoring'
+      ? 'tutoring'
+      : svcNorm === 'test-prep'
+        ? 'test_prep'
+        : svcNorm === 'virtual-tour'
+          ? 'virtual_tour'
+          : svcNorm === 'counseling'
+            ? 'counseling'
+            : null;
+  if (!service_type) return null;
+
+  const pricingPlan: PricingPlan =
+    planNorm.endsWith('-monthly') || planNorm === 'counseling-monthly' ? 'monthly' : 'single';
+
+  const duration_minutes: 60 | null = service_type === 'counseling' ? 60 : null;
+
+  return { service_type, plan: pricingPlan, duration_minutes };
+}
+
+function minutesFromPlan(plan: Plan): number | null {
+  if (!plan) return null;
+  if (plan === 'counseling-single') return 60;
+  if (plan === 'counseling-monthly') return 60;
+  // Default for tutoring/test prep/virtual tours (approx)
+  return 60;
+}
+
+function planDisplayName(service: Service, plan: Plan): string {
+  const svc = service || null;
+  const p = String(plan || '').trim().toLowerCase();
+  if (!svc) return 'Plan';
+
+  if (svc === 'tutoring') return p === 'tutoring-monthly' ? 'Monthly Tutoring Package (4 sessions)' : 'Single Tutoring Session';
+  if (svc === 'test-prep') return p === 'test-prep-monthly' ? 'Monthly Test Prep Bundle (4 sessions)' : 'Single Test Prep Session';
+  if (svc === 'virtual-tour') return 'Single Virtual College Tour';
+
+  // counseling
+  if (p === 'counseling-monthly') return 'Monthly Counseling Plan (4 sessions of 60 min)';
+  return 'College Counseling';
+}
+
+function sessionLengthDisplay(service: Service, plan: Plan): string {
+  if (!service) return '';
+  if (service === 'virtual-tour') return 'Live guided tour';
+  const m = minutesFromPlan(plan);
+  if (!m) return '';
+  return '60 minutes';
+}
+
+function buildServiceLineItemLabel(service: Service, plan: Plan): string {
+  if (!service) return 'Service';
+
+  if (service === 'virtual-tour') {
+    // Requirement example: “Virtual Campus Tour”
+    return 'Virtual Campus Tour';
+  }
+
+  const minutes = minutesFromPlan(plan);
+  const minutesSuffix = typeof minutes === 'number' ? ` (${minutes} minutes)` : '';
+
+  switch (service) {
+    case 'tutoring':
+      return `Tutoring Session${minutesSuffix}`;
+    case 'test-prep':
+      return `Test Prep Session${minutesSuffix}`;
+    case 'counseling':
+      return `College Counseling Session${minutesSuffix}`;
+    default:
+      return 'Service';
+  }
+}
 
 export default function BookingSummaryPage() {
   const router = useRouter();
@@ -88,9 +149,26 @@ export default function BookingSummaryPage() {
   const [canceled, setCanceled] = useState(false);
 
   // Helper functions
+  const getSchoolDisplay = (): string => {
+    const direct = typeof (bookingState as any)?.schoolName === 'string' ? String((bookingState as any).schoolName) : '';
+    if (direct.trim()) return direct.trim();
+    const s = bookingState?.school as any;
+    return (s?.name as string) || (s?.displayName as string) || '';
+  };
+  const getSchoolId = (): string => {
+    const direct = typeof (bookingState as any)?.schoolId === 'string' ? String((bookingState as any).schoolId) : '';
+    if (direct.trim()) return direct.trim();
+    const s = bookingState?.school as any;
+    return (s?.id as string) || (s?.normalizedName as string) || '';
+  };
   const getPlanInfo = () => {
-    if (!bookingState?.plan) return null;
-    return PLAN_PRICING[bookingState.plan];
+    const params = toPricingParams(bookingState?.service ?? null, bookingState?.plan ?? null);
+    if (!params) return null;
+    try {
+      return getSessionPricingCents(params);
+    } catch {
+      return null;
+    }
   };
 
   useEffect(() => {
@@ -137,33 +215,38 @@ export default function BookingSummaryPage() {
     setError(null);
 
     try {
+      const payloadBookingState = {
+        ...bookingState,
+        // Ensure schoolId/schoolName are present for counseling booking validation
+        schoolId: getSchoolId() || undefined,
+        schoolName: getSchoolDisplay() || undefined,
+        selectedSessions: bookingState.selectedSessions.map((session) => ({
+          ...session,
+          // Preserve canonical UTC identity for server-side validation/reservation
+          startTimeUTC: (session as any).startTimeUTC,
+          endTimeUTC: (session as any).endTimeUTC,
+          providerId: bookingState.provider ?? (session as any).providerId ?? null,
+          date: session.date.toISOString(),
+          time: (session as any).displayTime,
+        })),
+      };
+
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bookingState: {
-            ...bookingState,
-            selectedSessions: bookingState.selectedSessions.map(session => ({
-              ...session,
-              date: session.date.toISOString(),
-            })),
-          },
-        }),
+        body: JSON.stringify({ bookingState: payloadBookingState }),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create checkout session');
+        const msg = errorData.error || 'Request failed';
+        throw new Error(msg);
       }
 
       const data = await response.json();
 
-      if (data.url) {
-        // Redirect to Stripe Checkout
-        window.location.href = data.url;
-      } else {
-        throw new Error('No checkout URL received');
-      }
+      if (!data.url) throw new Error('No checkout URL received');
+      window.location.href = data.url;
     } catch (err) {
       console.error('Checkout error:', err);
       setError(err instanceof Error ? err.message : 'An error occurred. Please try again.');
@@ -171,10 +254,13 @@ export default function BookingSummaryPage() {
     }
   };
 
-  const getProviderInfo = () => {
-    if (!bookingState?.provider) return null;
-    return MOCK_PROVIDERS.find((p) => p.id === bookingState.provider);
-  };
+
+  const providerId = bookingState?.provider || null;
+  const { displayNames, status: providerNameStatus } = useUserDisplayMap(providerId ? [providerId] : []);
+  const providerDisplayName =
+    providerId && typeof displayNames?.[providerId] === 'string' && displayNames[providerId].trim()
+      ? displayNames[providerId].trim()
+      : null;
 
   const getStepForEdit = (section: 'service' | 'plan' | 'datetime') => {
     // Return step number for edit navigation
@@ -204,9 +290,19 @@ export default function BookingSummaryPage() {
     return null;
   }
 
-  const providerInfo = getProviderInfo();
   const planInfo = getPlanInfo();
   const serviceName = bookingState.service ? SERVICE_NAMES[bookingState.service] : '';
+  const schoolDisplay = getSchoolDisplay();
+
+  // Stripe final charge = service price + Stripe Tax (calculated at Checkout based on address).
+  // We can show the service price now; tax/total will be shown on Stripe Checkout + confirmation.
+  const baseCents = planInfo ? planInfo.purchase_price_cents : 0;
+
+  // Display-only breakdown rules:
+  // - Before Stripe tax is available, show Total = base service price (avoid "calculated at checkout" for Total).
+  // - Stripe will show final tax/total on Checkout itself, and we show the tax breakdown on the success/receipt page.
+  const taxAmountCents: number | null = null;
+  const totalDisplayCents = typeof taxAmountCents === 'number' ? baseCents + taxAmountCents : baseCents;
 
   return (
     <div className="min-h-screen w-full bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -244,7 +340,9 @@ export default function BookingSummaryPage() {
             <div className="flex items-start justify-between py-3 border-b border-gray-100">
               <div className="flex-1">
                 <div className="text-sm text-gray-500 mb-1">Plan</div>
-                <div className="text-base font-medium text-gray-900">{planInfo.name}</div>
+                <div className="text-base font-medium text-gray-900">
+                  {planDisplayName(bookingState.service, bookingState.plan)}
+                </div>
               </div>
               <Link
                 href={`/dashboard/book?step=${getStepForEdit('plan')}`}
@@ -265,7 +363,7 @@ export default function BookingSummaryPage() {
                     : 'School'}
                 </div>
                 <div className="text-base font-medium text-gray-900">
-                  {bookingState.subject || bookingState.school?.displayName}
+                  {bookingState.subject || schoolDisplay}
                 </div>
                 {bookingState.topic && (
                   <div className="text-sm text-gray-600 mt-1">
@@ -287,7 +385,9 @@ export default function BookingSummaryPage() {
             <div className="flex items-start justify-between py-3 border-b border-gray-100">
               <div className="flex-1">
                 <div className="text-sm text-gray-500 mb-1">Session Length</div>
-                <div className="text-base font-medium text-gray-900">{planInfo.sessionLength}</div>
+                <div className="text-base font-medium text-gray-900">
+                  {sessionLengthDisplay(bookingState.service, bookingState.plan)}
+                </div>
               </div>
             </div>
           )}
@@ -333,7 +433,7 @@ export default function BookingSummaryPage() {
           )}
 
           {/* Provider */}
-          {providerInfo && (
+          {providerId && (
             <div className="flex items-start justify-between py-3">
               <div className="flex-1">
                 <div className="text-sm text-gray-500 mb-1">
@@ -341,25 +441,9 @@ export default function BookingSummaryPage() {
                     ? 'Selected Tutor'
                     : 'Selected Counselor'}
                 </div>
-                <div className="flex items-center gap-3 mt-2">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-                    <span className="text-sm font-semibold text-gray-700">
-                      {providerInfo.name.split(' ').map((n) => n[0]).join('')}
-                    </span>
-                  </div>
-                  <div>
-                    <div className="text-base font-medium text-gray-900">{providerInfo.name}</div>
-                    <div className="text-sm text-gray-600">
-                      {bookingState.service === 'tutoring' || bookingState.service === 'test-prep'
-                        ? providerInfo.subject
-                        : providerInfo.school}
-                    </div>
-                    <div className="flex items-center gap-1 mt-1">
-                      <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                      </svg>
-                      <span className="text-sm font-medium text-gray-900">{providerInfo.rating}</span>
-                    </div>
+                <div className="mt-2">
+                  <div className="text-base font-medium text-gray-900">
+                    {providerNameStatus === 'loading' ? 'Loading provider…' : providerDisplayName || 'Provider'}
                   </div>
                 </div>
               </div>
@@ -381,10 +465,24 @@ export default function BookingSummaryPage() {
 
           {/* Pricing Breakdown */}
           <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="text-base font-medium text-gray-900">Service price</div>
+                <div className="text-base font-medium text-gray-900">{formatUsdFromCents(baseCents)}</div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="text-base text-gray-700">Tax</div>
+                <div className="text-base text-gray-700">
+                  {typeof taxAmountCents === 'number' ? formatUsdFromCents(taxAmountCents) : 'Calculated at checkout'}
+                </div>
+              </div>
+            </div>
+
             <div className="border-t border-gray-200 pt-4 mt-4">
               <div className="flex items-center justify-between">
                 <div className="text-lg font-semibold text-gray-900">Total</div>
-                <div className="text-2xl font-bold text-[#0088CB]">${TOTAL_PRICE.toFixed(2)}</div>
+                <div className="text-2xl font-bold text-[#0088CB]">{formatUsdFromCents(totalDisplayCents)}</div>
               </div>
             </div>
           </div>
@@ -422,7 +520,9 @@ export default function BookingSummaryPage() {
             disabled={isProcessing}
             className="w-full px-8 py-3 bg-[#0088CB] text-white font-semibold rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isProcessing ? 'Processing...' : `Pay $${TOTAL_PRICE.toFixed(2)}`}
+            {isProcessing
+              ? 'Processing...'
+              : `Continue to secure checkout (${formatUsdFromCents(baseCents)} + tax)`}
           </button>
         </div>
 

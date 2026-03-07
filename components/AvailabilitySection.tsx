@@ -1,9 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getCurrentUserId } from '@/lib/sessions/actions';
-import { addDevSession, removeDevSessionsByProviderIdAndStatus } from '@/lib/devSessionStore';
-import { Session } from '@/lib/models/types';
+import { getCurrentUserEnabledServices, getCurrentUserId } from '@/lib/sessions/actions';
 
 interface TimeRange {
   start: string;
@@ -27,21 +25,6 @@ const DAYS_OF_WEEK = [
 ];
 
 /**
- * Generate UUID for browser
- */
-function generateUUID(): string {
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
-    return window.crypto.randomUUID();
-  }
-  // Fallback for older browsers
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
-/**
  * Get the day of week index (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
  */
 function getDayOfWeekIndex(dayName: string): number {
@@ -62,10 +45,12 @@ export default function AvailabilitySection() {
     DAYS_OF_WEEK.map((day) => ({
       day,
       enabled: false,
-      timeRanges: [{ start: '09:00', end: '17:00' }],
+      timeRanges: [{ start: '', end: '' }],
     }))
   );
   const [providerId, setProviderId] = useState<string | null>(null);
+  const [enabledServices, setEnabledServices] = useState<string[]>([]);
+  const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -80,9 +65,85 @@ export default function AvailabilitySection() {
         return;
       }
       setProviderId(userId);
+      const servicesResult = await getCurrentUserEnabledServices();
+      if (servicesResult?.services?.length) {
+        setEnabledServices(servicesResult.services);
+        setSelectedServiceType((prev) => prev ?? servicesResult.services[0]);
+      }
     };
     fetchProviderId();
   }, []);
+
+  // Initialize from API once per (providerId + selectedServiceType) fetch.
+  useEffect(() => {
+    if (!providerId || !selectedServiceType) return;
+
+    const minutesToTime = (minutes: number): string => {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    };
+
+    const dayLabelFromDow = (dow: number): string =>
+      dow === 0 ? 'Sunday' :
+      dow === 1 ? 'Monday' :
+      dow === 2 ? 'Tuesday' :
+      dow === 3 ? 'Wednesday' :
+      dow === 4 ? 'Thursday' :
+      dow === 5 ? 'Friday' :
+      'Saturday';
+
+    const load = async () => {
+      try {
+        const params = new URLSearchParams({ serviceType: selectedServiceType });
+        const res = await fetch(`/api/availability?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) return;
+        const entry = data?.availability;
+        if (!entry) return;
+
+        const rangesByDayLabel = new Map<string, Array<{ start: string; end: string }>>();
+        const enabledByDayLabel = new Map<string, boolean>();
+
+        const pushRange = (dow: number, startMinutes: number, endMinutes: number) => {
+          const label = dayLabelFromDow(dow);
+          enabledByDayLabel.set(label, true);
+          const arr = rangesByDayLabel.get(label) || [];
+          arr.push({ start: minutesToTime(startMinutes), end: minutesToTime(endMinutes) });
+          rangesByDayLabel.set(label, arr);
+        };
+
+        if (Array.isArray(entry.days)) {
+          for (const d of entry.days) {
+            const dow = Number(d?.dayOfWeek);
+            if (!Number.isFinite(dow) || dow < 0 || dow > 6) continue;
+            const enabled = Boolean(d?.enabled);
+            if (!enabled) continue;
+            const trs = Array.isArray(d?.timeRanges) ? d.timeRanges : [];
+            for (const tr of trs) {
+              pushRange(dow, Number((tr as any).startMinutes), Number((tr as any).endMinutes));
+            }
+          }
+        } else if (Array.isArray(entry.blocks)) {
+          for (const b of entry.blocks) {
+            pushRange(Number((b as any).dayOfWeek), Number((b as any).startMinutes), Number((b as any).endMinutes));
+          }
+        }
+
+        setAvailability(
+          DAYS_OF_WEEK.map((day) => {
+            const enabled = enabledByDayLabel.get(day) || false;
+            const timeRanges = rangesByDayLabel.get(day) || [{ start: '', end: '' }];
+            return { day, enabled, timeRanges };
+          })
+        );
+      } catch (e) {
+        console.error('Failed to load availability:', e);
+      }
+    };
+
+    load();
+  }, [providerId, selectedServiceType]);
 
   const toggleDay = (dayIndex: number) => {
     setAvailability((prev) =>
@@ -150,6 +211,10 @@ export default function AvailabilitySection() {
       setSaveMessage({ type: 'error', text: 'Provider ID not found. Please refresh the page.' });
       return;
     }
+    if (!selectedServiceType) {
+      setSaveMessage({ type: 'error', text: 'Please select a service type before saving.' });
+      return;
+    }
 
     if (!hasAnyAvailability) {
       setSaveMessage({ type: 'error', text: 'Please enable at least one day with time ranges.' });
@@ -160,67 +225,48 @@ export default function AvailabilitySection() {
     setSaveMessage(null);
 
     try {
-      // Remove old availability slots for this provider (we'll recreate them)
-      // This ensures we don't have duplicate slots when provider updates availability
-      removeDevSessionsByProviderIdAndStatus(providerId, 'available');
+      // STRICT BOOKING FLOW:
+      // Save provider availability to the server-backed availability store.
+      // Booking availability is generated from this, and booked slots are consumed server-side.
 
-      const now = new Date();
-      const newSlots: Session[] = [];
+      const parseTimeToMinutes = (hhmm: string): number => {
+        const [hh, mm] = String(hhmm || '0:0').split(':').map(Number);
+        return (Number.isFinite(hh) ? hh : 0) * 60 + (Number.isFinite(mm) ? mm : 0);
+      };
 
-      // Generate slots for the next 4 weeks
-      for (let weekOffset = 0; weekOffset < 4; weekOffset++) {
-        for (const dayAvailability of availability) {
-          if (!dayAvailability.enabled) continue;
+      const days = Array.from({ length: 7 }, (_, dayOfWeek) => {
+        const label =
+          dayOfWeek === 0 ? 'Sunday' :
+          dayOfWeek === 1 ? 'Monday' :
+          dayOfWeek === 2 ? 'Tuesday' :
+          dayOfWeek === 3 ? 'Wednesday' :
+          dayOfWeek === 4 ? 'Thursday' :
+          dayOfWeek === 5 ? 'Friday' :
+          'Saturday';
 
-          const dayIndex = getDayOfWeekIndex(dayAvailability.day);
-          
-          // Find the next occurrence of this day
-          const targetDate = new Date(now);
-          const daysUntilTarget = (dayIndex - now.getDay() + 7) % 7;
-          targetDate.setDate(now.getDate() + daysUntilTarget + (weekOffset * 7));
-          
-          // Create a slot for each time range
-          for (const timeRange of dayAvailability.timeRanges) {
-            const [startHour, startMinute] = timeRange.start.split(':').map(Number);
-            const [endHour, endMinute] = timeRange.end.split(':').map(Number);
-            
-            const slotStart = new Date(targetDate);
-            slotStart.setHours(startHour, startMinute, 0, 0);
-            
-            const slotEnd = new Date(targetDate);
-            slotEnd.setHours(endHour, endMinute, 0, 0);
-            
-            // Only create slots in the future
-            if (slotStart > now) {
-              const newSlot: Session = {
-                id: generateUUID(),
-                studentId: '', // Empty for available sessions
-                providerId: providerId, // CRITICAL: Use provider's auth.user.id
-                serviceTypeId: 'tutoring', // Default, can be customized later
-                sessionType: 'tutoring', // Default, can be customized later
-                scheduledStartTime: slotStart.toISOString(),
-                scheduledEndTime: slotEnd.toISOString(),
-                status: 'available',
-                priceCents: 6900, // Default $69, can be customized later
-                amountChargedCents: 0,
-                amountRefundedCents: 0,
-                bookedAt: '',
-                bookedBy: '',
-                availabilityId: `availability-${generateUUID()}`,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              };
-              
-              newSlots.push(newSlot);
-              addDevSession(newSlot);
-            }
-          }
-        }
+        const source = availability.find((d) => d.day === label) || { enabled: false, timeRanges: [] as TimeRange[] };
+        const timeRanges = (source.timeRanges || []).map((tr) => ({
+          startMinutes: parseTimeToMinutes(tr.start),
+          endMinutes: parseTimeToMinutes(tr.end),
+        }));
+
+        return { dayOfWeek, enabled: !!source.enabled, timeRanges };
+      });
+
+      const res = await fetch('/api/availability', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId, serviceType: selectedServiceType, timezone: 'America/New_York', days }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error || 'Failed to save availability');
       }
 
-      setSaveMessage({ 
-        type: 'success', 
-        text: `Successfully created ${newSlots.length} availability slots for the next 4 weeks.` 
+      setSaveMessage({
+        type: 'success',
+        text: 'Availability saved successfully.',
       });
     } catch (error) {
       console.error('Error saving availability:', error);
@@ -236,13 +282,29 @@ export default function AvailabilitySection() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Availability</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Set your available days and times for sessions. Slots will be created for the next 4 weeks.
+            Set your available days and times. Bookable slots are generated from this availability.
           </p>
         </div>
+        {enabledServices.length > 0 && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700">Service</label>
+            <select
+              value={selectedServiceType || ''}
+              onChange={(e) => setSelectedServiceType(e.target.value || null)}
+              className="rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] text-sm py-2 px-3"
+            >
+              {enabledServices.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <button
           type="button"
           onClick={handleSaveAvailability}
-          disabled={saving || !hasAnyAvailability || !providerId}
+          disabled={saving || !hasAnyAvailability || !providerId || !selectedServiceType}
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? (

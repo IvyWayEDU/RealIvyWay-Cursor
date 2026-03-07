@@ -6,3 +6,4 @@ export default function AuthLayout({
   // Minimal layout - no header, no footer, just the children
   return <>{children}</>;
 }
+

@@ -32,11 +32,14 @@ export default function Signup() {
     if (userType === 'student') {
       roles.push('student');
     } else if (userType === 'provider') {
+      // Always include the base provider role for dashboard access checks,
+      // plus any specific provider sub-roles (tutor/counselor).
+      roles.push('provider');
       if (tutorCheckedValue) roles.push('tutor');
       if (counselorCheckedValue) roles.push('counselor');
       
       // Validate that at least one provider role is selected
-      if (roles.length === 0) {
+      if (!tutorCheckedValue && !counselorCheckedValue) {
         setRoleError('Please select at least one role (Tutor or Counselor)');
         setIsSubmitting(false);
         return;
@@ -229,13 +232,13 @@ export default function Signup() {
               />
               <label htmlFor="terms" className="ml-3 block text-sm leading-6 text-gray-900">
                 I agree to the{' '}
-                <a href="#" className="font-semibold text-[#0088CB] hover:text-[#0070A3]">
+                <Link href="/terms" className="font-semibold text-[#0088CB] hover:text-[#0070A3]">
                   Terms of Service
-                </a>{' '}
+                </Link>{' '}
                 and{' '}
-                <a href="#" className="font-semibold text-[#0088CB] hover:text-[#0070A3]">
+                <Link href="/privacy" className="font-semibold text-[#0088CB] hover:text-[#0070A3]">
                   Privacy Policy
-                </a>
+                </Link>
               </label>
             </div>
 

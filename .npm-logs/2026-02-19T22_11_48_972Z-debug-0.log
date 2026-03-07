@@ -1,0 +1,57 @@
+0 verbose cli /usr/local/bin/node /usr/local/lib/node_modules/npm/bin/npm-cli.js
+1 info using npm@11.6.2
+2 info using node@v24.12.0
+3 silly config load:file:/usr/local/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/matthewtahk/Documents/IvyWay Development/ivyway-web/.npmrc
+5 silly config load:file:/Users/matthewtahk/.npmrc
+6 silly config load:file:/usr/local/etc/npmrc
+7 verbose title npm exec next dev -H 127.0.0.1 -p 3000
+8 verbose argv "exec" "--yes" "--" "next" "dev" "-H" "127.0.0.1" "-p" "3000"
+9 verbose logfile logs-max:10 dir:/Users/matthewtahk/Documents/IvyWay Development/ivyway-web/.npm-logs/2026-02-19T22_11_48_972Z-
+10 verbose logfile /Users/matthewtahk/Documents/IvyWay Development/ivyway-web/.npm-logs/2026-02-19T22_11_48_972Z-debug-0.log
+11 silly logfile done cleaning log files
+12 verbose stack Error: EPERM: operation not permitted, open '/usr/local/lib/node_modules/npm/node_modules/@sigstore/verify/dist/key/index.js'
+12 verbose stack     at Object.readFileSync (node:fs:440:20)
+12 verbose stack     at defaultLoadImpl (node:internal/modules/cjs/loader:1139:17)
+12 verbose stack     at loadSource (node:internal/modules/cjs/loader:1788:20)
+12 verbose stack     at Object..js (node:internal/modules/cjs/loader:1886:44)
+12 verbose stack     at Module.load (node:internal/modules/cjs/loader:1481:32)
+12 verbose stack     at Module._load (node:internal/modules/cjs/loader:1300:12)
+12 verbose stack     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+12 verbose stack     at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+12 verbose stack     at Module.require (node:internal/modules/cjs/loader:1504:12)
+12 verbose stack     at require (node:internal/modules/helpers:152:16)
+13 error code EPERM
+14 error syscall open
+15 error path /usr/local/lib/node_modules/npm/node_modules/@sigstore/verify/dist/key/index.js
+16 error errno -1
+17 error Error: EPERM: operation not permitted, open '/usr/local/lib/node_modules/npm/node_modules/@sigstore/verify/dist/key/index.js'
+17 error     at Object.readFileSync (node:fs:440:20)
+17 error     at defaultLoadImpl (node:internal/modules/cjs/loader:1139:17)
+17 error     at loadSource (node:internal/modules/cjs/loader:1788:20)
+17 error     at Object..js (node:internal/modules/cjs/loader:1886:44)
+17 error     at Module.load (node:internal/modules/cjs/loader:1481:32)
+17 error     at Module._load (node:internal/modules/cjs/loader:1300:12)
+17 error     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+17 error     at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+17 error     at Module.require (node:internal/modules/cjs/loader:1504:12)
+17 error     at require (node:internal/modules/helpers:152:16) {
+17 error   errno: -1,
+17 error   code: 'EPERM',
+17 error   syscall: 'open',
+17 error   path: '/usr/local/lib/node_modules/npm/node_modules/@sigstore/verify/dist/key/index.js'
+17 error }
+18 error
+18 error The operation was rejected by your operating system.
+18 error It is likely you do not have the permissions to access this file as the current user
+18 error
+18 error If you believe this might be a permissions issue, please double-check the
+18 error permissions of the file and its containing directories, or try running
+18 error the command again as root/Administrator.
+19 verbose cwd /Users/matthewtahk/Documents/IvyWay Development/ivyway-web
+20 verbose os Darwin 23.5.0
+21 verbose node v24.12.0
+22 verbose npm  v11.6.2
+23 verbose exit -1
+24 verbose code -1
+25 error A complete log of this run can be found in: /Users/matthewtahk/Documents/IvyWay Development/ivyway-web/.npm-logs/2026-02-19T22_11_48_972Z-debug-0.log

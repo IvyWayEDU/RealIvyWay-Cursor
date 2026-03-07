@@ -6,15 +6,15 @@ import { UserRole } from './types';
  */
 export function getDashboardRoute(roles: UserRole[]): string {
   if (roles.includes('admin')) {
-    return '/dashboard/admin';
+    return '/admin';
   }
   
   if (roles.includes('student')) {
     return '/dashboard/student';
   }
   
-  // Tutor, Counselor, or both go to provider dashboard
-  if (roles.includes('tutor') || roles.includes('counselor')) {
+  // Provider role goes to provider dashboard
+  if (roles.includes('provider') || roles.includes('tutor') || roles.includes('counselor')) {
     return '/dashboard/provider';
   }
   
@@ -35,9 +35,9 @@ export function validateRoles(roles: UserRole[]): { valid: boolean; error?: stri
     return { valid: false, error: 'Admin role cannot be combined with other roles' };
   }
   
-  // Student cannot be combined with Tutor/Counselor
-  if (roles.includes('student') && (roles.includes('tutor') || roles.includes('counselor'))) {
-    return { valid: false, error: 'Student role cannot be combined with Tutor or Counselor roles' };
+  // Student cannot be combined with Provider
+  if (roles.includes('student') && (roles.includes('provider') || roles.includes('tutor') || roles.includes('counselor'))) {
+    return { valid: false, error: 'Student role cannot be combined with Provider role' };
   }
   
   return { valid: true };
@@ -56,8 +56,8 @@ export function getDisplayRole(roles: UserRole[]): 'student' | 'provider' | 'adm
     return 'student';
   }
   
-  // Tutor, Counselor, or both go to provider dashboard
-  if (roles.includes('tutor') || roles.includes('counselor')) {
+  // Provider role goes to provider dashboard
+  if (roles.includes('provider') || roles.includes('tutor') || roles.includes('counselor')) {
     return 'provider';
   }
   
@@ -78,9 +78,10 @@ export function hasAccessToDashboard(
     case 'student':
       return userRoles.includes('student');
     case 'provider':
-      return userRoles.includes('tutor') || userRoles.includes('counselor');
+      return userRoles.includes('provider') || userRoles.includes('tutor') || userRoles.includes('counselor');
     default:
       return false;
   }
 }
+
 

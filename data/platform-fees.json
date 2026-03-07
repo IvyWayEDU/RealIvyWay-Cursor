@@ -1,0 +1,68 @@
+{
+  "fees": [
+    {
+      "id": "tutoring-single-session",
+      "serviceType": "tutoring",
+      "planType": "single-session",
+      "calculationType": "flat",
+      "amountCents": 1900,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    },
+    {
+      "id": "tutoring-monthly-package",
+      "serviceType": "tutoring",
+      "planType": "monthly-package",
+      "calculationType": "flat",
+      "amountCents": 4900,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    },
+    {
+      "id": "test-prep-single-session",
+      "serviceType": "test-prep",
+      "planType": "single-session",
+      "calculationType": "flat",
+      "amountCents": 4900,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    },
+    {
+      "id": "test-prep-monthly-package",
+      "serviceType": "test-prep",
+      "planType": "monthly-package",
+      "calculationType": "flat",
+      "amountCents": 9900,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    },
+    {
+      "id": "college-counseling-single",
+      "serviceType": "college-counseling",
+      "planType": "counseling-single",
+      "calculationType": "flat",
+      "amountCents": 2900,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    },
+    {
+      "id": "college-counseling-monthly",
+      "serviceType": "college-counseling",
+      "planType": "counseling-monthly",
+      "calculationType": "flat",
+      "amountCents": 5900,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    },
+    {
+      "id": "virtual-tours-single-tour",
+      "serviceType": "virtual-tours",
+      "planType": "single-tour",
+      "calculationType": "flat",
+      "amountCents": 3400,
+      "percentage": 0,
+      "updatedAt": "2025-12-23T01:54:24.814Z"
+    }
+  ],
+  "lastUpdatedAt": "2025-12-23T01:54:24.814Z"
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "0c2b84ed-4a91-4a1f-b8dc-081229cd296a",
+    "conversationId": "conv_01090057-226e-424e-9637-e85e29dd6173__272cc2af-4054-4263-8da3-b0e487d409af",
+    "senderId": "01090057-226e-424e-9637-e85e29dd6173",
+    "recipientId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "createdAt": "2026-01-16T00:29:35.212Z",
+    "text": "hello"
+  },
+  {
+    "id": "87120dd4-abeb-4951-ac87-39f428f8a038",
+    "conversationId": "conv_01090057-226e-424e-9637-e85e29dd6173__272cc2af-4054-4263-8da3-b0e487d409af",
+    "senderId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "recipientId": "01090057-226e-424e-9637-e85e29dd6173",
+    "createdAt": "2026-01-16T00:30:13.430Z",
+    "text": "hi"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "payoutreq_1771540419871_4uw6qyq0",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 5500,
+    "status": "processing",
+    "createdAt": "2026-02-19T22:33:39.871Z",
+    "stripeTransferId": null,
+    "updatedAt": "2026-02-19T22:43:45.541Z"
+  }
+]

@@ -12,10 +12,12 @@ export default function PublicLayoutClient({
   const pathname = usePathname();
   // Exclude all auth routes from public layout (no header/footer)
   const isAuthPage = pathname?.startsWith('/auth/');
+  // Landing page has its own hero-overlay navigation; avoid rendering the standard top header there.
+  const isLandingPage = pathname === '/';
 
   return (
     <div className="public-layout flex min-h-screen flex-col bg-white">
-      {!isAuthPage && <Navigation />}
+      {!isAuthPage && !isLandingPage && <Navigation />}
       <main className="flex-1 bg-white">{children}</main>
       {!isAuthPage && <Footer />}
     </div>

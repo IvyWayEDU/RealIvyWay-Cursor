@@ -1,0 +1,41 @@
+[
+  {
+    "id": "42591073-c2f9-477f-a7dd-c2788fd71348",
+    "userId": "42591073-c2f9-477f-a7dd-c2788fd71348",
+    "providerType": "tutor",
+    "displayName": "provider test",
+    "firstName": "provider",
+    "lastName": "test",
+    "qualifications": [],
+    "certifications": [],
+    "specialties": [],
+    "subjects": [],
+    "gradeLevels": [],
+    "availabilityStatus": "available",
+    "profileComplete": false,
+    "verified": false,
+    "active": true,
+    "createdAt": "2026-01-14T08:01:16.913Z",
+    "updatedAt": "2026-01-14T08:01:16.913Z"
+  },
+  {
+    "id": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "userId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "providerType": "tutor",
+    "displayName": "test2 provider",
+    "firstName": "test2",
+    "lastName": "provider",
+    "qualifications": [],
+    "certifications": [],
+    "specialties": [],
+    "subjects": [],
+    "gradeLevels": [],
+    "availabilityStatus": "available",
+    "profileComplete": false,
+    "verified": false,
+    "active": true,
+    "createdAt": "2026-01-14T08:10:30.466Z",
+    "updatedAt": "2026-02-08T22:21:03.045Z",
+    "stripeConnectAccountId": "acct_1Syg1CR41I9PHiCs"
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "51918909-cacd-4444-8b37-05ee622431a9",
+    "userId": "01090057-226e-424e-9637-e85e29dd6173",
+    "role": "student",
+    "subject": "Support",
+    "status": "open",
+    "createdAt": "2026-02-01T23:27:22.564Z"
+  },
+  {
+    "id": "feeaed24-fcf8-44d9-a0d0-1f1ae37f2c10",
+    "userId": "01090057-226e-424e-9637-e85e29dd6173",
+    "role": "student",
+    "subject": "Other",
+    "status": "admin_replied",
+    "createdAt": "2026-02-02T02:57:27.911Z"
+  }
+]

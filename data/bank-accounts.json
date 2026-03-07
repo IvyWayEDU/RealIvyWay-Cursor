@@ -1,0 +1,10 @@
+[
+  {
+    "providerId": "9aa6c128-1360-4eb8-add3-b132ef2e0d09",
+    "bankName": "chase",
+    "last4": "6789",
+    "accountType": "checking",
+    "connectedAt": "2025-12-25T04:51:08.557Z",
+    "status": "active"
+  }
+]

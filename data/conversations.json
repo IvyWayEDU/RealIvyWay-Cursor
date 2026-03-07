@@ -1,0 +1,14 @@
+[
+  {
+    "id": "conv_01090057-226e-424e-9637-e85e29dd6173__272cc2af-4054-4263-8da3-b0e487d409af",
+    "participants": [
+      "01090057-226e-424e-9637-e85e29dd6173",
+      "272cc2af-4054-4263-8da3-b0e487d409af"
+    ],
+    "createdAt": "2026-01-16T00:29:35.210Z",
+    "updatedAt": "2026-01-16T00:30:13.430Z",
+    "lastMessageText": "hi",
+    "lastMessageAt": "2026-01-16T00:30:13.430Z",
+    "lastMessageSenderId": "272cc2af-4054-4263-8da3-b0e487d409af"
+  }
+]
