@@ -30,7 +30,21 @@ export async function POST(request: NextRequest) {
 
     const validationResult = await validateRequestBody(request, supportChatRequestSchema);
     if (!validationResult.success) return validationResult.response;
-    const { action, threadId, text } = validationResult.data;
+
+    // Even with schema validation, guard request-body fields at runtime so TS builds never
+    // fail due to overly-broad inferred types (e.g. `{}`) from validation helpers.
+    const body = validationResult.data as {
+      action?: unknown;
+      threadId?: unknown;
+      text?: unknown;
+    };
+
+    const action = typeof body.action === 'string' ? body.action : 'send';
+    const threadId =
+      typeof body.threadId === 'string' || typeof body.threadId === 'number'
+        ? String(body.threadId).trim()
+        : '';
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
 
     const isAdmin = Array.isArray(session.roles) && session.roles.includes('admin');
 
