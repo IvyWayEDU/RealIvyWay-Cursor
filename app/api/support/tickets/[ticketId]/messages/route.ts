@@ -3,8 +3,6 @@ import { getServerSession } from '@/lib/auth/getServerSession';
 import { getDisplayRole } from '@/lib/auth/utils';
 import { addSupportMessage, getSupportTicketById, setSupportTicketStatus } from '@/lib/support/ticketingStorage';
 import { handleApiError } from '@/lib/errorHandler';
-import { validateRequestBody } from '@/lib/validation/utils';
-import { supportTicketMessageSchema } from '@/lib/validation/schemas';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest, ctx: { params: Promise<{ ticketId: string }> }) {
@@ -26,9 +24,12 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ ticket
     const ticket = await getSupportTicketById(id);
     if (!ticket) return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
 
-    const validationResult = await validateRequestBody(request, supportTicketMessageSchema);
-    if (!validationResult.success) return validationResult.response;
-    const { message } = validationResult.data;
+    const body = (await request.json().catch(() => ({}))) as { message?: unknown };
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+    if (!message) {
+      return NextResponse.json({ error: 'Message is required' }, { status: 400 });
+    }
 
     const isAdmin = Array.isArray(session.roles) && session.roles.includes('admin');
 
