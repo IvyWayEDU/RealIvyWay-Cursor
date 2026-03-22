@@ -21,7 +21,9 @@ export async function POST(request: NextRequest) {
     const provider = await getProviderByUserId(session.userId);
     if (!provider) return NextResponse.json({ error: 'Provider profile not found' }, { status: 404 });
 
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-12-15.clover' });
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: '2026-02-25.clover',
+    });
 
     let stripeConnectAccountId = String((provider as any)?.stripeConnectAccountId || '').trim();
     if (!stripeConnectAccountId) {

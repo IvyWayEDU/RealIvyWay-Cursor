@@ -228,7 +228,7 @@ export async function createCheckoutSession(
     return { success: false, error: 'Stripe is not configured. Please set STRIPE_SECRET_KEY environment variable.' };
   }
 
-  const stripe = new Stripe(stripeSecretKey);
+  const stripe = new Stripe(stripeSecretKey, { apiVersion: '2026-02-25.clover' });
 
   try {
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';

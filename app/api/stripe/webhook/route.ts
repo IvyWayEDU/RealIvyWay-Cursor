@@ -10,8 +10,8 @@ import { getProviderPayout } from '@/lib/payouts/getProviderPayout';
 import { deleteCheckoutBookingRecord, readCheckoutBookingRecord } from '@/lib/stripe/checkoutBookingStore.server';
 
 // Initialize Stripe with secret key from environment variable
-const stripe = process.env.STRIPE_SECRET_KEY 
-  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-02-25.clover' })
   : null;
 
 // Get webhook secret from environment variable

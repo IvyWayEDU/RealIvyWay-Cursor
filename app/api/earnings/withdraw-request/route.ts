@@ -79,7 +79,9 @@ export async function POST(request: NextRequest) {
     if (!stripeSecretKey) {
       return Response.json({ success: false, error: 'Stripe is not configured (missing STRIPE_SECRET_KEY)' }, { status: 500 });
     }
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-12-15.clover' });
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: '2026-02-25.clover',
+    });
     const account = await stripe.accounts.retrieve(stripeConnectAccountId);
     if (!account.details_submitted) {
       return Response.json(
