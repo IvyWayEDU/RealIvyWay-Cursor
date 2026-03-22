@@ -173,7 +173,14 @@ async function main() {
   const keys = Object.keys(PRICING_CATALOG) as PricingKey[];
   const taxCodes = await resolveTaxCodes();
 
-  const mode = stripeKey.startsWith('sk_live_') ? 'live' : stripeKey.startsWith('sk_test_') ? 'test' : 'unknown';
+  const mode =
+    typeof stripeKey === 'string'
+      ? stripeKey.startsWith('sk_live_')
+        ? 'live'
+        : stripeKey.startsWith('sk_test_')
+        ? 'test'
+        : 'unknown'
+      : 'unknown';
   console.log(`[INFO] Stripe key mode: ${mode}`);
 
   if (!taxCodes.education || !taxCodes.digital) {
