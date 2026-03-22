@@ -19,7 +19,7 @@ import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2025-12-15.clover',
+      apiVersion: '2026-02-25.clover',
     })
   : null;
 
