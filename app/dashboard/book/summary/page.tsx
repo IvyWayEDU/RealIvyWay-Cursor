@@ -277,7 +277,9 @@ export default function BookingSummaryPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Checkout failed');
+        const errorData = await response.json().catch(() => null);
+        console.error('Checkout API error:', errorData);
+        throw new Error(errorData?.error || errorData?.message || 'Checkout failed');
       }
 
       const data = await response.json();

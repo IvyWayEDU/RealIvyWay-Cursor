@@ -170,12 +170,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const pricingKey = pricing.pricing_key;
+    const sessionDate = sessionDateInput;
+    const sessionTime = sessionTimeInput;
+
     // Debug: print active Stripe price map keys + source once per runtime.
     debugLogStripePriceIdMapKeysOnce('CHECKOUT STRIPE_PRICE_IDS');
 
     let stripePriceId: string;
     try {
-      stripePriceId = getStripePriceIdForPricingKey(pricing.pricing_key);
+      stripePriceId = getStripePriceIdForPricingKey(pricingKey);
     } catch (e) {
       console.error('CHECKOUT failed to resolve Stripe price id:', e);
       return NextResponse.json(
@@ -184,8 +188,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Production-safe debug logs (requested). Do NOT log secrets.
+    console.log('[CHECKOUT DEBUG]', {
+      pricingKey,
+      stripePriceId,
+      providerId,
+      sessionDate,
+      sessionTime,
+      hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
+      hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
+    });
+
     // Required debug logs (requested)
-    console.log('CHECKOUT pricing key:', pricing.pricing_key);
+    console.log('CHECKOUT pricing key:', pricingKey);
     console.log('CHECKOUT stripe price id:', stripePriceId);
     try {
       const info = getStripePriceIdMapDebugInfo();
@@ -413,49 +428,82 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      checkoutSession = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'], // Cards are always enabled
-      // Apple Pay, Google Pay, Cash App, Affirm, Klarna, Link, etc. are automatically
-      // enabled by Stripe Checkout when available for the customer
-      // Taxes: Stripe Tax calculates tax based on the customer's address and product tax category.
-      // IMPORTANT: This must add tax ON TOP of the listed service price (prices must be tax_behavior='exclusive').
-      automatic_tax: { enabled: true },
-      // Collect billing address so Stripe Tax can determine jurisdiction.
-      billing_address_collection: 'required',
-      // Optional: allow customers with tax IDs (e.g. VAT/GST) to provide them.
-      tax_id_collection: { enabled: true },
-      allow_promotion_codes: false,
-      line_items: [{ price: stripePriceId, quantity: 1 }],
-      mode: 'payment',
-      // IMPORTANT: Do NOT pass both `customer` and `customer_email`.
-      // Always use email to avoid creation failures and let Stripe associate receipts.
-      customer_email: user.email,
-      success_url: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/dashboard/book/summary?canceled=true`,
-      client_reference_id: `ivyway|${canonicalServiceType}|${studentId}|${providerId}|${String(single?.scheduledStart || '')}|${String(single?.scheduledEnd || '')}|${checkoutBookingId}`.slice(0, 500),
-      metadata: {
-        // Keep Stripe metadata minimal; webhook primarily uses client_reference_id + checkout store.
-        serviceType: canonicalServiceType,
-        checkoutBookingId,
-        // Helpful context (size-limited; canonical persistence is in checkout store above)
-        subject: (subject ? subject.slice(0, 250) : ''),
-        topic: (topic ? topic.slice(0, 250) : ''),
-      },
-      // Enable 3D Secure for cards
-      payment_method_options: {
-        card: {
-          request_three_d_secure: 'automatic',
-        },
-      },
-      });
-    } catch (err) {
-      // Stripe checkout creation failed; roll back reservation so the slot reappears
+      try {
+        checkoutSession = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'], // Cards are always enabled
+          // Apple Pay, Google Pay, Cash App, Affirm, Klarna, Link, etc. are automatically
+          // enabled by Stripe Checkout when available for the customer
+          // Taxes: Stripe Tax calculates tax based on the customer's address and product tax category.
+          // IMPORTANT: This must add tax ON TOP of the listed service price (prices must be tax_behavior='exclusive').
+          automatic_tax: { enabled: true },
+          // Collect billing address so Stripe Tax can determine jurisdiction.
+          billing_address_collection: 'required',
+          // Optional: allow customers with tax IDs (e.g. VAT/GST) to provide them.
+          tax_id_collection: { enabled: true },
+          allow_promotion_codes: false,
+          line_items: [{ price: stripePriceId, quantity: 1 }],
+          mode: 'payment',
+          // IMPORTANT: Do NOT pass both `customer` and `customer_email`.
+          // Always use email to avoid creation failures and let Stripe associate receipts.
+          customer_email: user.email,
+          success_url: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${baseUrl}/dashboard/book/summary?canceled=true`,
+          client_reference_id: `ivyway|${canonicalServiceType}|${studentId}|${providerId}|${String(single?.scheduledStart || '')}|${String(single?.scheduledEnd || '')}|${checkoutBookingId}`.slice(0, 500),
+          metadata: {
+            // Keep Stripe metadata minimal; webhook primarily uses client_reference_id + checkout store.
+            serviceType: canonicalServiceType,
+            checkoutBookingId,
+            // Helpful context (size-limited; canonical persistence is in checkout store above)
+            subject: (subject ? subject.slice(0, 250) : ''),
+            topic: (topic ? topic.slice(0, 250) : ''),
+          },
+          // Enable 3D Secure for cards
+          payment_method_options: {
+            card: {
+              request_three_d_secure: 'automatic',
+            },
+          },
+        });
+      } catch (error) {
+        console.error('[CHECKOUT ERROR]', {
+          message: error instanceof Error ? error.message : String(error),
+          pricingKey,
+          stripePriceId,
+          providerId,
+          sessionDate,
+          sessionTime,
+          stripe: {
+            type: (error as any)?.type,
+            code: (error as any)?.code,
+            statusCode: (error as any)?.statusCode,
+            requestId: (error as any)?.requestId,
+          },
+        });
+
+        // Stripe checkout creation failed; roll back reservation so the slot reappears
+        await unreserveSlotsAtomically(slotsToReserve);
+        // Best-effort cleanup of server-side booking record
+        try {
+          await deleteCheckoutBookingRecord(checkoutBookingId);
+        } catch {}
+
+        // TEMPORARY: Return real error message for production debugging
+        return NextResponse.json(
+          {
+            success: false,
+            error: error instanceof Error ? error.message : 'Checkout failed',
+          },
+          { status: 500 }
+        );
+      }
+    } catch (error) {
+      // Non-Stripe errors in the checkout creation block
       await unreserveSlotsAtomically(slotsToReserve);
       // Best-effort cleanup of server-side booking record
       try {
         await deleteCheckoutBookingRecord(checkoutBookingId);
       } catch {}
-      throw err;
+      throw error;
     }
 
     return NextResponse.json({
