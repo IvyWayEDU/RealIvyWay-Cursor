@@ -65,7 +65,9 @@ export async function POST(request: NextRequest) {
         );
       }
       // Normalize school IDs
-      const normalizedSchoolIds = body.schoolIds.map((id: string) => normalizeSchoolId(id));
+      const normalizedSchoolIds = Array.isArray(body.schoolIds)
+        ? (body.schoolIds as string[]).map((id) => normalizeSchoolId(id))
+        : [];
       updateData.schoolIds = normalizedSchoolIds;
       updateData.schoolNames = body.schoolNames;
       // Single source of truth for matching + display (primary school = first selection)
