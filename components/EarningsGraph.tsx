@@ -33,17 +33,27 @@ export default function EarningsGraph({ bookings }: EarningsGraphProps) {
   }
 
   // Calculate cumulative earnings over time
-  let cumulativeEarnings = 0;
-  const dataPoints = displayBookings.map((booking) => {
-    cumulativeEarnings += booking.providerPayoutCents;
+  const dataPoints = displayBookings.reduce<
+    Array<{
+      date: Date;
+      earnings: number;
+      label: string;
+      fullDate: string;
+    }>
+  >((acc, booking) => {
+    const prev = acc.length > 0 ? acc[acc.length - 1]!.earnings : 0;
+    const earnings = prev + booking.providerPayoutCents;
     const date = new Date(booking.completedAt || booking.bookedAt || booking.scheduledStartTime);
-    return {
+    return [
+      ...acc,
+      {
       date,
-      earnings: cumulativeEarnings,
+      earnings,
       label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       fullDate: date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
-    };
-  });
+      },
+    ];
+  }, []);
 
   // Graph dimensions
   const width = 100;

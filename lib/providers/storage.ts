@@ -8,6 +8,19 @@ import { ProviderProfile } from '@/lib/models/types';
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PROVIDERS_FILE = path.join(DATA_DIR, 'providers.json');
 
+export type ProviderPayoutDetails = Pick<
+  ProviderProfile,
+  | 'payoutMethod'
+  | 'wiseEmail'
+  | 'paypalEmail'
+  | 'zelleContact'
+  | 'bankName'
+  | 'bankAccountNumber'
+  | 'bankRoutingNumber'
+  | 'bankCountry'
+  | 'accountHolderName'
+>;
+
 // Ensure data directory exists
 async function ensureDataDir() {
   if (!existsSync(DATA_DIR)) {
@@ -89,6 +102,41 @@ export async function updateProvider(id: string, updates: Partial<Omit<ProviderP
   
   await saveProviders(providers);
   return providers[index];
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const v = value.trim();
+  return v ? v : undefined;
+}
+
+/**
+ * Update payout details for a provider (by provider userId).
+ * Storage-only helper used by API routes and server actions.
+ */
+export async function updateProviderPayoutDetailsByUserId(
+  userId: string,
+  details: ProviderPayoutDetails
+): Promise<ProviderProfile | null> {
+  const provider = await getProviderByUserId(userId);
+  if (!provider) return null;
+
+  // IMPORTANT: Only update keys that are present on the input object.
+  // This prevents accidental wiping of existing payout details on partial updates.
+  const updates: ProviderPayoutDetails = {};
+  const has = (k: keyof ProviderPayoutDetails) => Object.prototype.hasOwnProperty.call(details as any, k);
+
+  if (has('payoutMethod')) updates.payoutMethod = normalizeOptionalString((details as any).payoutMethod);
+  if (has('wiseEmail')) updates.wiseEmail = normalizeOptionalString((details as any).wiseEmail);
+  if (has('paypalEmail')) updates.paypalEmail = normalizeOptionalString((details as any).paypalEmail);
+  if (has('zelleContact')) updates.zelleContact = normalizeOptionalString((details as any).zelleContact);
+  if (has('bankName')) updates.bankName = normalizeOptionalString((details as any).bankName);
+  if (has('bankAccountNumber')) updates.bankAccountNumber = normalizeOptionalString((details as any).bankAccountNumber);
+  if (has('bankRoutingNumber')) updates.bankRoutingNumber = normalizeOptionalString((details as any).bankRoutingNumber);
+  if (has('bankCountry')) updates.bankCountry = normalizeOptionalString((details as any).bankCountry);
+  if (has('accountHolderName')) updates.accountHolderName = normalizeOptionalString((details as any).accountHolderName);
+
+  return updateProvider(provider.id, updates as any);
 }
 
 // Delete provider

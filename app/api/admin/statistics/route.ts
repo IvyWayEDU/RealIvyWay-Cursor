@@ -2,9 +2,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getAdminStatistics } from '@/lib/admin/statistics.server';
 import { getSessions } from '@/lib/sessions/storage';
+import { getUsers } from '@/lib/auth/storage';
+import { listAllPayoutRequests } from '@/lib/payouts/payout-requests.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 function money(cents: number): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
+}
+
+function safeInt(n: unknown): number {
+  const v = typeof n === 'number' ? n : Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.floor(v);
+}
+
+function getProviderPayoutCents(session: any): number {
+  const n = safeInt(session?.provider_payout_cents ?? session?.providerPayoutCents ?? 0);
+  return Math.max(0, n);
+}
+
+function getGrossCents(session: any): number {
+  const n = safeInt(session?.session_price_cents ?? session?.priceCents ?? session?.amountChargedCents ?? session?.grossCents ?? 0);
+  return Math.max(0, n);
+}
+
+function getPlatformRevenueCents(session: any): number {
+  const ivy = safeInt(session?.ivyway_take_cents ?? 0);
+  if (ivy > 0) return ivy;
+  const pf = safeInt(session?.platformFeeCents ?? 0);
+  if (pf > 0) return pf;
+  return Math.max(0, getGrossCents(session) - getProviderPayoutCents(session));
 }
 
 function csvEscape(v: unknown): string {
@@ -27,18 +54,139 @@ export async function GET(request: NextRequest) {
   try {
     const stats = await getAdminStatistics({ months: 12 });
 
-    if (exportKind === 'revenue') {
-      const rows: Array<Array<unknown>> = [
-        ['service_type', 'revenue_usd', 'revenue_cents', 'percent_of_total'],
-      ];
-      for (const r of stats.revenueOverview.byService) {
-        rows.push([r.serviceType, money(r.revenueCents), r.revenueCents, (r.percentOfTotal * 100).toFixed(2)]);
+    if (exportKind === 'earnings') {
+      const [users, sessions] = await Promise.all([getUsers(), getSessions()]);
+      const userById = new Map<string, any>((users as any[]).filter((u) => typeof u?.id === 'string').map((u) => [u.id, u]));
+
+      const providerAgg = new Map<
+        string,
+        {
+          providerId: string;
+          providerName: string;
+          providerEmail: string;
+          sessionsCompleted: number;
+          grossCents: number;
+          platformRevenueCents: number;
+          providerEarningsCents: number;
+          payoutsSentCents: number;
+          pendingPayoutsCents: number;
+        }
+      >();
+
+      for (const s of sessions as any[]) {
+        if (String(s?.status || '') !== 'completed') continue;
+        const providerId = typeof s?.providerId === 'string' ? s.providerId.trim() : '';
+        if (!providerId) continue;
+
+        const u = userById.get(providerId);
+        const providerName =
+          (typeof s?.providerName === 'string' && s.providerName.trim()) ||
+          (typeof u?.name === 'string' && String(u.name).trim()) ||
+          (typeof u?.email === 'string' && String(u.email).trim()) ||
+          providerId;
+        const providerEmail = typeof u?.email === 'string' ? u.email : '';
+
+        const grossCents = getGrossCents(s);
+        const platformRevenueCents = getPlatformRevenueCents(s);
+        const providerEarningsCents = getProviderPayoutCents(s);
+
+        const payoutStatus = String(s?.payoutStatus || 'available');
+        const isPaid = payoutStatus === 'paid' || payoutStatus === 'paid_out';
+        const isPending = payoutStatus === 'pending_payout' || payoutStatus === 'approved' || payoutStatus === 'locked';
+
+        const existing = providerAgg.get(providerId) || {
+          providerId,
+          providerName,
+          providerEmail,
+          sessionsCompleted: 0,
+          grossCents: 0,
+          platformRevenueCents: 0,
+          providerEarningsCents: 0,
+          payoutsSentCents: 0,
+          pendingPayoutsCents: 0,
+        };
+
+        existing.providerName = existing.providerName || providerName;
+        existing.providerEmail = existing.providerEmail || providerEmail;
+        existing.sessionsCompleted += 1;
+        existing.grossCents += grossCents;
+        existing.platformRevenueCents += platformRevenueCents;
+        existing.providerEarningsCents += providerEarningsCents;
+        if (isPaid) existing.payoutsSentCents += providerEarningsCents;
+        if (isPending) existing.pendingPayoutsCents += providerEarningsCents;
+        providerAgg.set(providerId, existing);
       }
+
+      const rows: Array<Array<unknown>> = [
+        [
+          'provider_id',
+          'provider_name',
+          'provider_email',
+          'sessions_completed',
+          'gross_usd',
+          'gross_cents',
+          'platform_revenue_usd',
+          'platform_revenue_cents',
+          'provider_earnings_usd',
+          'provider_earnings_cents',
+          'payouts_sent_usd',
+          'payouts_sent_cents',
+          'pending_payouts_usd',
+          'pending_payouts_cents',
+        ],
+      ];
+
+      const all = Array.from(providerAgg.values()).sort(
+        (a, b) => (b.platformRevenueCents - a.platformRevenueCents) || (b.providerEarningsCents - a.providerEarningsCents)
+      );
+
+      let totSessions = 0;
+      let totGross = 0;
+      let totPlatform = 0;
+      let totProvider = 0;
+      let totSent = 0;
+      let totPending = 0;
+
+      for (const r of all) {
+        rows.push([
+          r.providerId,
+          r.providerName,
+          r.providerEmail,
+          r.sessionsCompleted,
+          money(r.grossCents),
+          r.grossCents,
+          money(r.platformRevenueCents),
+          r.platformRevenueCents,
+          money(r.providerEarningsCents),
+          r.providerEarningsCents,
+          money(r.payoutsSentCents),
+          r.payoutsSentCents,
+          money(r.pendingPayoutsCents),
+          r.pendingPayoutsCents,
+        ]);
+        totSessions += r.sessionsCompleted;
+        totGross += r.grossCents;
+        totPlatform += r.platformRevenueCents;
+        totProvider += r.providerEarningsCents;
+        totSent += r.payoutsSentCents;
+        totPending += r.pendingPayoutsCents;
+      }
+
       rows.push([
         'TOTAL',
-        money(stats.revenueOverview.totalRevenueCents),
-        stats.revenueOverview.totalRevenueCents,
-        '100.00',
+        '',
+        '',
+        totSessions,
+        money(totGross),
+        totGross,
+        money(totPlatform),
+        totPlatform,
+        money(totProvider),
+        totProvider,
+        money(totSent),
+        totSent,
+        money(totPending),
+        totPending,
       ]);
 
       const csv = toCsv(rows);
@@ -46,7 +194,7 @@ export async function GET(request: NextRequest) {
         status: 200,
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',
-          'Content-Disposition': `attachment; filename="ivyway-revenue.csv"`,
+          'Content-Disposition': `attachment; filename="ivyway-earnings.csv"`,
           'Cache-Control': 'no-store',
         },
       });
@@ -128,6 +276,64 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    if (exportKind === 'payouts') {
+      const [users, payoutRequests] = await Promise.all([getUsers(), listAllPayoutRequests()]);
+      const userById = new Map<string, any>((users as any[]).filter((u) => typeof u?.id === 'string').map((u) => [u.id, u]));
+
+      const rows: Array<Array<unknown>> = [
+        [
+          'payout_request_id',
+          'provider_id',
+          'provider_name',
+          'provider_email',
+          'amount_usd',
+          'amount_cents',
+          'status',
+          'created_at',
+          'approved_at',
+          'paid_at',
+          'payout_method',
+          'payout_destination_masked',
+        ],
+      ];
+
+      for (const pr of payoutRequests as any[]) {
+        const providerId = typeof pr?.providerId === 'string' ? pr.providerId : '';
+        const u = providerId ? userById.get(providerId) : null;
+        const providerName =
+          (typeof u?.name === 'string' && u.name.trim()) ||
+          (typeof u?.email === 'string' && u.email.trim()) ||
+          providerId ||
+          '';
+        const providerEmail = typeof u?.email === 'string' ? u.email : '';
+        const amountCents = Math.max(0, safeInt(pr?.amountCents ?? 0));
+        rows.push([
+          pr?.id ?? '',
+          providerId,
+          providerName,
+          providerEmail,
+          money(amountCents),
+          amountCents,
+          pr?.status ?? '',
+          pr?.createdAt ?? '',
+          pr?.approvedAt ?? '',
+          pr?.paidAt ?? '',
+          pr?.payoutMethod ?? '',
+          pr?.payoutDestinationMasked ?? pr?.payoutDestination ?? '',
+        ]);
+      }
+
+      const csv = toCsv(rows);
+      return new NextResponse(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename="ivyway-payouts.csv"`,
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
     // Default JSON response
     return NextResponse.json(stats, {
       status: 200,
@@ -136,8 +342,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[ADMIN STATISTICS] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/statistics]' });
   }
 }
 

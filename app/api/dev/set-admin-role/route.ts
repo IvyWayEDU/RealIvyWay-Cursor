@@ -1,5 +1,7 @@
 import { setAdminRoleByEmail } from '@/lib/auth/setAdminRole';
 import { NextResponse } from 'next/server';
+import { handleApiError } from '@/lib/errorHandler';
+import { getServerSession } from '@/lib/auth/getServerSession';
 
 /**
  * Set Admin Role API Route
@@ -16,6 +18,16 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
+    // DEV-ONLY: never allow in production
+    if (process.env.NODE_ENV === 'production') {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    // SECURITY: require an admin session even in dev
+    const session = await getServerSession();
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (session.user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
     const body = await request.json();
     const { email } = body;
 
@@ -41,14 +53,7 @@ export async function POST(request: Request) {
       );
     }
   } catch (error) {
-    console.error('[SET_ADMIN_ROLE API] Error:', error);
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Failed to set admin role' 
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/dev/set-admin-role]' });
   }
 }
 

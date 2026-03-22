@@ -7,6 +7,7 @@ import { getUsers } from '@/lib/auth/storage';
 import { createProvider } from '@/lib/providers/storage';
 import crypto from 'crypto';
 import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -138,11 +139,7 @@ export async function POST(request: NextRequest) {
       },
     }, { status: 201 });
   } catch (error) {
-    console.error('Registration error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/auth/register]' });
   }
 }
 

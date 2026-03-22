@@ -3,11 +3,11 @@
 import { useState } from 'react';
 
 export default function DevClearSessionsButton() {
+  const [isClearing, setIsClearing] = useState(false);
+
   if (process.env.NODE_ENV === 'production') {
     return null;
   }
-
-  const [isClearing, setIsClearing] = useState(false);
 
   return (
     <div className="mb-6 rounded border border-red-400 bg-red-50 p-4">

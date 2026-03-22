@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUsers, updateUser } from '@/lib/auth/storage';
 import { findSchoolByDisplayName, mapLegacySchoolNameToId, SCHOOLS_LIST } from '@/lib/models/schools';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * Dev-only migration helper to map provider schoolNames to schoolIds
@@ -110,15 +111,7 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json(result);
   } catch (error) {
-    console.error('[MIGRATE_PROVIDER_SCHOOLS] Error:', error);
-    return NextResponse.json(
-      { 
-        success: false,
-        error: 'Failed to migrate provider schools',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/dev/migrate-provider-schools]' });
   }
 }
 

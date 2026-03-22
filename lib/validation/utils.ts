@@ -1,6 +1,24 @@
 import { z } from 'zod';
 import { NextRequest, NextResponse } from 'next/server';
 
+export type RequestBodyValidationError =
+  | {
+      kind: 'zod';
+      message: 'Validation failed';
+      details: Array<{ path: string; message: string }>;
+      rawError: z.ZodError;
+    }
+  | {
+      kind: 'invalid_json';
+      message: 'Invalid JSON in request body';
+      rawError: unknown;
+    }
+  | {
+      kind: 'unknown';
+      message: 'Invalid request body';
+      rawError: unknown;
+    };
+
 /**
  * Validates request body against a Zod schema and returns parsed data or error response
  * Strips unknown fields to reject unexpected data
@@ -8,23 +26,35 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function validateRequestBody<T>(
   request: NextRequest,
   schema: z.ZodSchema<T>
-): Promise<{ success: true; data: T } | { success: false; response: NextResponse }> {
+): Promise<
+  | { success: true; data: T }
+  | { success: false; response: NextResponse; error: RequestBodyValidationError }
+> {
   try {
     const body = await request.json();
-    // Use strict mode to reject unknown fields
-    const parsed = schema.strict().parse(body);
+    // Use strict mode to reject unknown fields (when schema supports it)
+    const strictSchema =
+      typeof (schema as any)?.strict === 'function' ? ((schema as any).strict() as z.ZodSchema<T>) : schema;
+    const parsed = strictSchema.parse(body);
     return { success: true, data: parsed };
   } catch (error) {
     if (error instanceof z.ZodError) {
+      const details = error.issues.map((err) => ({
+        path: err.path.join('.'),
+        message: err.message,
+      }));
       return {
         success: false,
+        error: {
+          kind: 'zod',
+          message: 'Validation failed',
+          details,
+          rawError: error,
+        },
         response: NextResponse.json(
           {
             error: 'Validation failed',
-            details: error.errors.map((err) => ({
-              path: err.path.join('.'),
-              message: err.message,
-            })),
+            details,
           },
           { status: 400 }
         ),
@@ -33,6 +63,11 @@ export async function validateRequestBody<T>(
     // JSON parse error
     return {
       success: false,
+      error: {
+        kind: 'invalid_json',
+        message: 'Invalid JSON in request body',
+        rawError: error,
+      },
       response: NextResponse.json(
         { error: 'Invalid JSON in request body' },
         { status: 400 }
@@ -63,11 +98,14 @@ export function validateQueryParams<T>(
       }
     }
     
-    const parsed = schema.strict().parse(params);
+    const strictSchema =
+      typeof (schema as any)?.strict === 'function' ? ((schema as any).strict() as z.ZodSchema<T>) : schema;
+    const parsed = strictSchema.parse(params);
     return { success: true, data: parsed };
   } catch (error) {
-    const anyError = error as unknown as { errors?: unknown; message?: unknown };
-    const zodStyleErrors = Array.isArray(anyError?.errors) ? anyError.errors : null;
+    const anyError = error as unknown as { errors?: unknown; issues?: unknown; message?: unknown };
+    const zodStyleErrors =
+      Array.isArray(anyError?.issues) ? anyError.issues : Array.isArray(anyError?.errors) ? anyError.errors : null;
 
     if (zodStyleErrors) {
       return {

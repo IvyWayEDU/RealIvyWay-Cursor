@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { resolveUnifiedSessions } from '@/lib/sessions/unified-resolver';
 import { getSessions } from '@/lib/sessions/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * SECURITY: Admin access required for dev routes
@@ -63,24 +64,14 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    errors.push(errorMessage);
-    console.error('[DEV_RESOLVE] Error in resolver:', error);
-
-    const endedAt = new Date();
-    const nowISO = new Date().toISOString();
-
-    return NextResponse.json({
-      startedAt: startedAt.toISOString(),
-      endedAt: endedAt.toISOString(),
-      nowISO,
-      totalSessionsChecked: 0,
-      eligibleCount: 0,
-      transitionedCount: 0,
-      completedCount: 0,
-      providerNoShowCount: 0,
-      errors,
-    }, { status: 500 });
+    errors.push('Resolver run failed');
+    return handleApiError(error, {
+      logPrefix: '[api/dev/resolve-sessions]',
+      logContext: {
+        startedAt: startedAt.toISOString(),
+        errors,
+      },
+    });
   }
 }
 

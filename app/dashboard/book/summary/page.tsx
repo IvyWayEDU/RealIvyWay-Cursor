@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
@@ -215,32 +215,69 @@ export default function BookingSummaryPage() {
     setError(null);
 
     try {
+      const planInfo = getPlanInfo();
+      const pricingKey = typeof (planInfo as any)?.pricing_key === 'string' ? String((planInfo as any).pricing_key).trim() : '';
+      const first = bookingState.selectedSessions?.[0];
+      const providerId =
+        (typeof bookingState.provider === 'string' ? bookingState.provider.trim() : '') ||
+        (typeof (first as any)?.providerId === 'string' ? String((first as any).providerId).trim() : '');
+      const selectedDate = first?.date instanceof Date ? first.date.toISOString() : '';
+      const selectedTime = String((first as any)?.displayTime || (first as any)?.time || '').trim();
+
+      console.log({
+        providerId,
+        selectedDate,
+        selectedTime,
+        pricingKey,
+      });
+
+      if (!providerId) {
+        setError('Provider not loaded. Please refresh.');
+        setIsProcessing(false);
+        return;
+      }
+      if (!selectedDate || !selectedTime) {
+        setError('Session time not loaded. Please refresh.');
+        setIsProcessing(false);
+        return;
+      }
+      if (!pricingKey) {
+        setError('Pricing not loaded. Please refresh.');
+        setIsProcessing(false);
+        return;
+      }
+
       const payloadBookingState = {
         ...bookingState,
         // Ensure schoolId/schoolName are present for counseling booking validation
         schoolId: getSchoolId() || undefined,
         schoolName: getSchoolDisplay() || undefined,
+        provider: providerId || null,
         selectedSessions: bookingState.selectedSessions.map((session) => ({
           ...session,
           // Preserve canonical UTC identity for server-side validation/reservation
           startTimeUTC: (session as any).startTimeUTC,
           endTimeUTC: (session as any).endTimeUTC,
-          providerId: bookingState.provider ?? (session as any).providerId ?? null,
+          providerId: providerId ?? (session as any).providerId ?? null,
           date: session.date.toISOString(),
-          time: (session as any).displayTime,
+          time: (session as any).displayTime || (session as any).time,
         })),
       };
 
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookingState: payloadBookingState }),
+        body: JSON.stringify({
+          providerId,
+          sessionDate: selectedDate,
+          sessionTime: selectedTime,
+          pricingKey,
+          bookingState: payloadBookingState,
+        }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        const msg = errorData.error || 'Request failed';
-        throw new Error(msg);
+        throw new Error('Checkout failed');
       }
 
       const data = await response.json();
@@ -249,14 +286,15 @@ export default function BookingSummaryPage() {
       window.location.href = data.url;
     } catch (err) {
       console.error('Checkout error:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred. Please try again.');
+      setError('Unable to book session. Please try again.');
       setIsProcessing(false);
     }
   };
 
 
   const providerId = bookingState?.provider || null;
-  const { displayNames, status: providerNameStatus } = useUserDisplayMap(providerId ? [providerId] : []);
+  const providerIds = useMemo(() => (providerId ? [providerId] : []), [providerId]);
+  const { displayNames, status: providerNameStatus } = useUserDisplayMap(providerIds);
   const providerDisplayName =
     providerId && typeof displayNames?.[providerId] === 'string' && displayNames[providerId].trim()
       ? displayNames[providerId].trim()

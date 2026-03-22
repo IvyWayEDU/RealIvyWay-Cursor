@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { generateSlots } from '@/lib/availability/slots';
 import { normalizeServiceType } from '@/lib/availability/engine';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function GET(request: NextRequest) {
   try {
@@ -65,10 +66,6 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ slots });
   } catch (error) {
-    console.error('Get slots error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/availability/slots]' });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { auth } from '@/lib/auth/middleware';
 import { getProviderByUserId } from '@/lib/providers/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export const runtime = 'nodejs';
 
@@ -26,7 +27,7 @@ export async function GET(_request: NextRequest) {
       return NextResponse.json({ error: 'Stripe is not configured (missing STRIPE_SECRET_KEY)' }, { status: 500 });
     }
 
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-12-15.clover' });
     const account = await stripe.accounts.retrieve(stripeConnectAccountId);
 
     if (!account.details_submitted) {
@@ -39,8 +40,7 @@ export async function GET(_request: NextRequest) {
 
     return NextResponse.json({ status: 'connected' satisfies StripeConnectStatus }, { status: 200 });
   } catch (error) {
-    console.error('[stripe/connect/status] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/stripe/connect/status]' });
   }
 }
 

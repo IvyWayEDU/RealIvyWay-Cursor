@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/middleware';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { handleApiError } from '@/lib/errorHandler';
 
 type Balances = Record<string, { balanceCents: number; updatedAt: string }>;
 
@@ -48,8 +49,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, providerId, balance: balances[providerId] });
   } catch (error) {
-    console.error('[ADMIN EARNINGS ADJUST BALANCE] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/earnings/adjust-balance]' });
   }
 }
 

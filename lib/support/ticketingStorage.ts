@@ -4,7 +4,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 
-export type SupportTicketStatus = 'open' | 'admin_replied' | 'closed' | (string & {});
+export type SupportTicketStatus =
+  | 'open'
+  | 'pending'
+  | 'admin_replied'
+  | 'resolved'
+  | 'closed'
+  | (string & {});
 
 export type SupportTicketRole = 'student' | 'provider' | 'admin' | (string & {});
 
@@ -15,6 +21,10 @@ export interface SupportTicketRow {
   subject: string;
   status: SupportTicketStatus;
   createdAt: string; // ISO (timestamp default now())
+  updatedAt?: string; // ISO
+  resolvedAt?: string | null; // ISO
+  unreadForAdmin?: number;
+  unreadForUser?: number;
 }
 
 export interface SupportMessageRow {
@@ -29,6 +39,8 @@ export interface SupportMessageRow {
 export interface SupportTicketWithMeta extends SupportTicketRow {
   lastMessageAt: string;
   messageCount: number;
+  lastMessagePreview?: string;
+  lastMessageSenderRole?: string;
 }
 
 export interface SupportTicketThread {
@@ -118,7 +130,23 @@ export async function listSupportTickets(args: {
     const lastMessageAt = ms.length
       ? ms.reduce((acc, cur) => (cur.createdAt > acc ? cur.createdAt : acc), ms[0].createdAt)
       : t.createdAt;
-    return { ...t, lastMessageAt, messageCount: ms.length };
+    const lastMessage = ms.length ? ms.reduce((acc, cur) => (cur.createdAt > acc.createdAt ? cur : acc), ms[0]) : null;
+    const previewRaw = String(lastMessage?.message || '').replace(/\s+/g, ' ').trim();
+    const lastMessagePreview = previewRaw ? (previewRaw.length > 120 ? `${previewRaw.slice(0, 120)}…` : previewRaw) : '';
+    const lastMessageSenderRole = lastMessage?.senderRole ? String(lastMessage.senderRole) : '';
+    const updatedAt = t.updatedAt ?? lastMessageAt;
+    const unreadForAdmin = typeof t.unreadForAdmin === 'number' ? t.unreadForAdmin : 0;
+    const unreadForUser = typeof t.unreadForUser === 'number' ? t.unreadForUser : 0;
+    return {
+      ...t,
+      lastMessageAt,
+      updatedAt,
+      unreadForAdmin,
+      unreadForUser,
+      messageCount: ms.length,
+      lastMessagePreview,
+      lastMessageSenderRole,
+    };
   });
 
   meta.sort((a, b) => (b.lastMessageAt || '').localeCompare(a.lastMessageAt || ''));
@@ -140,6 +168,10 @@ export async function createSupportTicket(input: {
     subject: input.subject,
     status: input.status ?? 'open',
     createdAt: now,
+    updatedAt: now,
+    resolvedAt: null,
+    unreadForAdmin: 0,
+    unreadForUser: 0,
   };
   tickets.push(ticket);
   await saveAllSupportTickets(tickets);
@@ -150,7 +182,30 @@ export async function setSupportTicketStatus(ticketId: string, status: SupportTi
   const tickets = await getAllSupportTickets();
   const idx = tickets.findIndex(t => t.id === ticketId);
   if (idx === -1) throw new Error('Ticket not found');
-  tickets[idx] = { ...tickets[idx], status };
+  const now = new Date().toISOString();
+  const nextResolvedAt = (status === 'resolved' || status === 'closed') ? now : null;
+  tickets[idx] = {
+    ...tickets[idx],
+    status,
+    updatedAt: now,
+    resolvedAt: nextResolvedAt,
+  };
+  await saveAllSupportTickets(tickets);
+  return tickets[idx];
+}
+
+export async function markSupportTicketRead(ticketId: string, by: 'admin' | 'user'): Promise<SupportTicketRow> {
+  const tickets = await getAllSupportTickets();
+  const idx = tickets.findIndex(t => t.id === ticketId);
+  if (idx === -1) throw new Error('Ticket not found');
+  const cur = tickets[idx];
+  const now = new Date().toISOString();
+  tickets[idx] = {
+    ...cur,
+    updatedAt: cur.updatedAt ?? now,
+    unreadForAdmin: by === 'admin' ? 0 : (cur.unreadForAdmin ?? 0),
+    unreadForUser: by === 'user' ? 0 : (cur.unreadForUser ?? 0),
+  };
   await saveAllSupportTickets(tickets);
   return tickets[idx];
 }
@@ -162,8 +217,34 @@ export async function addSupportMessage(input: {
   message: string;
 }): Promise<SupportMessageRow> {
   const [tickets, messages] = await Promise.all([getAllSupportTickets(), getAllSupportMessages()]);
-  const exists = tickets.some(t => t.id === input.ticketId);
-  if (!exists) throw new Error('Ticket not found');
+  const idx = tickets.findIndex(t => t.id === input.ticketId);
+  if (idx === -1) throw new Error('Ticket not found');
+
+  const normalizedMessage = typeof input.message === 'string' ? input.message.trim() : '';
+  if (!normalizedMessage) throw new Error('Message is required');
+
+  // Protect against duplicate sends (double-click / retries).
+  // If the last message for this ticket matches exactly (same senderRole + same trimmed message) within 15s, treat as idempotent.
+  const lastForTicket = [...messages]
+    .filter(m => m.ticketId === input.ticketId)
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
+    .slice(-1)[0];
+  if (lastForTicket) {
+    const lastAtMs = Date.parse(String(lastForTicket.createdAt || ''));
+    const nowMs = Date.now();
+    const lastMsgText = typeof lastForTicket.message === 'string' ? lastForTicket.message.trim() : '';
+    const lastRole = typeof lastForTicket.senderRole === 'string' ? lastForTicket.senderRole.trim().toLowerCase() : '';
+    const curRole = typeof input.senderRole === 'string' ? input.senderRole.trim().toLowerCase() : '';
+    if (
+      lastMsgText === normalizedMessage &&
+      lastRole === curRole &&
+      Number.isFinite(lastAtMs) &&
+      nowMs - lastAtMs >= 0 &&
+      nowMs - lastAtMs < 15_000
+    ) {
+      return lastForTicket;
+    }
+  }
 
   const now = new Date().toISOString();
   const msg: SupportMessageRow = {
@@ -171,11 +252,24 @@ export async function addSupportMessage(input: {
     ticketId: input.ticketId,
     senderId: input.senderId,
     senderRole: input.senderRole,
-    message: input.message,
+    message: normalizedMessage,
     createdAt: now,
   };
   messages.push(msg);
-  await saveAllSupportMessages(messages);
+
+  // Update ticket metadata + unread counters
+  const cur = tickets[idx];
+  const isAdminSender = String(input.senderRole || '').toLowerCase() === 'admin';
+  const unreadForAdmin = cur.unreadForAdmin ?? 0;
+  const unreadForUser = cur.unreadForUser ?? 0;
+  tickets[idx] = {
+    ...cur,
+    updatedAt: now,
+    unreadForAdmin: isAdminSender ? 0 : (unreadForAdmin + 1),
+    unreadForUser: isAdminSender ? (unreadForUser + 1) : 0,
+  };
+
+  await Promise.all([saveAllSupportMessages(messages), saveAllSupportTickets(tickets)]);
   return msg;
 }
 
@@ -186,7 +280,7 @@ export async function getOrCreateActiveSupportTicketForUser(input: {
 }): Promise<SupportTicketRow> {
   const tickets = await getAllSupportTickets();
   const active = tickets
-    .filter(t => t.userId === input.userId && t.status !== 'closed')
+    .filter(t => t.userId === input.userId && t.status !== 'closed' && t.status !== 'resolved')
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
 
   if (active) return active;

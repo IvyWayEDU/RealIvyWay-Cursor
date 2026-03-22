@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/requireAuth';
 import { requireAdmin as requireAdminResp } from '@/lib/auth/authorization';
 import { getAllSupportConversations } from '@/lib/support/storage';
 import { getUserById } from '@/lib/auth/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function GET() {
   try {
@@ -35,8 +36,7 @@ export async function GET() {
 
     return NextResponse.json({ conversations: enriched });
   } catch (error) {
-    console.error('Support conversations error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/conversations]' });
   }
 }
 

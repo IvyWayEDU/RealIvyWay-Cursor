@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthContext } from '@/lib/auth/session';
 import { getSessions, updateSession } from '@/lib/sessions/storage';
 import { Session } from '@/lib/models/types';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * Retroactive migration script to fix already completed sessions in dev
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
     }
 
     let migratedCount = 0;
-    let errors: string[] = [];
+    const errors: string[] = [];
 
     // Migrate each session
     for (const sessionToMigrate of sessionsToMigrate) {
@@ -109,14 +110,7 @@ export async function POST(request: NextRequest) {
       errors: errors.length > 0 ? errors : undefined,
     });
   } catch (error) {
-    console.error('Error running migration:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to run migration',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/migrate-completed]' });
   }
 }
 

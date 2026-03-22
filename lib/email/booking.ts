@@ -84,13 +84,11 @@ export async function sendBookingConfirmationEmails(
         studentEmailSent = true;
         console.log('Student confirmation email sent:', {
           bookingId: booking.id,
-          studentEmail: student.email,
         });
       } else {
         errors.push(`Failed to send student email: ${result.error}`);
         console.error('Failed to send student confirmation email:', {
           bookingId: booking.id,
-          studentEmail: student.email,
           error: result.error,
         });
       }
@@ -99,7 +97,6 @@ export async function sendBookingConfirmationEmails(
       errors.push(`Error sending student email: ${errorMessage}`);
       console.error('Error sending student confirmation email:', {
         bookingId: booking.id,
-        studentEmail: student.email,
         error: errorMessage,
       });
     }
@@ -133,13 +130,11 @@ export async function sendBookingConfirmationEmails(
         providerEmailSent = true;
         console.log('Provider notification email sent:', {
           bookingId: booking.id,
-          providerEmail: provider.email,
         });
       } else {
         errors.push(`Failed to send provider email: ${result.error}`);
         console.error('Failed to send provider notification email:', {
           bookingId: booking.id,
-          providerEmail: provider.email,
           error: result.error,
         });
       }
@@ -148,7 +143,6 @@ export async function sendBookingConfirmationEmails(
       errors.push(`Error sending provider email: ${errorMessage}`);
       console.error('Error sending provider notification email:', {
         bookingId: booking.id,
-        providerEmail: provider.email,
         error: errorMessage,
       });
     }

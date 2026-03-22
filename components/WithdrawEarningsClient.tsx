@@ -130,7 +130,7 @@ export default function WithdrawEarningsClient({
       }
       window.location.href = data.url;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong');
+      setError('Something went wrong. Please try again.');
     } finally {
       setIsConnectingStripe(false);
     }
@@ -150,14 +150,14 @@ export default function WithdrawEarningsClient({
 
       const data = (await res.json()) as { success?: boolean; error?: string };
       if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'Failed to request withdrawal');
+        throw new Error('Withdrawal request failed');
       }
 
       setSuccess(true);
       setAmountInput('');
       await refreshSummary();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong');
+      setError('Withdrawal request failed.');
     } finally {
       setIsSubmitting(false);
     }

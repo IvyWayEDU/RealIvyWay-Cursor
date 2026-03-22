@@ -14,6 +14,7 @@ export type AdminStatistics = {
     totalRevenueCents: number;
     revenueThisMonthCents: number;
     revenueLastMonthCents: number;
+    revenueTodayCents: number;
     byService: Array<{
       serviceType: CanonicalServiceType;
       revenueCents: number;
@@ -42,8 +43,10 @@ export type AdminStatistics = {
   sessionHealth: {
     totalSessionsBooked: number;
     sessionsCompleted: number;
+    sessionsCancelled: number;
     sessionsNoShowProvider: number;
     sessionsNoShowStudent: number;
+    sessionsNoShowTotal: number;
     refundedSessions: number;
     flaggedSessions: number;
     completionRate: number; // 0..1
@@ -55,6 +58,14 @@ export type AdminStatistics = {
     totalWithdrawnCents: number;
     pendingPayoutsCents: number;
   };
+
+  topProviders: Array<{
+    providerId: string;
+    providerName: string;
+    sessionsCompleted: number;
+    platformRevenueCents: number;
+    providerEarningsCents: number;
+  }>;
 
   qualityReviews: {
     averageProviderRating: number | null;
@@ -184,6 +195,13 @@ function isFlaggedSession(session: any): boolean {
   return status === 'flagged' || status === 'requires_review' || hasFlagFields;
 }
 
+function isCancelledSession(session: any): boolean {
+  const status = String(session?.status || '').trim().toLowerCase();
+  if (status === 'cancelled' || status === 'canceled') return true;
+  if (status.startsWith('cancelled') || status.startsWith('canceled')) return true;
+  return Boolean(session?.cancelledAt || session?.canceledAt);
+}
+
 function isRefundedSession(session: any): boolean {
   const status = String(session?.status || '').trim().toLowerCase();
   const refundedCents = safeNumber(session?.amountRefundedCents);
@@ -207,6 +225,7 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
 
   const [users, sessions, reviews] = await Promise.all([getUsers(), getSessions(), getReviews()]);
   const allSessions = sessions as any[];
+  const userById = new Map<string, any>((users as any[]).filter((u) => typeof u?.id === 'string').map((u) => [u.id, u]));
 
   // User totals
   const totalStudents = users.filter(isStudentUser).length;
@@ -244,13 +263,16 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
   const lastMonth = new Date(Date.UTC(new Date(nowMs).getUTCFullYear(), new Date(nowMs).getUTCMonth() - 1, 1))
     .toISOString()
     .slice(0, 7);
+  const todayKey = new Date(nowMs).toISOString().slice(0, 10);
 
   let totalRevenueCents = 0;
   let revenueThisMonthCents = 0;
   let revenueLastMonthCents = 0;
+  let revenueTodayCents = 0;
 
   let totalSessionsBooked = 0;
   let sessionsCompleted = 0;
+  let sessionsCancelled = 0;
   let sessionsNoShowProvider = 0;
   let sessionsNoShowStudent = 0;
   let refundedSessions = 0;
@@ -261,6 +283,10 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
   let pendingPayoutsCents = 0;
 
   const anyNoShowSessionIds = new Set<string>();
+  const providerAgg = new Map<
+    string,
+    { providerId: string; providerName: string; sessionsCompleted: number; platformRevenueCents: number; providerEarningsCents: number }
+  >();
 
   for (const s of allSessions) {
     totalSessionsBooked += 1;
@@ -271,6 +297,7 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
     if (String(s?.status || '') === 'completed') {
       sessionsCompleted += 1;
     }
+    if (isCancelledSession(s)) sessionsCancelled += 1;
 
     if (isNoShowProvider(s)) {
       sessionsNoShowProvider += 1;
@@ -304,6 +331,10 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
       const mk = monthKeyFromIso(completedIso);
       if (mk === nowMonth) revenueThisMonthCents += platformRevenue;
       if (mk === lastMonth) revenueLastMonthCents += platformRevenue;
+      if (completedIso) {
+        const dk = new Date(completedIso).toISOString().slice(0, 10);
+        if (dk === todayKey) revenueTodayCents += platformRevenue;
+      }
 
       // Earnings flow: provider payout is only earned when eligible (mirrors earnings summary).
       const eligible = Boolean(s?.providerEligibleForPayout === true);
@@ -315,6 +346,30 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
         totalWithdrawnCents += providerPayoutCents;
       } else if (payoutStatus === 'pending_payout' || payoutStatus === 'approved' || payoutStatus === 'locked') {
         pendingPayoutsCents += providerPayoutCents;
+      }
+
+      // Top providers (completed sessions only)
+      const providerId = typeof s?.providerId === 'string' ? s.providerId.trim() : '';
+      if (providerId) {
+        const existing = providerAgg.get(providerId);
+        const fallbackName =
+          (typeof s?.providerName === 'string' && s.providerName.trim()) ||
+          (typeof userById.get(providerId)?.name === 'string' && String(userById.get(providerId).name).trim()) ||
+          (typeof userById.get(providerId)?.email === 'string' && String(userById.get(providerId).email).trim()) ||
+          providerId;
+        const providerName = existing?.providerName || fallbackName;
+        const next = existing || {
+          providerId,
+          providerName,
+          sessionsCompleted: 0,
+          platformRevenueCents: 0,
+          providerEarningsCents: 0,
+        };
+        next.providerName = providerName;
+        next.sessionsCompleted += 1;
+        next.platformRevenueCents += platformRevenue;
+        next.providerEarningsCents += providerPayoutCents;
+        providerAgg.set(providerId, next);
       }
     }
   }
@@ -352,12 +407,17 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
   const percentOfSessionsReviewed =
     completedSessionIds.size > 0 ? clamp01(reviewedCompletedCount / completedSessionIds.size) : 0;
 
+  const topProviders = Array.from(providerAgg.values())
+    .sort((a, b) => (b.platformRevenueCents - a.platformRevenueCents) || (b.sessionsCompleted - a.sessionsCompleted))
+    .slice(0, 10);
+
   return {
     generatedAt: new Date(nowMs).toISOString(),
     revenueOverview: {
       totalRevenueCents,
       revenueThisMonthCents,
       revenueLastMonthCents,
+      revenueTodayCents,
       byService,
     },
     servicePopularity: {
@@ -375,8 +435,10 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
     sessionHealth: {
       totalSessionsBooked,
       sessionsCompleted,
+      sessionsCancelled,
       sessionsNoShowProvider,
       sessionsNoShowStudent,
+      sessionsNoShowTotal: anyNoShowSessionIds.size,
       refundedSessions,
       flaggedSessions,
       completionRate: totalSessionsBooked > 0 ? clamp01(sessionsCompleted / totalSessionsBooked) : 0,
@@ -387,6 +449,7 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
       totalWithdrawnCents,
       pendingPayoutsCents,
     },
+    topProviders,
     qualityReviews: {
       averageProviderRating,
       numberOfReviews,

@@ -127,8 +127,6 @@ export function resolveSessionStatusByTime(
     zoomMeetingId: hasZoomMeetingId ? zoomMeetingId : null,
     providerJoinCount,
     studentJoinCount,
-    providerJoinedAt,
-    studentJoinedAt,
     attendanceFlag,
     payoutEligible: providerEligibleForPayout,
     providerEarned,

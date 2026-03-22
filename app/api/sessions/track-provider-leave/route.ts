@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { trackProviderLeft } from '@/lib/sessions/actions';
+import { handleApiError } from '@/lib/errorHandler';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
 import { sessionTrackingSchema } from '@/lib/validation/schemas';
@@ -48,14 +49,7 @@ export async function POST(request: NextRequest) {
       accumulatedSeconds: result.accumulatedSeconds,
     });
   } catch (error) {
-    console.error('Error tracking provider leave:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to track provider leave',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/track-provider-leave]' });
   }
 }
 

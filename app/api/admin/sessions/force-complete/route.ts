@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/middleware';
 import { getSessionById } from '@/lib/sessions/storage';
 import { markSessionCompletedWithEarnings } from '@/lib/sessions/actions';
 import { appendAdminAuditEntry } from '@/lib/audit/adminAudit.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * Admin: Force mark a session completed (non-test).
@@ -43,8 +44,7 @@ export async function POST(request: NextRequest) {
     const updated = await getSessionById(sessionId);
     return NextResponse.json({ success: true, session: updated });
   } catch (error) {
-    console.error('[ADMIN FORCE COMPLETE] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/sessions/force-complete]' });
   }
 }
 

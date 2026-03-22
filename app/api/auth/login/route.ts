@@ -2,9 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserByEmail } from '@/lib/auth/storage';
 import { verifyPassword } from '@/lib/auth/crypto';
 import { createSession } from '@/lib/auth/session';
+import { getServerSession } from '@/lib/auth/getServerSession';
+import { handleApiError } from '@/lib/errorHandler';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest) {
   try {
+    // RATE LIMITING (admins bypass)
+    const existingSession = await getServerSession().catch(() => null);
+    const rl = enforceRateLimit(request, {
+      session: existingSession,
+      endpoint: '/api/auth/login',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
+
     const body = await request.json();
     const { email, password } = body;
     
@@ -68,11 +80,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/auth/login]' });
   }
 }
 

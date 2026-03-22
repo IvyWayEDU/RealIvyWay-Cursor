@@ -98,11 +98,8 @@ export function checkGlobalRateLimitEdge(request: NextRequest): {
   const userId = getUserIdFromRequest(request);
 
   // RATE LIMITING: Apply global rate limits (100 req/min per IP, 300 req/min per user)
-  let ipLimit;
-  let userLimit;
-
   // Check IP limit
-  ipLimit = checkRateLimitEdge(`ip:${ip}`, 100, 60 * 1000); // 100 req/min
+  const ipLimit = checkRateLimitEdge(`ip:${ip}`, 100, 60 * 1000); // 100 req/min
   
   if (!ipLimit.allowed) {
     // RATE LIMITING: Log violation (no PII)
@@ -131,7 +128,7 @@ export function checkGlobalRateLimitEdge(request: NextRequest): {
 
   // Check user limit if authenticated
   if (userId) {
-    userLimit = checkRateLimitEdge(`user:${userId}`, 300, 60 * 1000); // 300 req/min
+    const userLimit = checkRateLimitEdge(`user:${userId}`, 300, 60 * 1000); // 300 req/min
     
     if (!userLimit.allowed) {
       // RATE LIMITING: Log violation (no PII)

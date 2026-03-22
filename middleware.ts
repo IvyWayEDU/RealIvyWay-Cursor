@@ -3,11 +3,46 @@ import type { NextRequest } from 'next/server';
 import { getDashboardRoute, hasAccessToDashboard } from './lib/auth/utils';
 import { UserRole } from './lib/auth/types';
 
+function parseSessionCookieValue(raw: string): { userId?: string; roles?: unknown } | null {
+  const val = typeof raw === 'string' ? raw : '';
+  if (!val) return null;
+  try {
+    return JSON.parse(val) as any;
+  } catch {
+    try {
+      return JSON.parse(decodeURIComponent(val)) as any;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const requestHeaders = new Headers(request.headers);
   // Used by server layouts to determine current path (e.g. admin login bypass).
   requestHeaders.set('x-pathname', pathname);
+
+  // Protect all admin routes (except login) with a strict 403 for non-admins.
+  if (pathname.startsWith('/admin')) {
+    const isAdminLoginPage = pathname === '/admin/login' || pathname.startsWith('/admin/login/');
+    if (!isAdminLoginPage) {
+      const sessionCookie = request.cookies.get('ivyway_session');
+      if (!sessionCookie?.value) {
+        const loginUrl = new URL('/admin/login', request.url);
+        loginUrl.searchParams.set('redirect', pathname);
+        return NextResponse.redirect(loginUrl);
+      }
+
+      const sessionData = parseSessionCookieValue(sessionCookie.value);
+      const rolesRaw = sessionData?.roles;
+      const roles = Array.isArray(rolesRaw) ? (rolesRaw as UserRole[]) : [];
+
+      if (!roles.includes('admin')) {
+        return new NextResponse('Forbidden', { status: 403 });
+      }
+    }
+  }
 
   // Protect all dashboard routes
   if (pathname.startsWith('/dashboard')) {
@@ -24,9 +59,9 @@ export async function middleware(request: NextRequest) {
     try {
       // Parse session to verify it's valid
       // Next.js middleware automatically decodes cookies
-      const session = JSON.parse(sessionCookie.value);
+      const session = parseSessionCookieValue(sessionCookie.value);
       
-      if (!session.userId || !session.roles || !Array.isArray(session.roles)) {
+      if (!session || !(session as any).userId || !(session as any).roles || !Array.isArray((session as any).roles)) {
         // Invalid session, redirect to login
         const loginUrl = new URL('/auth/login', request.url);
         loginUrl.searchParams.set('redirect', pathname);
@@ -35,7 +70,7 @@ export async function middleware(request: NextRequest) {
 
       // Check role-based access
       const pathRole = getRoleFromPath(pathname);
-      const userRoles = session.roles as UserRole[];
+      const userRoles = (session as any).roles as UserRole[];
 
       // Verify user has access to this dashboard
       if (pathRole && !hasAccessToDashboard(pathRole, userRoles)) {
@@ -43,7 +78,7 @@ export async function middleware(request: NextRequest) {
         const defaultDashboard = getDashboardRoute(userRoles);
         return NextResponse.redirect(new URL(defaultDashboard, request.url));
       }
-    } catch (error) {
+    } catch (_error) {
       // Invalid session format, redirect to login
       const loginUrl = new URL('/auth/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);

@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * SECURITY: Authentication required, ownership or admin access required
@@ -81,11 +82,7 @@ export async function GET(request: NextRequest) {
       latestSessions,
     });
   } catch (error) {
-    console.error('[DEBUG] Error in earnings debug endpoint:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/debug/earnings]' });
   }
 }
 

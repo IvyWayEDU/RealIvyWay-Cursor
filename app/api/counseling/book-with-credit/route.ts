@@ -8,6 +8,8 @@ import { getSessionPricingCents } from '@/lib/pricing/catalog';
 import { consumeOneCounselingMonthlyCredit, getCounselingMonthlyCreditsRemaining } from '@/lib/credits/counselingCredits.server';
 import { createZoomMeeting, isZoomConfigured } from '@/lib/zoom/api';
 import { getProviderPayout } from '@/lib/payouts/getProviderPayout';
+import { handleApiError } from '@/lib/errorHandler';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 /**
  * POST /api/counseling/book-with-credit
@@ -20,6 +22,13 @@ export async function POST(request: NextRequest) {
     if (auth.status === 'suspended') return NextResponse.json({ error: 'Account suspended' }, { status: 403 });
     if (auth.status !== 'ok') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const session = auth.session;
+
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/counseling/book-with-credit',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
 
     const body = await request.json();
     const bookingState = body?.bookingState ?? null;
@@ -197,11 +206,7 @@ export async function POST(request: NextRequest) {
       throw e;
     }
   } catch (error) {
-    console.error('Error booking counseling with credit:', error);
-    return NextResponse.json(
-      { error: 'Failed to book counseling session with credit', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/counseling/book-with-credit]' });
   }
 }
 

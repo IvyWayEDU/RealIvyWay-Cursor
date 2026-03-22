@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { updateUser } from '@/lib/auth/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   const authResult = await auth.requireAdmin();
@@ -16,8 +17,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, user });
   } catch (error) {
-    console.error('[ADMIN USERS REACTIVATE] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/users/reactivate]' });
   }
 }
 

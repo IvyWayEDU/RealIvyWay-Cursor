@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getSessionById } from '@/lib/sessions/storage';
 import { markSessionCompletedWithEarnings } from '@/lib/sessions/actions';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
-    const { session } = authResult;
     const body = await request.json();
     const { sessionId, actualStartTime, actualEndTime } = body;
     
@@ -93,10 +92,6 @@ export async function POST(request: NextRequest) {
     const updated = await getSessionById(sessionId);
     return NextResponse.json({ session: updated });
   } catch (error) {
-    console.error('Complete session error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/complete]' });
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getDisplayRole } from '@/lib/auth/utils';
 import {
   addSupportMessage,
@@ -7,12 +7,14 @@ import {
   getSupportTicketThread,
   setSupportTicketStatus,
 } from '@/lib/support/ticketingStorage';
+import { handleApiError } from '@/lib/errorHandler';
+import { z } from 'zod';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export async function GET() {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) return authResult;
-    const { session } = authResult;
+    const session = await getServerSession();
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const role = getDisplayRole(session.roles) === 'provider' ? 'provider' : 'student';
     const ticket = await getOrCreateActiveSupportTicketForUser({
@@ -24,21 +26,32 @@ export async function GET() {
     const thread = await getSupportTicketThread(ticket.id);
     return NextResponse.json({ thread });
   } catch (error) {
-    console.error('Support active ticket fetch error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/tickets/active] GET' });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) return authResult;
-    const { session } = authResult;
+    const session = await getServerSession();
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/support/tickets/active',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
 
     const body = await request.json().catch(() => ({}));
-    const message = typeof body?.message === 'string' ? body.message.trim() : '';
-    const subject = typeof body?.subject === 'string' ? body.subject.trim() : '';
-    if (!message) return NextResponse.json({ error: 'message is required' }, { status: 400 });
+    const BodySchema = z.object({
+      message: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(4000)),
+      subject: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(140)).optional(),
+    }).strict();
+    const parsed = BodySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parsed.error.issues }, { status: 400 });
+    }
+    const { message, subject } = parsed.data;
 
     const role = getDisplayRole(session.roles) === 'provider' ? 'provider' : 'student';
     const ticket = await getOrCreateActiveSupportTicketForUser({
@@ -62,8 +75,7 @@ export async function POST(request: NextRequest) {
     const thread = await getSupportTicketThread(ticket.id);
     return NextResponse.json({ thread });
   } catch (error) {
-    console.error('Support active ticket send error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/tickets/active] POST' });
   }
 }
 

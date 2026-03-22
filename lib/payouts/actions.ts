@@ -182,7 +182,7 @@ export async function getProviderPayoutSummary(providerId: string): Promise<{
 
   // Earnings are derived dynamically from completed sessions (no credits store).
   const { getSessionsByProviderId } = await import('@/lib/sessions/storage');
-  let sessions = await getSessionsByProviderId(providerId);
+  const sessions = await getSessionsByProviderId(providerId);
 
   const completedSessions = sessions.filter(
     (s: any) =>

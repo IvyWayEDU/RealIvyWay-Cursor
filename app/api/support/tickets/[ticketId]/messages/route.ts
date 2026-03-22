@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getDisplayRole } from '@/lib/auth/utils';
 import { addSupportMessage, getSupportTicketById, setSupportTicketStatus } from '@/lib/support/ticketingStorage';
+import { handleApiError } from '@/lib/errorHandler';
+import { validateRequestBody } from '@/lib/validation/utils';
+import { supportTicketMessageSchema } from '@/lib/validation/schemas';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest, ctx: { params: Promise<{ ticketId: string }> }) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) return authResult;
-    const { session } = authResult;
+    const session = await getServerSession();
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/support/tickets/[ticketId]/messages',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
 
     const { ticketId } = await ctx.params;
     const id = String(ticketId || '').trim();
@@ -16,9 +26,9 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ ticket
     const ticket = await getSupportTicketById(id);
     if (!ticket) return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
 
-    const body = await request.json().catch(() => ({}));
-    const message = typeof body?.message === 'string' ? body.message.trim() : '';
-    if (!message) return NextResponse.json({ error: 'message is required' }, { status: 400 });
+    const validationResult = await validateRequestBody(request, supportTicketMessageSchema);
+    if (!validationResult.success) return validationResult.response;
+    const { message } = validationResult.data;
 
     const isAdmin = Array.isArray(session.roles) && session.roles.includes('admin');
 
@@ -36,18 +46,20 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ ticket
     });
 
     if (isAdmin) {
-      await setSupportTicketStatus(id, 'admin_replied');
+      // Only flip to "admin_replied" when the ticket isn't already resolved/closed.
+      if (ticket.status !== 'resolved' && ticket.status !== 'closed') {
+        await setSupportTicketStatus(id, 'admin_replied');
+      }
     } else {
-      // If user responds after an admin reply, bring ticket back to open.
-      if (ticket.status === 'admin_replied') {
+      // If user responds after an admin reply (or after a resolution), bring ticket back to open.
+      if (ticket.status === 'admin_replied' || ticket.status === 'resolved') {
         await setSupportTicketStatus(id, 'open');
       }
     }
 
     return NextResponse.json({ message: msg });
   } catch (error) {
-    console.error('Support ticket message error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/tickets/[ticketId]/messages]' });
   }
 }
 

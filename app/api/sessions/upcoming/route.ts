@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getSessionsForUser } from '@/lib/sessions/storage';
 import { resolveUnifiedSessions } from '@/lib/sessions/unified-resolver';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function GET(request: NextRequest) {
   try {
     // Ensure session completion/no-show logic is evaluated before returning dashboard lists.
     await resolveUnifiedSessions('api_fetch');
 
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
-    const { session } = authResult;
     
     const requestedRole = request.nextUrl.searchParams.get('role');
 
@@ -44,10 +43,6 @@ export async function GET(request: NextRequest) {
     const sessions = upcoming;
     return NextResponse.json({ sessions });
   } catch (error) {
-    console.error('Get upcoming sessions error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/upcoming]' });
   }
 }

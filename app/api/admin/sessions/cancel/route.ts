@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getSessionById, updateSession } from '@/lib/sessions/storage';
 import { appendAdminAuditEntry } from '@/lib/audit/adminAudit.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   const authResult = await auth.requireAdmin();
@@ -37,8 +38,7 @@ export async function POST(request: NextRequest) {
     const updated = await getSessionById(sessionId);
     return NextResponse.json({ success: true, session: updated });
   } catch (error) {
-    console.error('[ADMIN CANCEL SESSION] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/sessions/cancel]' });
   }
 }
 

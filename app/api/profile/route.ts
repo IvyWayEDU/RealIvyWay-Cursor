@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getUserById, updateUser } from '@/lib/auth/storage';
 import { normalizeSchoolId } from '@/lib/models/schools';
+import { handleApiError } from '@/lib/errorHandler';
+import { validateRequestBody } from '@/lib/validation/utils';
+import { profileUpdateSchema } from '@/lib/validation/schemas';
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
-    const { session } = authResult;
-    const body = await request.json();
+
+    const validationResult = await validateRequestBody(request, profileUpdateSchema);
+    if (!validationResult.success) return validationResult.response;
+    const body = validationResult.data;
     
     const user = await getUserById(session.userId);
     if (!user) {
@@ -115,11 +119,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, user: updatedUser });
   } catch (error) {
-    console.error('Update profile error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/profile]' });
   }
 }
 

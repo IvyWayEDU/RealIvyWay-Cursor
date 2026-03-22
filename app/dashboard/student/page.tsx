@@ -10,6 +10,7 @@ import CompletedSessionsSection from '@/components/CompletedSessionsSection';
 import ConfirmedSessionsSection from '@/components/ConfirmedSessionsSection';
 import AIProblemSolver from '@/components/AIProblemSolver';
 import MessagesSection from '@/components/MessagesSection';
+import IvyWayAICard from '@/components/IvyWayAICard';
 
 export default function StudentDashboard() {
   return (
@@ -30,6 +31,11 @@ export default function StudentDashboard() {
         </Link>
       </div>
 
+      <IvyWayAICard
+        entryPoint="student_dashboard"
+        description="Get instant help with studying, flashcards, quizzes, and step by step explanations."
+      />
+
       {/* Upcoming Sessions Section */}
       <ConfirmedSessionsSection />
 
@@ -37,7 +43,11 @@ export default function StudentDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Completed Sessions Section - 50% width */}
         <div className="lg:col-span-1">
-          <CompletedSessionsSection />
+          <CompletedSessionsSection
+            limit={3}
+            showViewMore
+            viewMoreHref="/dashboard/student/sessions"
+          />
         </div>
 
         {/* AI Problem Solver and Messages - 50% width, stacked */}

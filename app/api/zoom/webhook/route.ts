@@ -101,7 +101,7 @@ async function handleParticipantLeft(event: ZoomWebhookEvent) {
 
   const session = await findSessionByZoomMeetingId(meetingId);
   if (!session) {
-    console.log('[ATTENDANCE] Participant left but session not found:', { meetingId, participantEmail: participant.email });
+    console.log('[ATTENDANCE] Participant left but session not found:', { meetingId });
     return;
   }
 
@@ -111,7 +111,6 @@ async function handleParticipantLeft(event: ZoomWebhookEvent) {
     console.log('[ATTENDANCE] Provider leave event:', {
       sessionId: session.id,
       zoomMeetingId: meetingId,
-      participantEmail: participant.email,
       leaveTime: participant.leave_time,
     });
     
@@ -147,7 +146,7 @@ async function handleParticipantJoined(event: ZoomWebhookEvent) {
 
   const session = await findSessionByZoomMeetingId(meetingId);
   if (!session) {
-    console.log('Zoom participant joined but session not found:', { meetingId, participantEmail: participant.email });
+    console.log('Zoom participant joined but session not found:', { meetingId });
     return;
   }
 
@@ -161,15 +160,7 @@ async function handleParticipantJoined(event: ZoomWebhookEvent) {
     console.log('[ATTENDANCE] Provider join event:', {
       sessionId: session.id,
       zoomMeetingId: meetingId,
-      participantEmail: participant.email,
       joinTime: participant.join_time,
-    });
-    console.log('[ZOOM_JOIN]', { sessionId: session.id, role: 'provider', joinTime: participant.join_time });
-    console.log('[PROVIDER_ZOOM_JOIN]', {
-      sessionId: session.id,
-      zoomMeetingId: meetingId,
-      participantEmail: participant.email,
-      source: 'zoom_webhook',
     });
     
     // Track provider join using unified resolver
@@ -226,10 +217,7 @@ async function handleParticipantJoined(event: ZoomWebhookEvent) {
     
     console.log('[ATTENDANCE] Student join recorded:', {
       sessionId: session.id,
-      studentJoinedAt: updateData.studentJoinedAt,
-      studentCurrentJoinTimestamp: updateData.studentCurrentJoinTimestamp,
     });
-    console.log('[ZOOM_JOIN]', { sessionId: session.id, role: 'student', joinTime: nowISO });
   }
 }
 

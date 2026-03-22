@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { getAuthContext } from '@/lib/auth/session';
 import { getSessionPricingCents, Plan as PricingPlan, ServiceType as PricingServiceType } from '@/lib/pricing/catalog';
 import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -109,14 +110,6 @@ export async function POST(request: NextRequest) {
       clientSecret: paymentIntent.client_secret,
     });
   } catch (error) {
-    console.error('Error creating PaymentIntent:', error);
-    
-    return NextResponse.json(
-      { 
-        error: 'Failed to create payment intent',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/payment-intent]' });
   }
 }

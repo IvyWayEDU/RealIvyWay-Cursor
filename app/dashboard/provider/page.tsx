@@ -11,8 +11,8 @@ import { getSession } from '@/lib/auth/session';
 import { getOnboardingStatus } from '@/lib/auth/onboarding';
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
 import UpcomingSessionsSection from '@/components/UpcomingSessionsSection';
-import DevClearSessionsButton from '@/components/DevClearSessionsButton';
 import ProviderEarningsSnapshotClient from '@/components/ProviderEarningsSnapshotClient';
+import IvyWayAICard from '@/components/IvyWayAICard';
 
 export default async function ProviderDashboard() {
   // Verify session exists
@@ -54,8 +54,10 @@ export default async function ProviderDashboard() {
         </Link>
       </div>
 
-      {/* Dev tools */}
-      <DevClearSessionsButton />
+      <IvyWayAICard
+        entryPoint="provider_dashboard"
+        description="Use AI to generate study materials, quizzes, explanations, and prep for tutoring sessions."
+      />
 
       {/* Upcoming Sessions Section */}
       <UpcomingSessionsSection />

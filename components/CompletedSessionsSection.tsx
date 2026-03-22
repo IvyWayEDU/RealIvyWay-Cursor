@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Session } from '@/lib/models/types';
 import { getReviewBySessionId, submitReview, hasReviewForSession } from '@/lib/reviewStore';
 import { useRouter } from 'next/navigation';
@@ -317,7 +318,27 @@ function CompletedSessionCard({ session, providerName, providerProfileImageUrl }
   );
 }
 
-export default function CompletedSessionsSection() {
+type CompletedSessionsSectionProps = {
+  /**
+   * If provided, limits the number of completed sessions displayed (most recent first).
+   * Intended for compact views like the dashboard home page.
+   */
+  limit?: number;
+  /**
+   * When true, renders a "View More" button below the list.
+   */
+  showViewMore?: boolean;
+  /**
+   * Target route for the "View More" button.
+   */
+  viewMoreHref?: string;
+};
+
+export default function CompletedSessionsSection({
+  limit,
+  showViewMore = false,
+  viewMoreHref,
+}: CompletedSessionsSectionProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const lastJsonRef = useRef<string>('');
@@ -372,6 +393,11 @@ export default function CompletedSessionsSection() {
     return () => clearInterval(interval);
   }, []);
 
+  const displaySessions =
+    typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+      ? sessions.slice(0, limit)
+      : sessions;
+
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow-sm border border-gray-200">
       <div className="px-6 py-4 border-b border-gray-200">
@@ -409,17 +435,30 @@ export default function CompletedSessionsSection() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4 max-h-[520px] overflow-auto">
-            {sessions.map((session) => (
-              <CompletedSessionCard
-                key={session.id}
-                session={session}
-                providerName={String((session as any)?.providerName || '')}
-                providerProfileImageUrl={(session as any)?.providerProfileImage ?? null}
-              />
-            ))}
+          <div className="space-y-4">
+            <div className={`space-y-4 ${limit ? '' : 'max-h-[520px] overflow-auto'}`}>
+              {displaySessions.map((session) => (
+                <CompletedSessionCard
+                  key={session.id}
+                  session={session}
+                  providerName={String((session as any)?.providerName || '')}
+                  providerProfileImageUrl={(session as any)?.providerProfileImage ?? null}
+                />
+              ))}
+            </div>
           </div>
         )}
+
+        {!loading && showViewMore && viewMoreHref ? (
+          <div className="pt-4">
+            <Link
+              href={viewMoreHref}
+              className="inline-flex items-center justify-center w-full px-4 py-2 bg-white border border-[#0088CB] text-[#0088CB] text-sm font-medium rounded-md hover:bg-[#0088CB] hover:text-white transition-colors"
+            >
+              View More
+            </Link>
+          </div>
+        ) : null}
       </div>
     </div>
   );

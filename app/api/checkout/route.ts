@@ -7,8 +7,14 @@ import { reserveSlotsAtomically, unreserveSlotsAtomically } from '@/lib/availabi
 import { getSessions } from '@/lib/sessions/storage';
 import { SCHOOLS } from '@/data/schools';
 import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as PricingPlan } from '@/lib/pricing/catalog';
-import { getStripePriceIdForPricingKey } from '@/lib/pricing/stripePriceIds';
+import {
+  debugLogStripePriceIdMapKeysOnce,
+  getStripePriceIdForPricingKey,
+  getStripePriceIdMapDebugInfo,
+} from '@/lib/pricing/stripePriceIds';
 import { deleteCheckoutBookingRecord, writeCheckoutBookingRecord } from '@/lib/stripe/checkoutBookingStore.server';
+import { handleApiError } from '@/lib/errorHandler';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -33,9 +39,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing user email for checkout' }, { status: 500 });
     }
 
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/checkout',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
+
     // Parse request body
     const body = await request.json();
     const bookingState = body?.bookingState;
+
+    // Debug: log raw incoming payload before any Stripe call.
+    console.log('CHECKOUT REQUEST BODY:', body);
+
+    // Validate required inputs exist (sent by frontend summary page).
+    const providerIdInput = typeof body?.providerId === 'string' ? String(body.providerId).trim() : '';
+    const sessionDateInput = typeof body?.sessionDate === 'string' ? String(body.sessionDate).trim() : '';
+    const sessionTimeInput = typeof body?.sessionTime === 'string' ? String(body.sessionTime).trim() : '';
+    const pricingKeyInput = typeof body?.pricingKey === 'string' ? String(body.pricingKey).trim() : '';
+
+    if (!providerIdInput || !sessionDateInput || !sessionTimeInput || !pricingKeyInput) {
+      return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 });
+    }
 
     // Get base URL for redirect URLs
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
@@ -44,8 +70,8 @@ export async function POST(request: NextRequest) {
     // Build booking metadata for webhook session creation
     // NOTE: Stripe metadata values must be strings and have size limits.
     const studentId = session.userId;
-    const providerIdRaw = (bookingState?.provider as string | undefined) || '';
-    let providerId = providerIdRaw.trim();
+    const providerIdRaw = providerIdInput || (bookingState?.provider as string | undefined) || '';
+    const providerId = String(providerIdRaw || '').trim();
     const serviceRaw = (bookingState?.service as string | undefined) || '';
     const subjectRaw = (bookingState?.subject as string | null | undefined) || '';
     const topicRaw = (bookingState?.topic as string | null | undefined) || '';
@@ -83,8 +109,8 @@ export async function POST(request: NextRequest) {
 
     const subject = String(subjectRaw || '').trim();
     const topic = String(topicRaw || '').trim();
-    let schoolId = String(schoolIdRaw || '').trim();
-    let schoolName = String(schoolNameRaw || '').trim();
+    const schoolId = String(schoolIdRaw || '').trim();
+    const schoolName = String(schoolNameRaw || '').trim();
 
     // SAFETY: Prevent bypass for virtual tours — must not allow booking attempts for schools with 0 providers.
     if (canonicalServiceType === 'virtual_tour') {
@@ -136,7 +162,38 @@ export async function POST(request: NextRequest) {
       duration_minutes,
     });
 
-    const stripePriceId = getStripePriceIdForPricingKey(pricing.pricing_key);
+    // Client provides pricingKey for validation/debugging only; server pricing is authoritative.
+    if (pricingKeyInput !== pricing.pricing_key) {
+      return NextResponse.json(
+        { error: `Invalid pricingKey (expected "${pricing.pricing_key}")` },
+        { status: 400 }
+      );
+    }
+
+    // Debug: print active Stripe price map keys + source once per runtime.
+    debugLogStripePriceIdMapKeysOnce('CHECKOUT STRIPE_PRICE_IDS');
+
+    let stripePriceId: string;
+    try {
+      stripePriceId = getStripePriceIdForPricingKey(pricing.pricing_key);
+    } catch (e) {
+      console.error('CHECKOUT failed to resolve Stripe price id:', e);
+      return NextResponse.json(
+        { success: false, message: 'Live Stripe price IDs are not configured correctly.' },
+        { status: 500 }
+      );
+    }
+
+    // Required debug logs (requested)
+    console.log('CHECKOUT pricing key:', pricing.pricing_key);
+    console.log('CHECKOUT stripe price id:', stripePriceId);
+    try {
+      const info = getStripePriceIdMapDebugInfo();
+      console.log('CHECKOUT stripe price map source:', info.source);
+      console.log('CHECKOUT stripe price map keys:', info.keys);
+    } catch (e) {
+      console.warn('CHECKOUT failed to read Stripe price map debug info:', e);
+    }
 
     // Monthly plans (including counseling_monthly) are bundle purchases:
     // Stripe is charged ONCE and the webhook creates sessions_per_purchase session records.
@@ -330,6 +387,32 @@ export async function POST(request: NextRequest) {
     // when available based on customer location and device capabilities
     let checkoutSession: Stripe.Checkout.Session;
     try {
+      // Validate the Stripe price exists BEFORE creating checkout session.
+      // This prevents confusing "No such price" failures later and helps ensure live env
+      // isn't accidentally using stale/test price IDs.
+      try {
+        const price = await stripe.prices.retrieve(stripePriceId);
+        console.log('CHECKOUT stripe price livemode:', price.livemode);
+        console.log('CHECKOUT stripe price active:', price.active);
+        if (price.active === false) {
+          throw new Error(`Stripe price is inactive: ${stripePriceId}`);
+        }
+        if (process.env.NODE_ENV === 'production' && price.livemode !== true) {
+          throw new Error(`Stripe price is not live-mode in production: ${stripePriceId}`);
+        }
+      } catch (e) {
+        console.error('CHECKOUT Stripe price validation failed:', e);
+        await unreserveSlotsAtomically(slotsToReserve);
+        // Best-effort cleanup of server-side booking record
+        try {
+          await deleteCheckoutBookingRecord(checkoutBookingId);
+        } catch {}
+        return NextResponse.json(
+          { success: false, message: 'Live Stripe price IDs are not configured correctly.' },
+          { status: 500 }
+        );
+      }
+
       checkoutSession = await stripe.checkout.sessions.create({
       payment_method_types: ['card'], // Cards are always enabled
       // Apple Pay, Google Pay, Cash App, Affirm, Klarna, Link, etc. are automatically
@@ -380,14 +463,6 @@ export async function POST(request: NextRequest) {
       url: checkoutSession.url,
     });
   } catch (error) {
-    console.error('Error creating Stripe Checkout Session:', error);
-    
-    return NextResponse.json(
-      { 
-        error: 'Failed to create checkout session',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/checkout]' });
   }
 }

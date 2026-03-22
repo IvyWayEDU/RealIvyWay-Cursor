@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthContext } from '@/lib/auth/session';
+import { auth } from '@/lib/auth/middleware';
 import { backfillMissingZoomUrls } from '@/lib/sessions/actions';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * API endpoint to backfill missing Zoom URLs for sessions
@@ -8,10 +9,10 @@ import { backfillMissingZoomUrls } from '@/lib/sessions/actions';
  */
 export async function POST(request: NextRequest) {
   try {
-    // Verify user session
-    const auth = await getAuthContext();
-    if (auth.status === 'suspended') return NextResponse.json({ error: 'Account suspended' }, { status: 403 });
-    if (auth.status !== 'ok') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // SECURITY: admin-only maintenance endpoint
+    const authResult = await auth.requireAdmin();
+    if (authResult.error) return authResult.error;
+    void request;
 
     // Backfill missing Zoom URLs
     const result = await backfillMissingZoomUrls();
@@ -22,14 +23,7 @@ export async function POST(request: NextRequest) {
       error: result.error,
     });
   } catch (error) {
-    console.error('[API /api/sessions/backfill-zoom] Error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to backfill Zoom URLs', 
-        details: error instanceof Error ? error.message : 'Unknown error' 
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/backfill-zoom]' });
   }
 }
 

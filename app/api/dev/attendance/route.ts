@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionById, updateSession } from '@/lib/sessions/storage';
 import { trackProviderJoinUnified, resolveUnifiedSessions } from '@/lib/sessions/unified-resolver';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * DEV-ONLY: Simulate attendance events for testing
@@ -180,11 +181,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
-    console.error('[ATTENDANCE] DEV: Error processing attendance event:', error);
-    return NextResponse.json(
-      { error: 'Internal server error', message: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/dev/attendance]' });
   }
 }
 

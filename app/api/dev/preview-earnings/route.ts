@@ -16,6 +16,7 @@ import { getAuthContext } from '@/lib/auth/session';
 import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { updateSession } from '@/lib/sessions/storage';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   // STRICT: Only allow in development
@@ -106,11 +107,7 @@ export async function POST(request: NextRequest) {
       completedAt,
     });
   } catch (error) {
-    console.error('[DEV-ONLY] Error in earnings preview helper:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/dev/preview-earnings]' });
   }
 }
 

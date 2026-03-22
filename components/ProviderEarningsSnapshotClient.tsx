@@ -28,6 +28,14 @@ export default function ProviderEarningsSnapshotClient(props: {
       });
       const data = (await res.json().catch(() => ({}))) as any;
       if (res.ok && typeof data?.availableBalanceCents === 'number') {
+        // Temporary debug logs (remove after verification).
+        console.log('[EARNINGS_SNAPSHOT_DEBUG]', {
+          earningsRows: Number(data?.earningsRows ?? 0),
+          totalEarningsCents: Number(data.totalEarningsCents || 0),
+          pendingPayoutsCents: Number(data.pendingPayoutsCents || 0),
+          totalWithdrawnCents: Number(data.totalWithdrawnCents || 0),
+          availableBalanceCents: Number(data.availableBalanceCents || 0),
+        });
         setSummary({
           totalEarningsCents: Number(data.totalEarningsCents || 0),
           availableBalanceCents: Number(data.availableBalanceCents || 0),

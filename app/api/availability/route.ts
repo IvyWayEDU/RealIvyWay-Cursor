@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { getAvailability, readAvailabilityFile, setAvailability } from '@/lib/availability/store.server';
 import type { DayAvailability } from '@/lib/availability/types';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function GET(request: NextRequest) {
   try {
@@ -63,11 +64,7 @@ export async function GET(request: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error('Get availability error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/availability] GET' });
   }
 }
 
@@ -224,10 +221,6 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    console.error('Save availability error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/availability] POST' });
   }
 }

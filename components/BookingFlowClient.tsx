@@ -1859,9 +1859,7 @@ function Step4ChooseTimeSlot({
     fetch(`/api/availability/all-slots?${params.toString()}`)
       .then(res => {
         if (!res.ok) {
-          return res.json().then(err => {
-            throw new Error(err.error || 'Failed to fetch available slots');
-          });
+          throw new Error('Unable to load available time slots. Please try again.');
         }
         return res.json();
       })
@@ -1906,7 +1904,7 @@ function Step4ChooseTimeSlot({
       })
       .catch(err => {
         console.error('Error fetching slots:', err);
-        setSlotsError(err.message || 'Failed to load available time slots');
+        setSlotsError('Unable to load available time slots. Please try again.');
         setAvailableSlots([]);
         setCounselingProviders([]);
       })
@@ -2259,7 +2257,7 @@ function Step5SelectProvider({
           ]);
         }
       } catch (e) {
-        if (!cancelled) setProvidersError(e instanceof Error ? e.message : 'Failed to load providers');
+        if (!cancelled) setProvidersError('Unable to load providers. Please try again.');
       } finally {
         if (!cancelled) setLoadingProviders(false);
       }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getPlatformFeesConfig, updatePlatformFee } from '@/lib/platform-fees/storage';
 import { PlatformFee } from '@/lib/platform-fees/types';
+import { handleApiError } from '@/lib/errorHandler';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
 import { platformFeeUpdateSchema } from '@/lib/validation/schemas';
@@ -25,11 +26,7 @@ export async function GET(request: NextRequest) {
     const config = await getPlatformFeesConfig();
     return NextResponse.json(config);
   } catch (error) {
-    console.error('Error fetching platform fees:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch platform fees' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/platform-fees] GET' });
   }
 }
 
@@ -76,11 +73,7 @@ export async function PUT(request: NextRequest) {
     const config = await getPlatformFeesConfig();
     return NextResponse.json(config);
   } catch (error) {
-    console.error('Error updating platform fee:', error);
-    return NextResponse.json(
-      { error: 'Failed to update platform fee' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/platform-fees] PUT' });
   }
 }
 

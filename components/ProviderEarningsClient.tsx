@@ -23,7 +23,6 @@ export default function ProviderEarningsClient(props: {
   availableBalanceCents: number;
   pendingPayoutsCents: number;
   totalWithdrawnCents: number;
-  stripeConnected: boolean;
 }) {
   const router = useRouter();
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -65,6 +64,14 @@ export default function ProviderEarningsClient(props: {
           });
           const sdata = (await sres.json().catch(() => ({}))) as any;
           if (sres.ok && typeof sdata?.availableBalanceCents === 'number') {
+            // Temporary debug logs (remove after verification).
+            console.log('[EARNINGS_CLIENT_DEBUG]', {
+              earningsRows: Number(sdata?.earningsRows ?? 0),
+              totalEarningsCents: Number(sdata.totalEarningsCents || 0),
+              pendingPayoutsCents: Number(sdata.pendingPayoutsCents || 0),
+              totalWithdrawnCents: Number(sdata.totalWithdrawnCents || 0),
+              availableBalanceCents: Number(sdata.availableBalanceCents || 0),
+            });
             setSummary({
               totalEarningsCents: Number(sdata.totalEarningsCents || 0),
               availableBalanceCents: Number(sdata.availableBalanceCents || 0),
@@ -183,6 +190,21 @@ export default function ProviderEarningsClient(props: {
   const availableBalanceCents = summary.availableBalanceCents || 0;
   const totalWithdrawnCents = summary.totalWithdrawnCents || 0;
   const pendingPayoutsCents = summary.pendingPayoutsCents || 0;
+
+  // Temporary debug logs (remove after verification).
+  if (typeof window !== 'undefined') {
+    // Only log when we have at least attempted loading.
+    if (!loading) {
+      console.log('[EARNINGS_BREAKDOWN_DEBUG]', {
+        earningsRowsShown: bookings.length,
+        totalEarningsFromBreakdownCents: totalEarningsFromSessionsCents,
+        totalEarningsCents,
+        pendingPayoutsCents,
+        totalWithdrawnCents,
+        availableBalanceCents,
+      });
+    }
+  }
 
   if (loading) {
     return (

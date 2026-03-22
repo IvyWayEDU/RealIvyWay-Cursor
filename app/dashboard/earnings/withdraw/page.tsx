@@ -7,9 +7,9 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { isProvider } from '@/lib/auth/authorization';
-import WithdrawEarningsClient from '@/components/WithdrawEarningsClient';
-import { getProviderByUserId } from '@/lib/providers/storage';
+import WithdrawFormClient from '@/components/WithdrawFormClient';
 import { getProviderPayoutSummaryFromLedger } from '@/lib/payouts/summary.server';
+import { getBankAccount } from '@/lib/payouts/bank-account-storage';
 
 export default async function WithdrawPage() {
   const session = await getSession();
@@ -18,11 +18,10 @@ export default async function WithdrawPage() {
   if (!isProvider(session as any)) redirect('/dashboard/student');
 
   const providerId = session.userId;
-  const [provider, payoutSummary] = await Promise.all([
-    getProviderByUserId(providerId),
+  const [payoutSummary, bankAccount] = await Promise.all([
     getProviderPayoutSummaryFromLedger(providerId),
+    getBankAccount(providerId),
   ]);
-  const stripeConnectAccountId = String((provider as any)?.stripeConnectAccountId || '').trim();
 
   return (
     <div className="space-y-8">
@@ -33,11 +32,9 @@ export default async function WithdrawPage() {
         </p>
       </div>
 
-      <WithdrawEarningsClient
+      <WithdrawFormClient
         availableBalanceCents={payoutSummary.availableBalanceCents}
-        pendingPayoutsCents={payoutSummary.pendingPayoutsCents ?? payoutSummary.pendingWithdrawalsCents}
-        totalWithdrawnCents={payoutSummary.totalWithdrawnCents}
-        stripeConnected={Boolean(stripeConnectAccountId)}
+        bankAccount={bankAccount}
       />
     </div>
   );

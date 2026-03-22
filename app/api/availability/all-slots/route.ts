@@ -17,6 +17,7 @@ import { normalizeSubjectToCanonical, subjectsMatch, normalizeSubjectId } from '
 // RATE LIMITING
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 import { auth } from '@/lib/auth/middleware';
+import { handleApiError } from '@/lib/errorHandler';
 
 const QuerySchema = z.object({
   date: z.string(),
@@ -444,7 +445,7 @@ export async function GET(req: NextRequest) {
     if (!parsed.success) {
       console.error('Invalid query:', parsed.error);
       return NextResponse.json(
-        { error: 'Invalid query parameters', details: parsed.error.errors },
+        { error: 'Invalid query parameters', details: parsed.error.issues },
         { status: 400 }
       );
     }
@@ -1416,10 +1417,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('[API /api/availability/all-slots] Error:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch available slots', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/availability/all-slots]' });
   }
 }

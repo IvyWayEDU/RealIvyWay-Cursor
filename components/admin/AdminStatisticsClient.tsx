@@ -56,6 +56,51 @@ function Section(props: { title: string; subtitle?: string; children: React.Reac
   );
 }
 
+function StackedPercentBar(props: {
+  items: Array<{ label: string; count: number; color: string }>;
+}) {
+  const total = props.items.reduce((sum, i) => sum + (Number(i.count) || 0), 0);
+  const parts = props.items.map((i) => {
+    const c = Math.max(0, Math.floor(Number(i.count) || 0));
+    const pct = total > 0 ? c / total : 0;
+    return { ...i, count: c, pct };
+  });
+
+  const w = 100;
+  const h = 10;
+  const segments = parts.map((p, idx) => {
+    const segW = p.pct * w;
+    const segX = parts.slice(0, idx).reduce((sum, q) => sum + q.pct * w, 0);
+    return { ...p, segW, segX };
+  });
+
+  return (
+    <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+      <div className="p-6">
+        <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-6" preserveAspectRatio="none" aria-hidden>
+          {segments.map((p) => (
+            <rect key={p.label} x={p.segX} y="0" width={p.segW} height={h} fill={p.color} />
+          ))}
+        </svg>
+
+        <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-2 lg:grid-cols-4">
+          {parts.map((p) => (
+            <div key={p.label} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: p.color }} />
+                <span className="font-medium text-gray-900 truncate">{p.label}</span>
+              </div>
+              <div className="tabular-nums text-gray-700">
+                {total > 0 ? `${(p.pct * 100).toFixed(1)}%` : '—'} <span className="text-gray-400">({p.count})</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BarChart(props: {
   items: Array<{ label: string; value: number }>;
   color?: string;
@@ -422,14 +467,19 @@ function LineChart(props: {
   );
 }
 
-async function downloadCsv(kind: 'revenue' | 'sessions') {
+async function downloadCsv(kind: 'earnings' | 'sessions' | 'payouts') {
   const res = await fetch(`/api/admin/statistics?export=${kind}`, { method: 'GET' });
   if (!res.ok) throw new Error(`Export failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = kind === 'revenue' ? 'ivyway-revenue.csv' : 'ivyway-sessions.csv';
+  a.download =
+    kind === 'earnings'
+      ? 'ivyway-earnings.csv'
+      : kind === 'payouts'
+        ? 'ivyway-payouts.csv'
+        : 'ivyway-sessions.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -482,10 +532,15 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
     pct: percent(s.percentOfTotal),
   }));
 
-  const popularityItems = data.servicePopularity.sessionsByService.map((s) => ({
-    label: labelService(s.serviceType),
-    value: s.sessionCount,
-  }));
+  const sessionBreakdownItems = [
+    { key: 'tutoring', label: 'Tutoring', color: '#4F46E5' },
+    { key: 'test_prep', label: 'Test Prep', color: '#0088cb' },
+    { key: 'college_counseling', label: 'Counseling', color: '#22c55e' },
+    { key: 'virtual_tour', label: 'Virtual Tours', color: '#f59e0b' },
+  ].map((base) => {
+    const found = data.servicePopularity.sessionsByService.find((s) => s.serviceType === (base.key as any));
+    return { label: base.label, count: found?.sessionCount ?? 0, color: base.color };
+  });
 
   const signupLabels = data.userGrowth.signupsPerMonth.map((p) => formatMonth(p.month));
   const studentSeries = data.userGrowth.signupsPerMonth.map((p) => p.studentSignups);
@@ -511,10 +566,10 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
             type="button"
             disabled={exporting !== null}
             onClick={async () => {
-              setExporting('revenue');
+              setExporting('earnings');
               setError(null);
               try {
-                await downloadCsv('revenue');
+                await downloadCsv('earnings');
               } catch (e) {
                 setError(e instanceof Error ? e.message : 'Export failed');
               } finally {
@@ -523,7 +578,7 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
             }}
             className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
           >
-            {exporting === 'revenue' ? 'Exporting…' : 'Export Revenue CSV'}
+            {exporting === 'earnings' ? 'Exporting…' : 'Export Earnings CSV'}
           </button>
           <button
             type="button"
@@ -543,6 +598,24 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
           >
             {exporting === 'sessions' ? 'Exporting…' : 'Export Sessions CSV'}
           </button>
+          <button
+            type="button"
+            disabled={exporting !== null}
+            onClick={async () => {
+              setExporting('payouts');
+              setError(null);
+              try {
+                await downloadCsv('payouts');
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Export failed');
+              } finally {
+                setExporting(null);
+              }
+            }}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-60"
+          >
+            {exporting === 'payouts' ? 'Exporting…' : 'Export Payouts CSV'}
+          </button>
         </div>
       </div>
 
@@ -550,11 +623,15 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
       ) : null}
 
-      <Section title="Revenue Overview" subtitle="Platform revenue is computed from completed sessions only.">
+      <Section title="Platform Revenue" subtitle="Platform revenue is computed from completed sessions only.">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Total Revenue (all time)" value={money(data.revenueOverview.totalRevenueCents)} />
-          <StatCard label="Revenue This Month" value={money(data.revenueOverview.revenueThisMonthCents)} />
-          <StatCard label="Revenue Last Month" value={money(data.revenueOverview.revenueLastMonthCents)} />
+          <StatCard label="Total revenue" value={money(data.revenueOverview.totalRevenueCents)} />
+          <StatCard
+            label="Monthly revenue"
+            value={money(data.revenueOverview.revenueThisMonthCents)}
+            sub={`Last month: ${money(data.revenueOverview.revenueLastMonthCents)}`}
+          />
+          <StatCard label="Today revenue" value={money(data.revenueOverview.revenueTodayCents)} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -564,11 +641,11 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
         </div>
       </Section>
 
-      <Section title="Service Popularity" subtitle="Sessions booked by service type (all statuses).">
-        <BarChart items={popularityItems} color="#4F46E5" />
+      <Section title="Session Breakdown" subtitle="Share of total sessions by service type (all statuses).">
+        <StackedPercentBar items={sessionBreakdownItems} />
       </Section>
 
-      <Section title="User Growth" subtitle="Signups per month.">
+      <Section title="User Growth" subtitle="New students and new providers per month.">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Total Students" value={data.userGrowth.totals.totalStudents} />
           <StatCard label="Total Providers" value={data.userGrowth.totals.totalProviders} />
@@ -610,6 +687,14 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
         />
       </Section>
 
+      <Section title="Session Completion Rate" subtitle="Completion vs cancellations and no-shows (all time).">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard label="Completed sessions" value={data.sessionHealth.sessionsCompleted} />
+          <StatCard label="Cancelled sessions" value={data.sessionHealth.sessionsCancelled} />
+          <StatCard label="No shows" value={data.sessionHealth.sessionsNoShowTotal} />
+        </div>
+      </Section>
+
       <Section title="Session Health Metrics" subtitle="Operational signals and risk flags.">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Total Sessions Booked" value={data.sessionHealth.totalSessionsBooked} />
@@ -623,11 +708,43 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
         </div>
       </Section>
 
-      <Section title="Earnings Flow" subtitle="Provider earnings derived from completed sessions (eligible only).">
+      <Section title="Provider Payouts" subtitle="Provider earnings derived from completed sessions (eligible only).">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label="Total Provider Earnings" value={money(data.earningsFlow.totalProviderEarningsCents)} />
-          <StatCard label="Total Withdrawn" value={money(data.earningsFlow.totalWithdrawnCents)} />
-          <StatCard label="Pending Payouts" value={money(data.earningsFlow.pendingPayoutsCents)} />
+          <StatCard label="Total provider earnings" value={money(data.earningsFlow.totalProviderEarningsCents)} />
+          <StatCard label="Total payouts sent" value={money(data.earningsFlow.totalWithdrawnCents)} />
+          <StatCard label="Pending payouts" value={money(data.earningsFlow.pendingPayoutsCents)} />
+        </div>
+      </Section>
+
+      <Section title="Top Providers" subtitle="Leaderboard by platform revenue generated (completed sessions).">
+        <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Provider</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Sessions completed</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Earnings generated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {data.topProviders.map((p) => (
+                  <tr key={p.providerId}>
+                    <td className="px-4 py-3 text-sm text-gray-900">{p.providerName}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{p.sessionsCompleted}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{money(p.platformRevenueCents)}</td>
+                  </tr>
+                ))}
+                {data.topProviders.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-4 py-10 text-center text-sm text-gray-600">
+                      No completed sessions yet.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       </Section>
 

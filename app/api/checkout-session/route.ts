@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { auth } from '@/lib/auth/middleware';
-// RATE LIMITING
-import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { createSession, getSessions } from '@/lib/sessions/storage';
 import { readCheckoutBookingRecord, deleteCheckoutBookingRecord } from '@/lib/stripe/checkoutBookingStore.server';
 import crypto from 'crypto';
 import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as PricingPlan } from '@/lib/pricing/catalog';
 import { getProviderPayout } from '@/lib/payouts/getProviderPayout';
 import { getUserById } from '@/lib/auth/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -66,17 +66,12 @@ export async function GET(request: NextRequest) {
     if (authResult.error) return authResult.error;
     const session = authResult.session!;
 
-    // RATE LIMITING: Check booking rate limit (prevent rapid-fire Stripe queries)
-    const rateLimitResult = checkBookingRateLimit(request, session.userId, '/api/checkout-session');
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Please wait before attempting again.' },
-        {
-          status: 429,
-          headers: createRateLimitHeaders(rateLimitResult),
-        }
-      );
-    }
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/checkout-session',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
 
     // Get session_id from query parameters
     const { searchParams } = new URL(request.url);
@@ -412,7 +407,6 @@ export async function GET(request: NextRequest) {
 
     console.log('[CHECKOUT_SESSION_CONFIRMED]', {
       stripeSessionId: checkoutSession.id,
-      userId: session.userId,
       createdCount: created.length,
     });
 
@@ -433,18 +427,12 @@ export async function GET(request: NextRequest) {
     
     // If it's a Stripe error, log additional details
     if (error && typeof error === 'object' && 'type' in error) {
-      console.error('Stripe error type:', (error as any).type);
-      console.error('Stripe error code:', (error as any).code);
-      console.error('Stripe error message:', (error as any).message);
+      console.error('[api/checkout-session] Stripe error type:', (error as any).type);
+      console.error('[api/checkout-session] Stripe error code:', (error as any).code);
+      console.error('[api/checkout-session] Stripe error message:', (error as any).message);
     }
     
-    return NextResponse.json(
-      { 
-        error: 'Failed to retrieve checkout session',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/checkout-session]' });
   }
 }
 

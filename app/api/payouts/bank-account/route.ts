@@ -3,6 +3,8 @@
 import { NextRequest } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { setBankAccount, getBankAccount } from '@/lib/payouts/bank-account-storage';
+import { updateProviderPayoutDetailsByUserId } from '@/lib/providers/storage';
+import { handleApiError } from '@/lib/errorHandler';
 // RATE LIMITING
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 // VALIDATION
@@ -21,8 +23,7 @@ export async function GET() {
 
     return Response.json({ success: true, bankAccount }, { status: 200 });
   } catch (error) {
-    console.error('Error fetching bank account:', error);
-    return Response.json({ success: false, error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/payouts/bank-account] GET' });
   }
 }
 
@@ -61,11 +62,22 @@ export async function POST(request: NextRequest) {
       accountType: accountType,
     });
 
+    // ALSO persist full payout details to the provider profile so admin payout processing
+    // can snapshot and display the real destination details in the admin modal.
+    // (These fields are admin-only surfaces; do not expose full details in tables.)
+    await updateProviderPayoutDetailsByUserId(providerId, {
+      payoutMethod: 'bank',
+      bankName: bankName.trim(),
+      bankCountry: 'US',
+      bankAccountNumber: accountNumber.trim(),
+      bankRoutingNumber: routingNumber.trim(),
+      accountHolderName: accountHolderName.trim(),
+    } as any);
+
     // Return bank account metadata (already contains only last4, no sensitive data)
     return Response.json({ success: true, bankAccount }, { status: 200 });
   } catch (error) {
-    console.error('Error saving bank account:', error);
-    return Response.json({ success: false, error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/payouts/bank-account] POST' });
   }
 }
 

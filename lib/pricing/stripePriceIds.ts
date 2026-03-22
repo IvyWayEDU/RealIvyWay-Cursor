@@ -51,6 +51,9 @@ export function toStripePriceEnvKey(pricing_key: PricingKey): StripeEnvPricingKe
 }
 
 let cachedMap: Record<StripeEnvPricingKey, string> | null = null;
+type StripePriceIdMapSource = 'env' | 'dev_fallback';
+let cachedSource: StripePriceIdMapSource | null = null;
+let didLogMapKeys = false;
 
 function tryLoadDevFallbackStripePriceIdMapRaw(): string | null {
   // Only allow fallback in non-production environments.
@@ -85,12 +88,16 @@ function tryLoadDevFallbackStripePriceIdMapRaw(): string | null {
 function loadStripePriceIdMapFromEnv(): Record<StripeEnvPricingKey, string> {
   if (cachedMap) return cachedMap;
 
-  const raw = process.env.STRIPE_PRICE_IDS_JSON || tryLoadDevFallbackStripePriceIdMapRaw();
+  const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
+  const fallbackRaw = envRaw ? null : tryLoadDevFallbackStripePriceIdMapRaw();
+  const raw = envRaw || fallbackRaw;
   if (!raw) {
     throw new Error(
       'Missing STRIPE_PRICE_IDS_JSON env var (JSON map from pricing key → Stripe price id). For local dev you can alternatively create data/stripe-price-ids.local.json.'
     );
   }
+
+  cachedSource = envRaw ? 'env' : 'dev_fallback';
 
   let parsed: unknown;
   try {
@@ -142,6 +149,31 @@ export function getStripePriceIdForPricingKey(pricing_key: PricingKey): string {
     throw new Error(`Missing Stripe price id for pricing_key=${pricing_key} (envKey=${envKey})`);
   }
   return id.trim();
+}
+
+export function getStripePriceIdMapDebugInfo(): {
+  source: StripePriceIdMapSource;
+  keys: StripeEnvPricingKey[];
+} {
+  const map = loadStripePriceIdMapFromEnv();
+  // loadStripePriceIdMapFromEnv always sets cachedSource if it succeeds
+  const source = cachedSource || 'env';
+  return {
+    source,
+    keys: Object.keys(map).sort() as StripeEnvPricingKey[],
+  };
+}
+
+export function debugLogStripePriceIdMapKeysOnce(logPrefix = 'STRIPE_PRICE_IDS'): void {
+  if (didLogMapKeys) return;
+  didLogMapKeys = true;
+  try {
+    const info = getStripePriceIdMapDebugInfo();
+    console.log(`${logPrefix} map source:`, info.source);
+    console.log(`${logPrefix} map keys:`, info.keys);
+  } catch (e) {
+    console.warn(`${logPrefix} map load failed:`, e);
+  }
 }
 
 

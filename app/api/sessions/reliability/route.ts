@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAuthContext } from '@/lib/auth/session';
+import { z } from 'zod';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { processSessionLifecycle, checkAndResolveAllUnresolvedSessions } from '@/lib/sessions/actions';
 import { getSessionsByStudentId, getSessionsByProviderId } from '@/lib/sessions/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * API endpoint to check and resolve session status based on join behavior
@@ -14,24 +16,23 @@ import { getSessionsByStudentId, getSessionsByProviderId } from '@/lib/sessions/
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const role = body.role || 'student'; // Default to student
-
-    const auth = await getAuthContext();
-    if (auth.status === 'suspended') {
-      return NextResponse.json({ error: 'Account suspended' }, { status: 403 });
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const body = await request.json().catch(() => ({}));
+    const RoleSchema = z.object({
+      role: z.enum(['student', 'provider', 'all']).default('student'),
+    }).strict();
+    const parsed = RoleSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parsed.error.issues }, { status: 400 });
+    }
+    const role = parsed.data.role;
 
     // If checking all sessions, verify admin access
     if (role === 'all') {
-      if (auth.status !== 'ok') {
-        return NextResponse.json(
-          { error: 'Unauthorized' },
-          { status: 401 }
-        );
-      }
-      const session = auth.session;
-
       // TEMP_ADMIN_MODE: Check if user is admin or temp admin
       const { isTempAdmin } = await import('@/lib/auth/tempAdmin');
       const isAdmin = session.roles.includes('admin') || isTempAdmin(session.userId);
@@ -64,14 +65,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Verify user session for role-based checks
-    if (auth.status !== 'ok') {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    // Enforce role-based access (students cannot run provider checks, etc.)
+    if (role === 'provider' && !session.roles.includes('provider')) {
+      return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
     }
-    const session = auth.session;
+    if (role === 'student' && !session.roles.includes('student')) {
+      return NextResponse.json({ error: 'Forbidden: Student role required' }, { status: 403 });
+    }
 
     let sessions = [];
     
@@ -107,14 +107,7 @@ export async function POST(request: NextRequest) {
       error: result.error,
     });
   } catch (error) {
-    console.error('[API /api/sessions/reliability] Error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to check session reliability', 
-        details: error instanceof Error ? error.message : 'Unknown error' 
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/reliability]' });
   }
 }
 

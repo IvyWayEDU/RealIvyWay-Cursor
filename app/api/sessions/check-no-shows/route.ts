@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { checkAndMarkNoShows } from '@/lib/sessions/noShowDetection';
+import { handleApiError } from '@/lib/errorHandler';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
 import { checkNoShowsSchema } from '@/lib/validation/schemas';
@@ -36,14 +37,7 @@ export async function POST(request: NextRequest) {
       message: `Checked sessions. Marked ${result.markedNoShows.length} as no-show.`,
     });
   } catch (error) {
-    console.error('[API /api/sessions/check-no-shows] Error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to check no-shows', 
-        details: error instanceof Error ? error.message : 'Unknown error' 
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/check-no-shows]' });
   }
 }
 

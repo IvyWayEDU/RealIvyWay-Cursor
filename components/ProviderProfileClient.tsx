@@ -225,6 +225,12 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
     await sendVerificationCode('phone', newPhone);
   };
 
+  const isProbablyReactEvent = (value: unknown): value is { preventDefault: () => void } => {
+    if (!value || typeof value !== 'object') return false;
+    const v = value as any;
+    return typeof v.preventDefault === 'function' && ('currentTarget' in v || 'target' in v);
+  };
+
   const handleSave = async (overrides: Record<string, any> = {}) => {
     setSaving(true);
     setSaveMessage(null);
@@ -240,6 +246,8 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
     }
 
     try {
+      const safeOverrides = isProbablyReactEvent(overrides) ? {} : overrides;
+
       const updateData: any = {
         name,
         email,
@@ -254,13 +262,15 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
       };
 
       // Allow callers (e.g. photo upload) to override specific fields without duplicating save logic.
-      Object.assign(updateData, overrides);
+      Object.assign(updateData, safeOverrides);
 
       // Update services array based on roles
       const services: string[] = [];
       if (updateData.isTutor) services.push('tutoring');
       if (updateData.isCounselor) services.push('college_counseling');
       updateData.services = services;
+
+      console.log('Saving provider profile:', updateData);
 
       const response = await fetch('/api/profile', {
         method: 'POST',
@@ -773,7 +783,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         <div className="pt-6 border-t border-gray-200">
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => handleSave()}
             disabled={saving}
             className="w-full inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >

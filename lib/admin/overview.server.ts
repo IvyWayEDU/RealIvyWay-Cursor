@@ -3,6 +3,7 @@ import 'server-only';
 import { getUsers } from '@/lib/auth/storage';
 import { getSessions } from '@/lib/sessions/storage';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
+import { getAllSupportTickets } from '@/lib/support/ticketingStorage';
 
 function safeNumber(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -28,10 +29,13 @@ export type AdminOverviewStats = {
   completedSessions: number;
   totalPlatformRevenueCents: number;
   totalProviderPayoutsCents: number;
+  openSupportTickets: number;
+  pendingSupportTickets: number;
+  unreadSupportTickets: number;
 };
 
 export async function getAdminOverviewStats(): Promise<AdminOverviewStats> {
-  const [users, sessions] = await Promise.all([getUsers(), getSessions()]);
+  const [users, sessions, supportTickets] = await Promise.all([getUsers(), getSessions(), getAllSupportTickets()]);
 
   const totalUsers = users.length;
   const totalStudents = users.filter(studentCountFromUser).length;
@@ -62,6 +66,15 @@ export async function getAdminOverviewStats(): Promise<AdminOverviewStats> {
     totalProviderPayoutsCents += providerPayout || providerPayoutFallback || providerPayoutDollar;
   }
 
+  const openSupportTickets = supportTickets.filter((t: any) => t?.status === 'open' || t?.status === 'admin_replied').length;
+  const pendingSupportTickets = supportTickets.filter((t: any) => t?.status === 'pending').length;
+  const unreadSupportTickets = supportTickets.filter((t: any) => {
+    const status = String(t?.status ?? '');
+    if (!['open', 'pending', 'admin_replied'].includes(status)) return false;
+    const unread = typeof t?.unreadForAdmin === 'number' ? t.unreadForAdmin : Number(t?.unreadForAdmin ?? 0);
+    return Number.isFinite(unread) && unread > 0;
+  }).length;
+
   return {
     totalUsers,
     totalStudents,
@@ -71,6 +84,9 @@ export async function getAdminOverviewStats(): Promise<AdminOverviewStats> {
     completedSessions,
     totalPlatformRevenueCents,
     totalProviderPayoutsCents,
+    openSupportTickets,
+    pendingSupportTickets,
+    unreadSupportTickets,
   };
 }
 

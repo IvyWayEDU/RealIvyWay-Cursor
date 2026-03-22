@@ -3,12 +3,12 @@
 import { useState } from 'react';
 
 export default function ClearDevSessionsButton() {
+  const [isClearing, setIsClearing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
   if (process.env.NODE_ENV === 'production') {
     return null;
   }
-
-  const [isClearing, setIsClearing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const handleClear = async () => {
     if (!confirm('Are you sure you want to clear all dev sessions? This action cannot be undone.')) {

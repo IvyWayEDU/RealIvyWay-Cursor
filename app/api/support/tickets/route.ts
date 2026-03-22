@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/requireAuth';
 import { requireAdmin as requireAdminResp } from '@/lib/auth/authorization';
 import { getUserById } from '@/lib/auth/storage';
 import { listSupportTickets } from '@/lib/support/ticketingStorage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function GET(request: NextRequest) {
   try {
@@ -43,8 +44,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ tickets: enriched });
   } catch (error) {
-    console.error('Support tickets list error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/tickets] GET' });
   }
 }
 

@@ -111,10 +111,9 @@
       "provider"
     ],
     "createdAt": "2026-01-14T08:10:30.459Z",
-    "updatedAt": "2026-01-25T03:10:44.933Z",
+    "updatedAt": "2026-03-14T17:50:48.915Z",
     "services": [
-      "tutoring",
-      "college_counseling"
+      "tutoring"
     ],
     "subjects": [
       "Math",
@@ -122,21 +121,15 @@
     ],
     "schoolId": "harvard_university",
     "schoolName": "Harvard University",
-    "offersVirtualTours": true,
+    "offersVirtualTours": false,
     "profileImageUrl": null,
-    "schoolIds": [
-      "michigan_state_university"
-    ],
-    "schoolNames": [
-      "Michigan State University"
-    ],
+    "schoolIds": [],
+    "schoolNames": [],
     "onboardingCompleted": true,
     "profilePhotoUrl": "",
     "isTutor": true,
-    "isCounselor": true,
+    "isCounselor": false,
     "phoneNumber": "",
-    "school_id": "michigan_state_university",
-    "school_name": "Michigan State University",
     "isSuspended": false,
     "status": "active"
   },
@@ -169,5 +162,48 @@
     "stripeCustomerCreatedAt": "2026-01-27T21:53:27.248Z",
     "isSuspended": false,
     "status": "active"
+  },
+  {
+    "id": "fee92bce-1aec-4430-a6b0-3d853de78a5d",
+    "name": "Student Test",
+    "email": "student_1773513371_d724bc@example.com",
+    "passwordHash": "ac1385e6754808a03915b37ff8bfeb22:a070ec8614ed462f5936086d07266c9349bc252e9df85e406786344da5bfd9f3aeb73fed74d7dbec35cbd557ea7b1a1d2031aff12024e827876c5fbefa56bca6",
+    "roles": [
+      "student"
+    ],
+    "isSuspended": false,
+    "status": "active",
+    "createdAt": "2026-03-14T18:36:11.386Z",
+    "updatedAt": "2026-03-14T18:36:11.806Z",
+    "stripeCustomerId": "cus_U9FXGIkQ8vFg2J",
+    "stripeCustomerEmail": "student_1773513371_d724bc@example.com",
+    "stripeCustomerName": "Student Test",
+    "stripeCustomerCreatedAt": "2026-03-14T18:36:11.803Z"
+  },
+  {
+    "id": "fe12504f-7cac-4f92-917a-1b220a7c616e",
+    "name": "Provider Test",
+    "email": "provider_1773513371_d724bc@example.com",
+    "passwordHash": "d0af0b1aaa3dac6086ef1228c9e38a39:5816e7da8d8c0b57191d3f19e3466d39694287e2c5b7157cfb97149d1f96e5db029ca6de773fd094b502cf6d3dfa291f986c3800dabf9dfc5d2b027835864555",
+    "roles": [
+      "provider"
+    ],
+    "isSuspended": false,
+    "status": "active",
+    "createdAt": "2026-03-14T18:36:11.878Z",
+    "updatedAt": "2026-03-14T18:36:11.878Z"
+  },
+  {
+    "id": "06164f20-d94d-4c7e-9240-7aea462d0b48",
+    "name": "Admin Test",
+    "email": "admintest+1773532854@ivyway.dev",
+    "passwordHash": "23e5f695019e4477ded528c5e88620f9:5608f0c912dab0f8840ad33907c1b2d980d3c13d796d5bf4cd3821df29f8926655c78603736e68cd986a8e0b26ab64dbe05cb1521eebe627f6f472e54b5c6c97",
+    "roles": [
+      "admin"
+    ],
+    "isSuspended": false,
+    "status": "active",
+    "createdAt": "2026-03-15T00:00:54.246Z",
+    "updatedAt": "2026-03-15T00:00:57.334Z"
   }
 ]

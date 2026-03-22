@@ -8,14 +8,30 @@ import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { getProviderPayoutRequestTotals } from '@/lib/payouts/payout-requests.server';
 import Stripe from 'stripe';
+import { handleApiError } from '@/lib/errorHandler';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
+
+function maskStripeAccountDestination(acct: string): string {
+  const a = String(acct || '').trim();
+  if (!a) return 'Stripe Connect';
+  const last4 = a.length >= 4 ? a.slice(-4) : a;
+  return `Stripe Connect •••• ${last4}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
     const authResult = await auth.requireProvider();
     if (authResult.error) return authResult.error;
     const session = authResult.session!;
+
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/stripe/payout/request',
+      body: { success: false, error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
 
     const validationResult = await validateRequestBody(request, withdrawalRequestSchema);
     if (!validationResult.success) return validationResult.response;
@@ -38,7 +54,7 @@ export async function POST(request: NextRequest) {
     if (!stripeSecretKey) {
       return NextResponse.json({ success: false, error: 'Stripe is not configured (missing STRIPE_SECRET_KEY)' }, { status: 500 });
     }
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-12-15.clover' });
     const account = await stripe.accounts.retrieve(stripeConnectAccountId);
     if (!account.details_submitted) {
       return NextResponse.json(
@@ -76,12 +92,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payoutRequest = await createPayoutRequest({ providerId: session.userId, amountCents: requestedAmountCents });
+    const payoutRequest = await createPayoutRequest({
+      providerId: session.userId,
+      amountCents: requestedAmountCents,
+      payoutMethod: 'Stripe',
+      payoutDestinationMasked: maskStripeAccountDestination(stripeConnectAccountId),
+      // legacy
+      payoutDestination: maskStripeAccountDestination(stripeConnectAccountId),
+    });
 
     return NextResponse.json({ success: true, payoutRequest }, { status: 201 });
   } catch (error) {
-    console.error('[stripe/payout/request] Error:', error);
-    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/stripe/payout/request]' });
   }
 }
 

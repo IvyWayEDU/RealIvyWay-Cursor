@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/middleware';
 import { getSessionById } from '@/lib/sessions/storage';
 import { markSessionCompletedWithEarnings } from '@/lib/sessions/actions';
 import { appendAdminAuditEntry } from '@/lib/audit/adminAudit.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,8 +45,7 @@ export async function POST(request: NextRequest) {
     const updated = await getSessionById(sessionId);
     return NextResponse.json({ session: updated });
   } catch (error) {
-    console.error('Admin force complete test error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/sessions/force-complete-test]' });
   }
 }
 

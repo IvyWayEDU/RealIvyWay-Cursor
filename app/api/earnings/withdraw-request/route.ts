@@ -8,8 +8,18 @@ import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { getProviderPayoutRequestTotals } from '@/lib/payouts/payout-requests.server';
 import Stripe from 'stripe';
+import type { ProviderProfile, Session } from '@/lib/models/types';
+import { handleApiError } from '@/lib/errorHandler';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
+
+function maskStripeAccountDestination(acct: string): string {
+  const a = String(acct || '').trim();
+  if (!a) return 'Stripe Connect';
+  const last4 = a.length >= 4 ? a.slice(-4) : a;
+  return `Stripe Connect •••• ${last4}`;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -30,17 +40,36 @@ export async function POST(request: NextRequest) {
 
     const session = authResult.session!;
 
+    const rl = enforceRateLimit(request, {
+      session: session as any,
+      endpoint: '/api/earnings/withdraw-request',
+      body: { success: false, error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
+
     const validationResult = await validateRequestBody(request, withdrawalRequestSchema);
     if (!validationResult.success) return validationResult.response;
     const { amountCents } = validationResult.data;
 
     const providerId = session.userId;
 
-    const provider = await getProviderByUserId(providerId);
-    const stripeConnectAccountId = String((provider as any)?.stripeConnectAccountId || '').trim();
+    const provider: ProviderProfile | null = await getProviderByUserId(providerId);
+    const stripeConnectAccountId =
+      typeof provider?.stripeConnectAccountId === 'string' ? provider.stripeConnectAccountId.trim() : '';
     if (!stripeConnectAccountId) {
       return Response.json(
         { success: false, error: 'Stripe Connect account is not linked. Please link a Stripe Connect account first.' },
+        { status: 400 }
+      );
+    }
+
+    // WITHDRAWAL VALIDATION: provider must be verified and active
+    if ((provider as any)?.active === false) {
+      return Response.json({ success: false, error: 'Provider account is inactive' }, { status: 403 });
+    }
+    if ((provider as any)?.verified !== true) {
+      return Response.json(
+        { success: false, error: 'Provider account must be verified before requesting withdrawals' },
         { status: 400 }
       );
     }
@@ -50,7 +79,7 @@ export async function POST(request: NextRequest) {
     if (!stripeSecretKey) {
       return Response.json({ success: false, error: 'Stripe is not configured (missing STRIPE_SECRET_KEY)' }, { status: 500 });
     }
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-12-15.clover' });
     const account = await stripe.accounts.retrieve(stripeConnectAccountId);
     if (!account.details_submitted) {
       return Response.json(
@@ -66,11 +95,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Always calculate the available balance fresh from the database (no Stripe balance API, no stored field).
-    const sessions = await getSessionsByProviderId(providerId);
+    const sessions = (await getSessionsByProviderId(providerId)) as unknown as Session[];
     const completedLike = new Set<string>(['completed', 'completed_provider_show', 'completed_no_show_student']);
     const totalEarningsCents = sessions
-      .filter((s: any) => completedLike.has(String(s?.status || '')) && s?.providerId === providerId)
-      .reduce((sum: number, s: any) => sum + calculateProviderPayoutCentsFromSession(s), 0);
+      .filter((s) => completedLike.has(String(s?.status || '')) && String(s?.providerId || '') === providerId)
+      .reduce((sum: number, s) => sum + calculateProviderPayoutCentsFromSession(s), 0);
     const totals = await getProviderPayoutRequestTotals(providerId);
     const totalWithdrawnCents = totals.withdrawnCents;
     const pendingPayoutsCents = totals.pendingCents;
@@ -88,12 +117,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const payoutRequest = await createPayoutRequest({ providerId, amountCents });
+    const payoutRequest = await createPayoutRequest({
+      providerId,
+      amountCents,
+      payoutMethod: 'Stripe',
+      payoutDestinationMasked: maskStripeAccountDestination(stripeConnectAccountId),
+      // legacy
+      payoutDestination: maskStripeAccountDestination(stripeConnectAccountId),
+    });
 
     return Response.json({ success: true, payoutRequest }, { status: 201 });
   } catch (error) {
-    console.error('Error handling withdraw request:', error);
-    return Response.json({ success: false, error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/earnings/withdraw-request]' });
   }
 }
 

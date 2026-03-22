@@ -34,24 +34,20 @@ export default async function AdminLayout({
 
   // SECURITY: Only allow admin users
   // Canonical admin check via session.user.role
-  // TEMP: Debug log for admin layout
-  console.log('[ADMIN LAYOUT]', session.email, session.roles);
-  
   if (session.user.role !== 'admin') {
-    console.log('[ADMIN LAYOUT] Access denied - not admin');
     redirect('/dashboard');
   }
-  
-  console.log('[ADMIN LAYOUT] Access granted - admin user');
 
   const nav = [
-    { name: 'Overview', href: '/admin' },
+    { name: 'Dashboard', href: '/admin' },
     { name: 'Statistics', href: '/admin/statistics' },
+    { name: 'Reconciliation', href: '/admin/analytics/reconciliation' },
     { name: 'Users', href: '/admin/users' },
     { name: 'Sessions', href: '/admin/sessions' },
-    { name: 'Earnings', href: '/admin/earnings-payouts' },
     { name: 'Support', href: '/admin/support' },
-    { name: 'Flags & Reports', href: '/admin/reports-flags' },
+    { name: 'Earnings', href: '/admin/earnings' },
+    { name: 'Payouts', href: '/admin/payouts' },
+    { name: 'Payout Investigation', href: '/admin/payout-investigation' },
   ] as const;
 
   return (

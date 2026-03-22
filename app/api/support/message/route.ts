@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
-import { requireAdmin as requireAdminResp } from '@/lib/auth/authorization';
+import { getServerSession } from '@/lib/auth/getServerSession';
+import { handleApiError } from '@/lib/errorHandler';
 import {
   appendSupportMessage,
   getOpenSupportConversationForUser,
@@ -10,20 +10,27 @@ import {
   setSupportConversationStatus,
 } from '@/lib/support/storage';
 import { shouldEscalateByKeyword } from '@/lib/support/escalation';
-
-type Action = 'send' | 'fetch' | 'markRead' | 'close';
+import { validateRequestBody } from '@/lib/validation/utils';
+import { supportChatRequestSchema } from '@/lib/validation/schemas';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) return authResult;
-    const { session } = authResult;
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const body = await request.json();
-    const action: Action = (body?.action as Action) || 'send';
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/support/message',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
 
-    const threadId: string | undefined = body?.threadId ? String(body.threadId) : undefined;
-    const text: string | undefined = body?.text ? String(body.text).trim() : undefined;
+    const validationResult = await validateRequestBody(request, supportChatRequestSchema);
+    if (!validationResult.success) return validationResult.response;
+    const { action, threadId, text } = validationResult.data;
 
     const isAdmin = Array.isArray(session.roles) && session.roles.includes('admin');
 
@@ -36,7 +43,7 @@ export async function POST(request: NextRequest) {
 
       if (action === 'markRead') {
         const convo = threadId
-          ? await getSupportConversationById(threadId)
+          ? await getSupportConversationById(String(threadId))
           : await getOpenSupportConversationForUser(session.userId);
         if (!convo) return NextResponse.json({ conversation: null });
         if (convo.userId !== session.userId) {
@@ -46,9 +53,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ conversation: updated });
       }
 
-      if (!text) {
-        return NextResponse.json({ error: 'Text is required' }, { status: 400 });
-      }
+      // send
+      if (!text) return NextResponse.json({ error: 'Text is required' }, { status: 400 });
 
       const convo = await getOrCreateOpenSupportConversationForUser(session.userId);
       const updated = await appendSupportMessage({
@@ -65,19 +71,18 @@ export async function POST(request: NextRequest) {
     }
 
     // -------- Admin actions --------
-    const adminGate = requireAdminResp(session);
-    if (adminGate) return adminGate;
+    if (session.user.role !== 'admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     if (action === 'fetch') {
       // Admins should use GET /api/support/conversations instead; keep this for completeness.
       return NextResponse.json({ error: 'Use /api/support/conversations' }, { status: 400 });
     }
 
-    if (!threadId) {
-      return NextResponse.json({ error: 'threadId is required' }, { status: 400 });
-    }
+    if (!threadId) return NextResponse.json({ error: 'threadId is required' }, { status: 400 });
 
-    const convo = await getSupportConversationById(threadId);
+    const convo = await getSupportConversationById(String(threadId));
     if (!convo) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
     }
@@ -92,9 +97,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ conversation: updated });
     }
 
-    if (!text) {
-      return NextResponse.json({ error: 'Text is required' }, { status: 400 });
-    }
+    if (!text) return NextResponse.json({ error: 'Text is required' }, { status: 400 });
 
     const updated = await appendSupportMessage({
       conversationId: convo.id,
@@ -105,8 +108,7 @@ export async function POST(request: NextRequest) {
     await markSupportConversationRead({ conversationId: updated.id, reader: 'admin' });
     return NextResponse.json({ conversation: updated });
   } catch (error) {
-    console.error('Support message error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/message]' });
   }
 }
 

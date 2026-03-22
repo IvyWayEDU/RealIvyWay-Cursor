@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthContext } from '@/lib/auth/session';
 import { updateExistingCreditsTo31Days } from '@/lib/referrals/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,14 +34,7 @@ export async function POST(request: NextRequest) {
       message: `Successfully updated ${updatedCount} referral credit(s) to 31-day expiration.`,
     });
   } catch (error) {
-    console.error('Error migrating referral credits:', error);
-    return NextResponse.json(
-      {
-        error: 'Failed to migrate referral credits',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/referrals/migrate]' });
   }
 }
 

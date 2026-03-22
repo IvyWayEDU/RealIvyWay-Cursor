@@ -83,15 +83,13 @@ export async function POST(request: NextRequest) {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;
     
-    // Log the event ID and session metadata
-    console.log('Checkout session completed - Event ID:', event.id);
-    console.log('Checkout session completed - Session metadata:', {
-      sessionId: session.id,
+    // Minimal operational log (avoid PII / full metadata dumps)
+    console.log('Checkout session completed:', {
+      eventId: event.id,
+      stripeSessionId: session.id,
       paymentStatus: session.payment_status,
-      customerEmail: session.customer_email,
       amountTotal: session.amount_total,
       currency: session.currency,
-      metadata: session.metadata || {},
     });
 
     try {
@@ -142,7 +140,6 @@ export async function POST(request: NextRequest) {
           if (!userId || !subscriptionId || !invoiceId) {
             console.error('[WEBHOOK] Missing fields for counseling monthly credit grant', {
               stripeSessionId: session.id,
-              userId: userId || null,
               subscriptionId: subscriptionId || null,
               invoiceId: invoiceId || null,
             });
@@ -158,15 +155,12 @@ export async function POST(request: NextRequest) {
             });
             console.log('[COUNSELING_MONTHLY_CREDITS_GRANTED]', {
               stripeSessionId: session.id,
-              userId,
               subscriptionId,
               invoiceId,
-              ...grant,
             });
           } catch (e) {
             console.error('[COUNSELING_MONTHLY_CREDITS_GRANT_FAILED]', {
               stripeSessionId: session.id,
-              userId,
               subscriptionId,
               invoiceId,
               error: e instanceof Error ? e.message : String(e),
@@ -624,22 +618,13 @@ export async function POST(request: NextRequest) {
               stripeSessionId: session.id,
               paymentIntentId,
               sessionId: created.id,
-              providerId,
-              studentId,
               zoomMeetingId: zoom.meetingId,
-              patched,
-              startTime: startIso,
-              endTime: endIso,
             });
           } catch (error) {
             console.error('[ZOOM_MEETING_CREATE_FAILED]', {
               stripeSessionId: session.id,
               paymentIntentId,
               sessionId: created.id,
-              providerId,
-              studentId,
-              startTime: startIso,
-              endTime: endIso,
               error: error instanceof Error ? error.message : String(error),
             });
             // Persist failure state, but never block booking.
@@ -655,11 +640,7 @@ export async function POST(request: NextRequest) {
           sessionId: created.id,
           stripeSessionId: session.id,
           paymentIntentId,
-          providerId,
-          studentId,
           serviceType: canonicalServiceType,
-          startTime: startIso,
-          endTime: endIso,
           zoomMeetingId: (created as any)?.zoomMeetingId || null,
         });
       }
@@ -761,10 +742,8 @@ export async function POST(request: NextRequest) {
         creditsToGrant: 4,
       });
       console.log('[COUNSELING_MONTHLY_CREDITS_GRANTED_INVOICE]', {
-        userId,
         subscriptionId,
         invoiceId,
-        ...grant,
       });
     } catch (e) {
       console.error('[WEBHOOK] invoice.paid handling failed', {

@@ -90,12 +90,29 @@ export async function appendSupportMessage(args: {
   if (!convo) {
     throw new Error('Conversation not found');
   }
+  const normalizedText = typeof args.text === 'string' ? args.text.trim() : '';
+  if (!normalizedText) {
+    throw new Error('Message text is required');
+  }
+
+  // Protect against duplicate sends (double-click / client retries).
+  // If the last message matches exactly (same sender + same trimmed text) within 15s, treat as idempotent.
+  const last = Array.isArray(convo.messages) && convo.messages.length > 0 ? convo.messages[convo.messages.length - 1] : null;
+  if (last && last.sender === args.sender) {
+    const lastText = typeof last.text === 'string' ? last.text.trim() : '';
+    const lastAtMs = Date.parse(String(last.createdAt || ''));
+    const nowMs = Date.now();
+    if (lastText === normalizedText && Number.isFinite(lastAtMs) && nowMs - lastAtMs >= 0 && nowMs - lastAtMs < 15_000) {
+      return convo;
+    }
+  }
+
   const now = new Date().toISOString();
   const msg: SupportMessage = {
     id: newId('msg'),
     sender: args.sender,
     senderId: args.senderId,
-    text: args.text,
+    text: normalizedText,
     createdAt: now,
   };
   convo.messages.push(msg);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { logger } from '@/lib/logger';
 
 /**
  * Hook to send provider or student heartbeat every 15 seconds
@@ -44,7 +45,12 @@ export function useProviderSessionHeartbeat(
 
         if (response.ok) {
           const data = await response.json();
-          console.log(`[HEARTBEAT_OK] ${sessionId} ${role} status:${data.status} providerSeconds:${data.providerAccumulatedSeconds || 0}`);
+          logger.debug('heartbeat', 'tick ok', {
+            sessionId,
+            role,
+            status: data.status,
+            providerAccumulatedSeconds: data.providerAccumulatedSeconds || 0,
+          });
           
           // Stop interval if session is in terminal state (canonical)
           const terminalStates = ['completed', 'flagged', 'cancelled'];
@@ -55,10 +61,10 @@ export function useProviderSessionHeartbeat(
             }
           }
         } else {
-          console.error('[HEARTBEAT] failed', sessionId, response.status);
+          logger.error('heartbeat', 'tick failed', { sessionId, status: response.status });
         }
       } catch (error) {
-        console.error('[HEARTBEAT] error', sessionId, error);
+        logger.error('heartbeat', 'tick error', { sessionId, error });
       }
     };
 
@@ -79,10 +85,10 @@ export function useProviderSessionHeartbeat(
 
         if (response.ok) {
           hasJoinedRef.current = true;
-          console.log(`[HEARTBEAT] ${sessionId} ${role} joined`);
+          logger.debug('heartbeat', 'joined', { sessionId, role });
         }
       } catch (error) {
-        console.error('[HEARTBEAT] join error', sessionId, error);
+        logger.error('heartbeat', 'join error', { sessionId, role, error });
       }
     };
 
@@ -100,9 +106,9 @@ export function useProviderSessionHeartbeat(
           }),
           keepalive: true, // Ensures request completes even if page unloads
         });
-        console.log(`[HEARTBEAT] ${sessionId} ${role} left`);
+        logger.debug('heartbeat', 'left', { sessionId, role });
       } catch (error) {
-        console.error('[HEARTBEAT] leave error', sessionId, error);
+        logger.error('heartbeat', 'leave error', { sessionId, role, error });
       }
     };
 

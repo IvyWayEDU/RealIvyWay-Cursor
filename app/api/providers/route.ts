@@ -6,6 +6,7 @@ import { getProviderRating } from '@/lib/providers/rating';
 import { getReviewsByProviderId } from '@/lib/reviews/storage.server';
 import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { ProviderProfile } from '@/lib/models/types';
+import { handleApiError } from '@/lib/errorHandler';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest) {
@@ -152,11 +153,7 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({ providers: enrichedProviders });
   } catch (error) {
-    console.error('Get providers error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/providers] GET' });
   }
 }
 
@@ -222,10 +219,6 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json({ provider }, { status: 201 });
   } catch (error) {
-    console.error('Create provider error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/providers] POST' });
   }
 }

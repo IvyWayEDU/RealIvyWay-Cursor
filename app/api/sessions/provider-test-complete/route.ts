@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getSessionById } from '@/lib/sessions/storage';
 import { markSessionCompletedWithEarnings } from '@/lib/sessions/actions';
 import { getProviderByUserId } from '@/lib/providers/storage';
 import { appendProviderAuditEntry } from '@/lib/audit/providerAudit.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 function isDevOrStaging(): boolean {
   // Dev: local NODE_ENV=development
@@ -17,12 +18,10 @@ function isDevOrStaging(): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    const { session } = authResult;
     if (!session.roles.includes('provider')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -78,8 +77,7 @@ export async function POST(request: NextRequest) {
     const updated = await getSessionById(sessionId);
     return NextResponse.json({ session: updated });
   } catch (error) {
-    console.error('Provider test complete error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/sessions/provider-test-complete]' });
   }
 }
 

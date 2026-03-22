@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
+import { handleApiError } from '@/lib/errorHandler';
+import { z } from 'zod';
+import { checkRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting';
 
 // In-memory store for verification codes (in production, use Redis or database)
 const verificationCodes = new Map<string, { code: string; expiresAt: number; value: string }>();
@@ -21,17 +24,42 @@ function cleanupExpiredCodes() {
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const session = await getServerSession();
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await request.json().catch(() => ({}));
+    const SendSchema = z.object({
+      type: z.enum(['email', 'phone']),
+      value: z.string().min(3).max(254),
+      code: z.undefined().optional(),
+      newValue: z.undefined().optional(),
+    }).strict();
+    const VerifySchema = z.object({
+      type: z.enum(['email', 'phone']),
+      code: z.string().regex(/^\d{6}$/, 'Verification code must be 6 digits'),
+      newValue: z.string().min(3).max(254),
+    }).strict();
+    const parsed = z.union([SendSchema, VerifySchema]).safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: 'Validation failed', details: parsed.error.issues }, { status: 400 });
     }
-    
-    const { session } = authResult;
-    const body = await request.json();
 
     // Send verification code
-    if (body.type && body.value && !body.code) {
-      const { type, value } = body;
+    if ('value' in parsed.data) {
+      const { type, value } = parsed.data;
+      const rl = checkRateLimit({
+        maxRequests: 5,
+        windowMs: 60 * 60 * 1000,
+        identifier: `verify:${type}:user:${session.userId}`,
+        endpoint: '/api/profile/verify:send',
+      });
+      if (!rl.allowed) {
+        return NextResponse.json(
+          { error: 'Rate limit exceeded. Please wait before requesting another verification code.' },
+          { status: 429, headers: createRateLimitHeaders(rl) }
+        );
+      }
+
       const code = generateCode();
       const key = `${session.userId}:${type}`;
       
@@ -57,8 +85,21 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify code
-    if (body.code && body.type && body.newValue) {
-      const { code, type, newValue } = body;
+    if ('newValue' in parsed.data) {
+      const { code, type, newValue } = parsed.data;
+      const rl = checkRateLimit({
+        maxRequests: 20,
+        windowMs: 60 * 60 * 1000,
+        identifier: `verify:${type}:attempts:user:${session.userId}`,
+        endpoint: '/api/profile/verify:verify',
+      });
+      if (!rl.allowed) {
+        return NextResponse.json(
+          { error: 'Too many verification attempts. Please wait and try again.' },
+          { status: 429, headers: createRateLimitHeaders(rl) }
+        );
+      }
+
       const key = `${session.userId}:${type}`;
       const stored = verificationCodes.get(key);
 
@@ -99,11 +140,7 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   } catch (error) {
-    console.error('Verification error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/profile/verify]' });
   }
 }
 

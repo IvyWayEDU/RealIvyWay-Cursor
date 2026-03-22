@@ -5,16 +5,9 @@ import crypto from 'crypto';
 
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { getDisplayRole } from '@/lib/auth/utils';
-import type { SupportTicketSubject } from '@/lib/support/types';
 import { addSupportMessage, createSupportTicket } from '@/lib/support/ticketingStorage';
-
-const ALLOWED_SUBJECTS: SupportTicketSubject[] = [
-  'Booking issue',
-  'Payment issue',
-  'Technical issue',
-  'Account issue',
-  'Other',
-];
+import { handleApiError } from '@/lib/errorHandler';
+import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
 function safeExtFromName(name: string): string {
   const base = (name || '').trim();
@@ -50,6 +43,13 @@ export async function POST(request: NextRequest) {
     if (authResult instanceof NextResponse) return authResult;
     const { session } = authResult;
 
+    const rl = enforceRateLimit(request, {
+      session,
+      endpoint: '/api/support-ticket',
+      body: { error: RATE_LIMIT_MESSAGE },
+    });
+    if (rl) return rl;
+
     const form = await request.formData();
     const rawSubject = String(form.get('subject') ?? '').trim();
     const message = String(form.get('message') ?? '').trim();
@@ -58,13 +58,15 @@ export async function POST(request: NextRequest) {
     if (!rawSubject) {
       return NextResponse.json({ error: 'Subject is required' }, { status: 400 });
     }
+    if (rawSubject.length > 140) {
+      return NextResponse.json({ error: 'Subject is too long (max 140 characters)' }, { status: 400 });
+    }
     if (!message) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    const subject: SupportTicketSubject = (ALLOWED_SUBJECTS as string[]).includes(rawSubject)
-      ? (rawSubject as SupportTicketSubject)
-      : 'Other';
+    // The ticket title should always match what the user entered.
+    const subject = rawSubject;
 
     const role = getDisplayRole(session.roles) === 'provider' ? 'provider' : 'student';
 
@@ -97,8 +99,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, ticket });
   } catch (error) {
-    console.error('Support ticket error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support-ticket]' });
   }
 }
 

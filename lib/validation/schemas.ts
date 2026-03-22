@@ -19,7 +19,7 @@ export const selectedSessionSchema = z.object({
 export const bookingStateSchema = z.object({
   provider: z.string().min(1, 'Provider ID is required'),
   service: z.enum(['tutoring', 'counseling', 'virtual-tour', 'test-prep'], {
-    errorMap: () => ({ message: 'Invalid service type' }),
+    message: 'Invalid service type',
   }),
   plan: z.string().min(1, 'Plan type is required'),
   subject: z.string().optional(),
@@ -188,14 +188,146 @@ export const withdrawalRequestSchema = z.object({
   amountCents: z.number().int().positive('Amount must be greater than 0'),
 });
 
+/**
+ * Support schemas
+ */
+const trimmedStringMax = (max: number) =>
+  z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(max));
+
+export const supportChatRequestSchema = z
+  .object({
+    action: z.enum(['send', 'fetch', 'markRead', 'close']).default('send'),
+    threadId: z.preprocess(
+      (v) => (typeof v === 'string' ? v.trim() : v),
+      z.string().min(1).max(200)
+    ).optional(),
+    text: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(4000)).optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    if (data.action === 'send') {
+      if (!data.text) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['text'], message: 'text is required' });
+      }
+    }
+    if (data.action === 'markRead' || data.action === 'close') {
+      if (!data.threadId) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['threadId'], message: 'threadId is required' });
+      }
+    }
+  });
+
+export const supportTicketMessageSchema = z
+  .object({
+    message: trimmedStringMax(4000),
+  })
+  .strict();
+
+/**
+ * Profile update schema (user profile, not provider payout details)
+ */
+export const profileUpdateSchema = z
+  .object({
+    name: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(120)).optional(),
+    profilePhotoUrl: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(2048)).optional(),
+    isTutor: z.boolean().optional(),
+    isCounselor: z.boolean().optional(),
+    schoolIds: z
+      .array(z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(64)))
+      .max(20)
+      .optional(),
+    schoolNames: z
+      .array(z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(140)))
+      .max(20)
+      .optional(),
+    subjects: z
+      .array(z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(80)))
+      .max(50)
+      .optional(),
+    offersVirtualTours: z.boolean().optional(),
+    email: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().email().max(254)).optional(),
+    phoneNumber: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(40)).optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    const hasSchoolIds = typeof data.schoolIds !== 'undefined';
+    const hasSchoolNames = typeof data.schoolNames !== 'undefined';
+    if (hasSchoolIds !== hasSchoolNames) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['schoolIds'],
+        message: 'schoolIds and schoolNames must be provided together',
+      });
+    }
+    if (Array.isArray(data.schoolIds) && Array.isArray(data.schoolNames) && data.schoolIds.length !== data.schoolNames.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['schoolNames'],
+        message: 'schoolIds and schoolNames must have the same length',
+      });
+    }
+  });
+
 export const bankAccountSchema = z.object({
   bankName: z.string().min(1, 'Bank name is required'),
   accountHolderName: z.string().min(1, 'Account holder name is required'),
   routingNumber: z.string().regex(/^\d{9}$/, 'Routing number must be exactly 9 digits'),
   accountNumber: z.string().regex(/^\d{4,17}$/, 'Account number must be between 4 and 17 digits'),
   accountType: z.enum(['checking', 'savings'], {
-    errorMap: () => ({ message: 'Account type must be "checking" or "savings"' }),
+    message: 'Account type must be "checking" or "savings"',
   }),
+});
+
+/**
+ * Provider payout details (manual / non-Stripe).
+ * Used by providers to configure where admins send withdrawals.
+ *
+ * Notes:
+ * - Strings are trimmed and empty strings are treated as "unset".
+ * - All fields except payoutMethod are optional; server will enforce method-specific requirements.
+ */
+const optionalTrimmedString = (max = 256) =>
+  z
+    .preprocess((v) => {
+      if (typeof v !== 'string') return v;
+      const t = v.trim();
+      return t === '' ? undefined : t;
+    }, z.string().max(max))
+    .optional();
+
+const optionalTrimmedEmail = () =>
+  z
+    .preprocess((v) => {
+      if (typeof v !== 'string') return v;
+      const t = v.trim();
+      return t === '' ? undefined : t;
+    }, z.string().email('Invalid email').max(254))
+    .optional();
+
+export const providerPayoutDetailsSchema = z.object({
+  payoutMethod: z.enum(['wise', 'paypal', 'zelle', 'bank'], {
+    message: 'payoutMethod must be one of: wise, paypal, zelle, bank',
+  }),
+  wiseEmail: optionalTrimmedEmail(),
+  paypalEmail: optionalTrimmedEmail(),
+  zelleContact: optionalTrimmedString(200),
+  bankName: optionalTrimmedString(120),
+  accountHolderName: optionalTrimmedString(120),
+  bankAccountNumber: z
+    .preprocess((v) => {
+      if (typeof v !== 'string') return v;
+      const compact = v.replace(/\s+/g, '').trim();
+      return compact === '' ? undefined : compact;
+    }, z.string().min(4).max(34))
+    .optional(),
+  bankRoutingNumber: z
+    .preprocess((v) => {
+      if (typeof v !== 'string') return v;
+      const compact = v.replace(/\s+/g, '').trim();
+      return compact === '' ? undefined : compact;
+    }, z.string().min(4).max(34))
+    .optional(),
+  bankCountry: optionalTrimmedString(2),
 });
 
 /**
@@ -224,7 +356,7 @@ export const sessionTrackingSchema = z.object({
 export const heartbeatSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID format'),
   role: z.enum(['provider', 'student'], {
-    errorMap: () => ({ message: 'Role must be "provider" or "student"' }),
+    message: 'Role must be "provider" or "student"',
   }),
   event: z.enum(['join', 'tick', 'leave']).optional(),
 });
@@ -249,7 +381,7 @@ export const checkNoShowsSchema = z.object({
 export const platformFeeUpdateSchema = z.object({
   feeId: z.string().min(1, 'feeId is required'),
   calculationType: z.enum(['flat', 'percentage'], {
-    errorMap: () => ({ message: 'calculationType must be "flat" or "percentage"' }),
+    message: 'calculationType must be "flat" or "percentage"',
   }),
   amountCents: z.number().int().min(0).optional(),
   percentage: z.number().min(0).max(100).optional(),

@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { getAuthContext } from '@/lib/auth/session';
 import { getStripePriceIdForPricingKey } from '@/lib/pricing/stripePriceIds';
 import { getCatalogItemByKey } from '@/lib/pricing/catalog';
+import { handleApiError } from '@/lib/errorHandler';
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2025-12-15.clover' })
@@ -70,11 +71,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url: checkoutSession.url });
   } catch (error) {
-    console.error('Error creating counseling subscription checkout:', error);
-    return NextResponse.json(
-      { error: 'Failed to create subscription checkout', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/counseling/subscribe]' });
   }
 }
 

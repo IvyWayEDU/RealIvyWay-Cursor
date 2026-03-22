@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { requireAdmin as requireAdminResp } from '@/lib/auth/authorization';
-import { getSupportTicketThread, setSupportTicketStatus } from '@/lib/support/ticketingStorage';
+import { getSupportTicketThread, markSupportTicketRead, setSupportTicketStatus } from '@/lib/support/ticketingStorage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function GET(_request: NextRequest, ctx: { params: Promise<{ ticketId: string }> }) {
   try {
@@ -10,7 +11,8 @@ export async function GET(_request: NextRequest, ctx: { params: Promise<{ ticket
     const { session } = authResult;
 
     const { ticketId } = await ctx.params;
-    const thread = await getSupportTicketThread(String(ticketId || '').trim());
+    const id = String(ticketId || '').trim();
+    const thread = await getSupportTicketThread(id);
     if (!thread) return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
 
     const isAdmin = Array.isArray(session.roles) && session.roles.includes('admin');
@@ -18,10 +20,16 @@ export async function GET(_request: NextRequest, ctx: { params: Promise<{ ticket
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    return NextResponse.json({ thread });
+    // Clear unread for the viewer when opening the ticket.
+    try {
+      await markSupportTicketRead(id, isAdmin ? 'admin' : 'user');
+      const refreshed = await getSupportTicketThread(id);
+      return NextResponse.json({ thread: refreshed ?? thread });
+    } catch {
+      return NextResponse.json({ thread });
+    }
   } catch (error) {
-    console.error('Support ticket thread error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/tickets/[ticketId]] GET' });
   }
 }
 
@@ -44,8 +52,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ ticke
     const updated = await setSupportTicketStatus(String(ticketId || '').trim(), status);
     return NextResponse.json({ ticket: updated });
   } catch (error) {
-    console.error('Support ticket update error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/support/tickets/[ticketId]] PATCH' });
   }
 }
 

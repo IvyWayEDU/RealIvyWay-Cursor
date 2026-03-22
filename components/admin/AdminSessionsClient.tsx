@@ -61,21 +61,15 @@ export default function AdminSessionsClient(props: { initialSessions: SessionRow
     });
   }, [sessions, query]);
 
-  async function act(sessionId: string, type: 'complete' | 'cancel' | 'flag') {
+  async function act(sessionId: string, type: 'cancel' | 'flag') {
     setWorkingId(sessionId);
     setError(null);
     try {
       const note =
-        type === 'cancel' || type === 'flag'
-          ? window.prompt(type === 'cancel' ? 'Cancellation note (optional):' : 'Flag note (optional):') || ''
-          : '';
+        window.prompt(type === 'cancel' ? 'Cancellation note (optional):' : 'Flag note (optional):') || '';
 
       const path =
-        type === 'complete'
-          ? '/api/admin/sessions/force-complete'
-          : type === 'cancel'
-            ? '/api/admin/sessions/cancel'
-            : '/api/admin/sessions/flag';
+        type === 'cancel' ? '/api/admin/sessions/cancel' : '/api/admin/sessions/flag';
 
       const data = await post(path, { sessionId, note });
       if (data?.session) {
@@ -159,14 +153,6 @@ export default function AdminSessionsClient(props: { initialSessions: SessionRow
                         >
                           View
                         </Link>
-                        <button
-                          type="button"
-                          onClick={() => act(s.id, 'complete')}
-                          disabled={busy || status === 'cancelled' || status === 'refunded'}
-                          className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-                        >
-                          Force completed
-                        </button>
                         <button
                           type="button"
                           onClick={() => act(s.id, 'cancel')}

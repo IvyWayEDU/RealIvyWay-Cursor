@@ -165,6 +165,20 @@ export interface ProviderProfile {
    * Example: "acct_1234..."
    */
   stripeConnectAccountId?: string | null;
+
+  /**
+   * Manual payout details (non-Stripe).
+   * Used by admins to send provider withdrawals manually.
+   */
+  payoutMethod?: string;
+  wiseEmail?: string;
+  paypalEmail?: string;
+  zelleContact?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankRoutingNumber?: string;
+  bankCountry?: string;
+  accountHolderName?: string;
   
   // Timestamps
   createdAt: string;
@@ -493,6 +507,21 @@ export interface Session {
    * gradually consolidate the session model.
    */
   [key: string]: any;
+}
+
+/**
+ * System-wide Audit Log entry (append-only).
+ * Backed by local JSONL storage under /data in this codebase.
+ */
+export interface AuditLog {
+  id: string;
+  userId: string;
+  userRole: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  metadata: Record<string, any> | null;
+  createdAt: string;
 }
 
 /**

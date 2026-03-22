@@ -7,6 +7,8 @@ export async function getProviderPayoutSummaryFromLedger(providerId: string): Pr
   ledgerBalanceCents: number;
   totalEarningsCents: number;
   pendingPayoutsCents: number;
+  approvedPayoutsCents: number;
+  paidPayoutsCents: number;
 }> {
   const summary = await getProviderEarningsSummary(providerId);
   return {
@@ -17,6 +19,8 @@ export async function getProviderPayoutSummaryFromLedger(providerId: string): Pr
     ledgerBalanceCents: summary.totalEarningsCents,
     totalEarningsCents: summary.totalEarningsCents,
     pendingPayoutsCents: summary.pendingPayoutsCents,
+    approvedPayoutsCents: summary.approvedPayoutsCents,
+    paidPayoutsCents: summary.paidPayoutsCents,
   };
 }
 

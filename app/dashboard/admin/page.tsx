@@ -6,8 +6,6 @@
  * Role-protected via middleware.
  */
 
-import ClearDevSessionsButton from '@/components/admin/ClearDevSessionsButton';
-
 export default function AdminDashboard() {
   return (
     <div className="space-y-8">
@@ -225,31 +223,6 @@ export default function AdminDashboard() {
               <h2 className="text-xl font-semibold text-gray-900">Quick Actions</h2>
             </div>
             <div className="p-6 space-y-3">
-              {/* Clear Dev Sessions Button */}
-              <div className="rounded-md border border-gray-200 p-4">
-                <div className="flex items-center mb-3">
-                  <div className="flex-shrink-0">
-                    <svg
-                      className="h-5 w-5 text-red-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </div>
-                  <div className="ml-3 flex-1">
-                    <p className="text-sm font-medium text-gray-900">Clear Dev Sessions</p>
-                    <p className="text-xs text-gray-500 mt-1">Remove all sessions from sessions.json</p>
-                  </div>
-                </div>
-                <ClearDevSessionsButton />
-              </div>
               <div className="rounded-md border border-gray-200 p-4 hover:bg-gray-50 cursor-not-allowed opacity-50">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">

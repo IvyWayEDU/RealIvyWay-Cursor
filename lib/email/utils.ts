@@ -64,7 +64,6 @@ export async function sendEmail(
     }
 
     console.log('Email sent successfully:', {
-      to,
       subject,
       emailId: result.data?.id,
     });
@@ -74,7 +73,6 @@ export async function sendEmail(
     // Log error without exposing sensitive information
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     console.error('Error sending email:', {
-      to,
       subject,
       error: errorMessage,
     });

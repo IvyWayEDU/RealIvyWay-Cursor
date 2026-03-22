@@ -10,16 +10,12 @@ import ReviewModal from '@/components/ReviewModal';
 import { getCurrentUserId } from '@/lib/sessions/actions';
 import { ensureConversationExistsForPair } from '@/lib/messages/actions';
 import { getReviewForSessionByReviewer } from '@/lib/reviewStore';
-import ProviderTestCompleteSessionButton from '@/components/ProviderTestCompleteSessionButton';
-import DevFinalizeSessionButton from '@/components/DevFinalizeSessionButton';
 
 interface SessionCardProps {
   session: Session;
   isCompleted?: boolean;
   viewerRole?: 'student' | 'provider';
   currentUserId?: string | null;
-  canUseTestCompletionOverride?: boolean;
-  onTestOverrideCompleted?: () => void;
   onMessage?: (session: Session) => void;
   onLeaveReview?: (session: Session) => void;
 }
@@ -29,8 +25,6 @@ function SessionCard({
   isCompleted = false,
   viewerRole = 'provider',
   currentUserId,
-  canUseTestCompletionOverride = false,
-  onTestOverrideCompleted,
   onMessage,
   onLeaveReview,
 }: SessionCardProps) {
@@ -244,26 +238,6 @@ function SessionCard({
           </button>
         )}
 
-        {viewerRole === 'provider' && canUseTestCompletionOverride && (
-          <div className="w-full sm:w-auto sm:min-w-[320px]">
-            <ProviderTestCompleteSessionButton
-              sessionId={session.id}
-              sessionStatus={String((session as any)?.status || '')}
-              onCompleted={onTestOverrideCompleted}
-            />
-          </div>
-        )}
-
-        {viewerRole === 'provider' && process.env.NODE_ENV !== 'production' && (
-          <div className="w-full sm:w-auto sm:min-w-[320px]">
-            <DevFinalizeSessionButton
-              sessionId={session.id}
-              sessionStatus={String((session as any)?.status || '')}
-              onFinalized={onTestOverrideCompleted}
-            />
-          </div>
-        )}
-
         {viewerRole === 'student' && isCompleted && (
           existingReview ? (
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md">
@@ -301,6 +275,7 @@ export default function ProviderSessionsClient({
   role?: 'student' | 'provider';
   canUseTestCompletionOverride?: boolean;
 }) {
+  void canUseTestCompletionOverride;
   const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
   const [completedSessions, setCompletedSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -443,8 +418,6 @@ export default function ProviderSessionsClient({
                       isCompleted={false}
                       viewerRole={role}
                       currentUserId={currentUserId}
-                      canUseTestCompletionOverride={canUseTestCompletionOverride && role === 'provider'}
-                      onTestOverrideCompleted={() => refreshSessionsRef.current?.()}
                       onMessage={handleMessage}
                     />
                   ))}
@@ -492,8 +465,6 @@ export default function ProviderSessionsClient({
                       isCompleted={true}
                       viewerRole={role}
                       currentUserId={currentUserId}
-                      canUseTestCompletionOverride={canUseTestCompletionOverride && role === 'provider'}
-                      onTestOverrideCompleted={() => refreshSessionsRef.current?.()}
                       onMessage={handleMessage}
                       onLeaveReview={role === 'student' ? handleLeaveReview : undefined}
                     />

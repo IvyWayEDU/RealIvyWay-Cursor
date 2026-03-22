@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserById, updateUser } from '@/lib/auth/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * DEV-ONLY: Promote a user to admin by userId.
@@ -34,11 +35,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, user: updated });
   } catch (error) {
-    console.error('[DEV MAKE ADMIN] Error:', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/dev/make-admin]' });
   }
 }
 

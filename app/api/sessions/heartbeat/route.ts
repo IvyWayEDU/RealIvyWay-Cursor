@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getSessionById, updateSession } from '@/lib/sessions/storage';
 import { resolveSessionAfterHeartbeat } from '@/lib/sessions/resolver';
+import { handleApiError } from '@/lib/errorHandler';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
 import { heartbeatSchema } from '@/lib/validation/schemas';
@@ -212,14 +213,7 @@ export async function POST(request: NextRequest) {
       payoutStatus: resolvedSession.payoutStatus || 'none',
     });
   } catch (error) {
-    console.error('Error processing heartbeat:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to process heartbeat',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/heartbeat]' });
   }
 }
 

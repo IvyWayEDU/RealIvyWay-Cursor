@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { resolvePricing, mapToPlanType } from '@/lib/pricing/resolver';
 import { getActiveReferralCredits } from '@/lib/referrals/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 /**
  * GET /api/pricing
@@ -74,14 +75,7 @@ export async function GET(request: NextRequest) {
       planType: pricing.planType,
     });
   } catch (error) {
-    console.error('Error in pricing API:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to calculate pricing',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/pricing]' });
   }
 }
 

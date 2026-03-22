@@ -153,9 +153,8 @@ export default function SupportCenterClient(props: {
         body: fd,
       });
 
-      const data = await resp.json().catch(() => null);
       if (!resp.ok) {
-        setError(String(data?.error ?? 'Failed to submit request.'));
+        setError('Unable to send message.');
         return;
       }
 
@@ -163,7 +162,7 @@ export default function SupportCenterClient(props: {
       setMessage('');
       setSuccess('Your request has been submitted. Our team will respond shortly.');
     } catch {
-      setError('Failed to submit request.');
+      setError('Unable to send message.');
     } finally {
       setIsSubmitting(false);
     }

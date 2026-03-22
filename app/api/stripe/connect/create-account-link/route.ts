@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/middleware';
 import Stripe from 'stripe';
 import { getProviderByUserId, updateProvider } from '@/lib/providers/storage';
 import { getUserById } from '@/lib/auth/storage';
+import { handleApiError } from '@/lib/errorHandler';
 
 export const runtime = 'nodejs';
 
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
     const provider = await getProviderByUserId(session.userId);
     if (!provider) return NextResponse.json({ error: 'Provider profile not found' }, { status: 404 });
 
-    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: '2025-12-15.clover' });
 
     let stripeConnectAccountId = String((provider as any)?.stripeConnectAccountId || '').trim();
     if (!stripeConnectAccountId) {
@@ -55,8 +56,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ url: link.url }, { status: 200 });
   } catch (error) {
-    console.error('[stripe/connect/create-account-link] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/stripe/connect/create-account-link]' });
   }
 }
 

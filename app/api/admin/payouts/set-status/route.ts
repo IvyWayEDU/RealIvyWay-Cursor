@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getSessionById, updateSession } from '@/lib/sessions/storage';
 import { appendAdminAuditEntry } from '@/lib/audit/adminAudit.server';
+import { handleApiError } from '@/lib/errorHandler';
 
 const ALLOWED = new Set(['available', 'locked', 'pending_payout', 'approved', 'paid', 'paid_out']);
 
@@ -35,8 +36,7 @@ export async function POST(request: NextRequest) {
     const updated = await getSessionById(sessionId);
     return NextResponse.json({ success: true, session: updated });
   } catch (error) {
-    console.error('[ADMIN PAYOUTS SET STATUS] Error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return handleApiError(error, { logPrefix: '[api/admin/payouts/set-status]' });
   }
 }
 

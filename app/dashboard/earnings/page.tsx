@@ -9,7 +9,6 @@ import { getSession } from '@/lib/auth/session';
 import ProviderEarningsClient from '@/components/ProviderEarningsClient';
 import EarningsDebugPanelClient from '@/components/EarningsDebugPanelClient';
 import { isProvider } from '@/lib/auth/authorization';
-import { getProviderByUserId } from '@/lib/providers/storage';
 import { getProviderPayoutSummaryFromLedger } from '@/lib/payouts/summary.server';
 
 export default async function EarningsPage() {
@@ -24,11 +23,7 @@ export default async function EarningsPage() {
   }
 
   const providerId = session.userId;
-  const [provider, payoutSummary] = await Promise.all([
-    getProviderByUserId(providerId),
-    getProviderPayoutSummaryFromLedger(providerId),
-  ]);
-  const stripeConnectAccountId = String((provider as any)?.stripeConnectAccountId || '').trim();
+  const payoutSummary = await getProviderPayoutSummaryFromLedger(providerId);
 
   return (
     <div className="space-y-8">
@@ -44,7 +39,6 @@ export default async function EarningsPage() {
         availableBalanceCents={payoutSummary.availableBalanceCents}
         pendingPayoutsCents={payoutSummary.pendingPayoutsCents ?? payoutSummary.pendingWithdrawalsCents}
         totalWithdrawnCents={payoutSummary.totalWithdrawnCents}
-        stripeConnected={Boolean(stripeConnectAccountId)}
       />
     </div>
   );

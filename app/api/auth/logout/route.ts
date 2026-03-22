@@ -1,16 +1,13 @@
 import { NextResponse } from 'next/server';
 import { deleteSession } from '@/lib/auth/session';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST() {
   try {
     await deleteSession();
     return NextResponse.json({ message: 'Logged out successfully' });
   } catch (error) {
-    console.error('Logout error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/auth/logout]' });
   }
 }
 

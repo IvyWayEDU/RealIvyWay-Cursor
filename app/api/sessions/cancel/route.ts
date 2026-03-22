@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/requireAuth';
+import { getServerSession } from '@/lib/auth/getServerSession';
 import { getSessionById, cancelSession } from '@/lib/sessions/storage';
 import { CancellationReason } from '@/lib/models/types';
+import { handleApiError } from '@/lib/errorHandler';
 
 export async function POST(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (authResult instanceof NextResponse) {
-      return authResult;
+    const session = await getServerSession();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
-    const { session } = authResult;
     const body = await request.json();
     const { sessionId, reason, note } = body;
     
@@ -66,10 +65,6 @@ export async function POST(request: NextRequest) {
     
     return NextResponse.json({ session: cancelled });
   } catch (error) {
-    console.error('Cancel session error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return handleApiError(error, { logPrefix: '[api/sessions/cancel]' });
   }
 }

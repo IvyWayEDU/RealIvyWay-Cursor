@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import Sidebar from './Sidebar';
 import DashboardHeader from './DashboardHeader';
 import { Session } from '@/lib/auth/types';
+import SupportWidget from '@/components/support/SupportWidget';
 
 type Role = 'student' | 'provider' | 'admin';
 
@@ -31,6 +32,7 @@ export default function DashboardLayoutClient({
 }: DashboardLayoutClientProps) {
   const pathname = usePathname() || '';
   const roleFromPath = getRoleFromPath(pathname);
+  const showSupportWidget = userRole !== 'admin';
 
   const isCheckoutPage =
     pathname === '/dashboard/book/summary' ||
@@ -40,6 +42,9 @@ export default function DashboardLayoutClient({
     return (
       <div className="min-h-screen bg-gray-50">
         <main className="min-h-screen overflow-visible">{children}</main>
+        {showSupportWidget && (
+          <SupportWidget role={userRole === 'provider' ? 'provider' : 'student'} />
+        )}
       </div>
     );
   }
@@ -53,6 +58,9 @@ export default function DashboardLayoutClient({
           <div className="p-8">{children}</div>
         </main>
       </div>
+      {showSupportWidget && (
+        <SupportWidget role={userRole === 'provider' ? 'provider' : 'student'} />
+      )}
     </div>
   );  
 }

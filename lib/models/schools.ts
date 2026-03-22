@@ -394,7 +394,7 @@ export function mapLegacySchoolNameToId(legacyName: string): string | null {
 export function normalizeSchoolId(name: string): string {
   if (!name || !name.trim()) return '';
   
-  let normalized = name
+  const normalized = name
     .trim()
     .toLowerCase()
     .replace(/&/g, 'and') // Replace "&" with "and"

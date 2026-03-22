@@ -24,7 +24,7 @@ function uniqNonEmpty(ids: Array<string | null | undefined>): string[] {
 }
 
 export function useUserDisplayMap(userIds: Array<string | null | undefined>): UserDisplayMapResult {
-  const uniqueIds = useMemo(() => uniqNonEmpty(userIds), [JSON.stringify(userIds)]);
+  const uniqueIds = useMemo(() => uniqNonEmpty(userIds), [userIds]);
   const key = useMemo(() => uniqueIds.slice().sort().join('|'), [uniqueIds]);
 
   const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
@@ -83,7 +83,7 @@ export function useUserDisplayMap(userIds: Array<string | null | undefined>): Us
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, uniqueIds]);
 
   return { displayNames, profileImageUrls, failedIds, status };
 }

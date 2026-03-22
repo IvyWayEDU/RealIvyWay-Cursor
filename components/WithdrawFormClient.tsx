@@ -144,12 +144,12 @@ export default function WithdrawFormClient({
         // Optionally refresh to ensure server state is in sync
         router.refresh();
       } else {
-        setBankFormError(data.error || 'Failed to save bank account');
+        setBankFormError(data?.message || data?.error || 'Unable to save bank account. Please try again.');
         setIsSavingBankAccount(false);
       }
     } catch (err) {
       console.error('Error saving bank account:', err);
-      setBankFormError('An error occurred. Please try again.');
+      setBankFormError('Unable to save bank account. Please try again.');
       setIsSavingBankAccount(false);
     }
   };
@@ -177,16 +177,35 @@ export default function WithdrawFormClient({
 
     try {
       const amountCents = Math.round(parseFloat(amount) * 100);
+      const route = '/api/payouts/withdrawal-request';
+      const payload = { amountCents };
 
-      const response = await fetch('/api/payouts/withdrawal-request', {
+      // TEMP DEBUG LOGS (remove after validation)
+      console.log('[WithdrawFormClient] Submitting withdrawal request:', { route, payload });
+
+      const response = await fetch(route, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ amountCents }),
+        credentials: 'include',
+        body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      const raw = await response.text();
+      let data: any = null;
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch {
+        data = { success: false, error: raw || 'Non-JSON response' };
+      }
+
+      // TEMP DEBUG LOGS (remove after validation)
+      console.log('[WithdrawFormClient] Withdrawal response:', {
+        status: response.status,
+        body: data,
+      });
+      console.log('withdrawal response', data);
 
       if (data.success) {
         // Optimistically update available balance immediately (subtract the withdrawn amount)
@@ -197,12 +216,12 @@ export default function WithdrawFormClient({
           router.push('/dashboard/earnings');
         }, 2000);
       } else {
-        setError(data.error || 'Failed to submit withdrawal request');
+        setError(data?.message || data?.error || 'Withdrawal request failed.');
         setIsSubmitting(false);
       }
     } catch (err) {
       console.error('Error submitting withdrawal request:', err);
-      setError('An error occurred. Please try again.');
+      setError('Withdrawal request failed.');
       setIsSubmitting(false);
     }
   };
@@ -248,7 +267,7 @@ export default function WithdrawFormClient({
                     Withdrawal request submitted successfully
                   </h3>
                   <div className="mt-2 text-sm text-green-700">
-                    <p>Your withdrawal request has been received and is pending admin review.</p>
+                    <p>Payout requested. Our team will process your withdrawal.</p>
                     <p className="mt-1">Redirecting to earnings page...</p>
                   </div>
                 </div>

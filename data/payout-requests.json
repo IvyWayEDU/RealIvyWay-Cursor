@@ -3,9 +3,214 @@
     "id": "payoutreq_1771540419871_4uw6qyq0",
     "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
     "amountCents": 5500,
-    "status": "processing",
+    "status": "paid",
     "createdAt": "2026-02-19T22:33:39.871Z",
     "stripeTransferId": null,
-    "updatedAt": "2026-02-19T22:43:45.541Z"
+    "updatedAt": "2026-03-15T01:52:27.658Z",
+    "paidAt": "2026-03-15T01:36:22.487Z",
+    "allocations": [
+      {
+        "sessionId": "f54cdea2-60e5-45e6-8f18-ffeaf66c67fc",
+        "amountCents": 5500
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1772946488013_ij5b1rb2",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 2500,
+    "status": "paid",
+    "createdAt": "2026-03-08T05:08:08.013Z",
+    "stripeTransferId": null,
+    "approvedAt": "2026-03-08T16:30:14.536Z",
+    "updatedAt": "2026-03-15T01:52:27.659Z",
+    "paidAt": "2026-03-15T01:36:20.388Z",
+    "allocations": [
+      {
+        "sessionId": "f54cdea2-60e5-45e6-8f18-ffeaf66c67fc",
+        "amountCents": 2500
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1773001602815_ymyl4ev6",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 2500,
+    "status": "paid",
+    "createdAt": "2026-03-08T20:26:42.815Z",
+    "payoutMethod": "Bank Transfer",
+    "payoutDestination": "chase •••• 8923",
+    "stripeTransferId": null,
+    "payoutDestinationMasked": "citi •••• 6789",
+    "bankName": "citi",
+    "bankCountry": "US",
+    "bankAccountNumber": "123456789",
+    "bankRoutingNumber": "123456789",
+    "accountHolderName": "testing",
+    "updatedAt": "2026-03-15T01:52:27.662Z",
+    "approvedAt": "2026-03-15T01:36:09.095Z",
+    "paidAt": "2026-03-15T01:36:17.626Z",
+    "allocations": [
+      {
+        "sessionId": "f54cdea2-60e5-45e6-8f18-ffeaf66c67fc",
+        "amountCents": 2000
+      },
+      {
+        "sessionId": "0d5cd7a0-f2d1-4b4a-8b1d-ad8e9de2fa55",
+        "amountCents": 500
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1773003721071_0vaa60rd",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 10000,
+    "status": "paid",
+    "createdAt": "2026-03-08T21:02:01.071Z",
+    "stripeTransferId": null,
+    "payoutMethod": "Bank Transfer",
+    "payoutDestinationMasked": "citi •••• 6789",
+    "payoutDestination": "citi •••• 6789",
+    "bankName": "citi",
+    "bankCountry": "US",
+    "bankAccountNumber": "123456789",
+    "bankRoutingNumber": "123456789",
+    "accountHolderName": "testing",
+    "updatedAt": "2026-03-15T01:52:27.663Z",
+    "approvedAt": "2026-03-15T01:36:07.842Z",
+    "paidAt": "2026-03-15T01:36:12.793Z",
+    "allocations": [
+      {
+        "sessionId": "0d5cd7a0-f2d1-4b4a-8b1d-ad8e9de2fa55",
+        "amountCents": 4500
+      },
+      {
+        "sessionId": "6393c015-f5df-4d1e-b6d2-ce78cffa4e00",
+        "amountCents": 5500
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1773004394100_5yiaejrz",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 5000,
+    "status": "paid",
+    "createdAt": "2026-03-08T21:13:14.100Z",
+    "payoutMethod": "Bank Transfer",
+    "payoutDestinationMasked": "citi •••• 6789",
+    "payoutDestination": "citi •••• 6789",
+    "bankName": "citi",
+    "bankAccountNumber": "123456789",
+    "bankRoutingNumber": "123456789",
+    "bankCountry": "US",
+    "accountHolderName": "testing",
+    "stripeTransferId": null,
+    "approvedAt": "2026-03-08T21:13:50.330Z",
+    "updatedAt": "2026-03-15T01:52:27.664Z",
+    "paidAt": "2026-03-08T21:14:05.783Z",
+    "allocations": [
+      {
+        "sessionId": "6393c015-f5df-4d1e-b6d2-ce78cffa4e00",
+        "amountCents": 500
+      },
+      {
+        "sessionId": "9469f7a2-2a8e-410a-acc1-d2e9cc06df6d",
+        "amountCents": 4500
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1773008969014_ze8g91iu",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 4800,
+    "status": "paid",
+    "createdAt": "2026-03-08T22:29:29.014Z",
+    "payoutMethod": "Bank Transfer",
+    "payoutDestinationMasked": "citi •••• 6789",
+    "payoutDestination": "citi •••• 6789",
+    "bankName": "citi",
+    "bankAccountNumber": "123456789",
+    "bankRoutingNumber": "123456789",
+    "bankCountry": "US",
+    "accountHolderName": "testing",
+    "stripeTransferId": null,
+    "approvedAt": "2026-03-08T22:31:52.329Z",
+    "updatedAt": "2026-03-15T01:52:27.666Z",
+    "paidAt": "2026-03-08T22:32:00.264Z",
+    "allocations": [
+      {
+        "sessionId": "9469f7a2-2a8e-410a-acc1-d2e9cc06df6d",
+        "amountCents": 3500
+      },
+      {
+        "sessionId": "3ff3a9f8-6aaf-47c8-be2a-2d78fd233edb",
+        "amountCents": 1300
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1773510783504_dxsxcpxa",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 9800,
+    "status": "paid",
+    "createdAt": "2026-03-14T17:53:03.504Z",
+    "payoutMethod": "Bank Transfer",
+    "payoutDestinationMasked": "citi •••• 6789",
+    "payoutDestination": "citi •••• 6789",
+    "bankName": "citi",
+    "bankAccountNumber": "123456789",
+    "bankRoutingNumber": "123456789",
+    "bankCountry": "US",
+    "accountHolderName": "testing",
+    "stripeTransferId": null,
+    "approvedAt": "2026-03-14T17:53:29.807Z",
+    "updatedAt": "2026-03-15T01:52:27.667Z",
+    "paidAt": "2026-03-14T17:53:36.905Z",
+    "allocations": [
+      {
+        "sessionId": "3ff3a9f8-6aaf-47c8-be2a-2d78fd233edb",
+        "amountCents": 7700
+      },
+      {
+        "sessionId": "82341723-196f-4f6c-8c33-eda32df2db32",
+        "amountCents": 2100
+      }
+    ],
+    "allocationsInferred": true
+  },
+  {
+    "id": "payoutreq_1773539547668_lvl7u0xc",
+    "providerId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "amountCents": 5000,
+    "status": "paid",
+    "createdAt": "2026-03-15T01:52:27.668Z",
+    "allocations": [
+      {
+        "sessionId": "82341723-196f-4f6c-8c33-eda32df2db32",
+        "amountCents": 2700
+      },
+      {
+        "sessionId": "6799fc86-cbb1-481d-a19f-601a6b1aec42",
+        "amountCents": 2300
+      }
+    ],
+    "payoutMethod": "Bank Transfer",
+    "payoutDestinationMasked": "citi •••• 6789",
+    "payoutDestination": "citi •••• 6789",
+    "bankName": "citi",
+    "bankAccountNumber": "123456789",
+    "bankRoutingNumber": "123456789",
+    "bankCountry": "US",
+    "accountHolderName": "testing",
+    "stripeTransferId": null,
+    "approvedAt": "2026-03-15T01:52:52.345Z",
+    "updatedAt": "2026-03-15T01:52:58.598Z",
+    "paidAt": "2026-03-15T01:52:58.598Z"
   }
 ]

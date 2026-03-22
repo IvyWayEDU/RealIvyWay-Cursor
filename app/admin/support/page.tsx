@@ -1,7 +1,7 @@
-import SupportInboxPage from '@/app/dashboard/admin/support-inbox/page';
+import AdminSupportClient from './AdminSupportClient';
 
 export default function AdminSupportPage() {
-  return <SupportInboxPage />;
+  return <AdminSupportClient />;
 }
 
 

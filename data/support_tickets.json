@@ -14,5 +14,41 @@
     "subject": "Other",
     "status": "admin_replied",
     "createdAt": "2026-02-02T02:57:27.911Z"
+  },
+  {
+    "id": "b790e205-12dd-48fe-bcb9-844393b38cd2",
+    "userId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "role": "provider",
+    "subject": "payout",
+    "status": "closed",
+    "createdAt": "2026-03-08T21:37:51.658Z",
+    "updatedAt": "2026-03-08T21:39:26.980Z",
+    "resolvedAt": "2026-03-08T21:39:26.980Z",
+    "unreadForAdmin": 0,
+    "unreadForUser": 0
+  },
+  {
+    "id": "f4a72d74-2c6d-4dae-b8d3-9ffa12afa4a2",
+    "userId": "272cc2af-4054-4263-8da3-b0e487d409af",
+    "role": "provider",
+    "subject": "Support request (Provider): how do i request a payout",
+    "status": "open",
+    "createdAt": "2026-03-08T21:54:23.377Z",
+    "updatedAt": "2026-03-08T21:54:23.382Z",
+    "resolvedAt": null,
+    "unreadForAdmin": 0,
+    "unreadForUser": 0
+  },
+  {
+    "id": "bfb21cf3-d4b3-4c5c-99b6-8702c16f0a06",
+    "userId": "9aa6c128-1360-4eb8-add3-b132ef2e0d09",
+    "role": "student",
+    "subject": "Support",
+    "status": "open",
+    "createdAt": "2026-03-14T18:41:29.028Z",
+    "updatedAt": "2026-03-14T18:41:29.028Z",
+    "resolvedAt": null,
+    "unreadForAdmin": 0,
+    "unreadForUser": 0
   }
 ]

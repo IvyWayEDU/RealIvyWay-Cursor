@@ -9,15 +9,15 @@ export default function DevFinalizeSessionButton(props: {
   sessionStatus?: string;
   onFinalized?: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [isWorking, setIsWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   if (process.env.NODE_ENV === 'production') {
     return null;
   }
 
   const { sessionId, sessionStatus, onFinalized } = props;
-
-  const [open, setOpen] = useState(false);
-  const [isWorking, setIsWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const finalize = async (simulationType: SimulationType) => {
     setIsWorking(true);
