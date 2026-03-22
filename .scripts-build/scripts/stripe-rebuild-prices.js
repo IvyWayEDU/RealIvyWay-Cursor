@@ -24,7 +24,7 @@ const stripeKey = process.env.STRIPE_SECRET_KEY;
 if (!stripeKey) {
     throw new Error('Missing STRIPE_SECRET_KEY');
 }
-const stripe = new stripe_1.default(stripeKey, { apiVersion: '2025-12-15.clover' });
+const stripe = new stripe_1.default(stripeKey, { apiVersion: '2026-02-25.clover' });
 function pickTaxCodeIdByKeywords(codes, keywords) {
     const kw = keywords.map((k) => k.toLowerCase());
     const match = codes.find((c) => {
