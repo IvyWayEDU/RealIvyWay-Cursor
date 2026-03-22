@@ -24,7 +24,7 @@
     "react-dom": "19.2.1",
     "resend": "^4.8.0",
     "stripe": "^20.1.0",
-    "zod": "^4.3.6"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
