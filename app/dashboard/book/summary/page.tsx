@@ -277,9 +277,20 @@ export default function BookingSummaryPage() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        console.error('Checkout API error:', errorData);
-        throw new Error(errorData?.error || errorData?.message || 'Checkout failed');
+        const rawBody = await response.text().catch(() => '');
+        let jsonBody: any = null;
+        try {
+          jsonBody = rawBody ? JSON.parse(rawBody) : null;
+        } catch {
+          jsonBody = null;
+        }
+        console.error('Checkout API error (full body):', {
+          status: response.status,
+          statusText: response.statusText,
+          rawBody,
+          jsonBody,
+        });
+        throw new Error(jsonBody?.error || jsonBody?.message || rawBody || 'Checkout failed');
       }
 
       const data = await response.json();

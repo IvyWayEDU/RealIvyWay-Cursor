@@ -159,6 +159,14 @@ async function main() {
     const out = {};
     const keys = Object.keys(catalog_1.PRICING_CATALOG);
     const taxCodes = await resolveTaxCodes();
+    const mode = typeof stripeKey === 'string'
+        ? stripeKey.startsWith('sk_live_')
+            ? 'live'
+            : stripeKey.startsWith('sk_test_')
+                ? 'test'
+                : 'unknown'
+        : 'unknown';
+    console.log(`[INFO] Stripe key mode: ${mode}`);
     if (!taxCodes.education || !taxCodes.digital) {
         console.warn('[WARN] Could not resolve one or more Stripe Tax codes. Consider setting env vars STRIPE_TAX_CODE_EDUCATION and STRIPE_TAX_CODE_DIGITAL.', taxCodes);
     }
@@ -170,7 +178,17 @@ async function main() {
         out[envKey] = priceId;
         console.log('OK', { key, priceId, amount: catalog_1.PRICING_CATALOG[key].purchase_price_cents });
     }
-    console.log('\nSTRIPE_PRICE_IDS_JSON=' + JSON.stringify(out));
+    // Stable, copy/paste safe output (especially for zsh, which will expand braces unless quoted).
+    const stable = {};
+    for (const k of Object.keys(out).sort())
+        stable[k] = out[k];
+    const json = JSON.stringify(stable);
+    console.log('\n# Paste into your .env (dotenv) as a single line:');
+    console.log(`STRIPE_PRICE_IDS_JSON='${json}'`);
+    console.log('\n# Or export in your shell:');
+    console.log(`export STRIPE_PRICE_IDS_JSON='${json}'`);
+    console.log('\n# Value only (for dashboards that ask just for the value):');
+    console.log(json);
 }
 main().catch((e) => {
     console.error(e);

@@ -9,6 +9,7 @@ import { SCHOOLS } from '@/data/schools';
 import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as PricingPlan } from '@/lib/pricing/catalog';
 import {
   debugLogStripePriceIdMapKeysOnce,
+  debugLogStripePriceIdMapDetailsOnce,
   getStripePriceIdForPricingKey,
   getStripePriceIdMapDebugInfo,
 } from '@/lib/pricing/stripePriceIds';
@@ -25,6 +26,13 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('CHECKOUT process.cwd():', process.cwd());
+    console.log('CHECKOUT env presence:', {
+      hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
+      hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
+      nodeEnv: process.env.NODE_ENV,
+    });
+
     // Verify user session
     const auth = await getAuthContext();
     if (auth.status === 'suspended') {
@@ -66,6 +74,7 @@ export async function POST(request: NextRequest) {
     // Get base URL for redirect URLs
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
       (request.headers.get('origin') || 'http://localhost:3000');
+    console.log('CHECKOUT baseUrl:', baseUrl);
 
     // Build booking metadata for webhook session creation
     // NOTE: Stripe metadata values must be strings and have size limits.
@@ -161,6 +170,11 @@ export async function POST(request: NextRequest) {
       plan: pricingPlan,
       duration_minutes,
     });
+    console.log('CHECKOUT resolved pricing object:', pricing);
+    console.log('CHECKOUT pricingKeyInput vs server pricing_key:', {
+      pricingKeyInput,
+      serverPricingKey: pricing.pricing_key,
+    });
 
     // Client provides pricingKey for validation/debugging only; server pricing is authoritative.
     if (pricingKeyInput !== pricing.pricing_key) {
@@ -176,6 +190,7 @@ export async function POST(request: NextRequest) {
 
     // Debug: print active Stripe price map keys + source once per runtime.
     debugLogStripePriceIdMapKeysOnce('CHECKOUT STRIPE_PRICE_IDS');
+    debugLogStripePriceIdMapDetailsOnce('CHECKOUT STRIPE_PRICE_IDS');
 
     let stripePriceId: string;
     try {
@@ -195,6 +210,9 @@ export async function POST(request: NextRequest) {
       providerId,
       sessionDate,
       sessionTime,
+      baseUrl,
+      successUrl: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
       hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
       hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
     });
@@ -206,6 +224,9 @@ export async function POST(request: NextRequest) {
       const info = getStripePriceIdMapDebugInfo();
       console.log('CHECKOUT stripe price map source:', info.source);
       console.log('CHECKOUT stripe price map keys:', info.keys);
+      console.log('CHECKOUT stripe price map cwd:', info.cwd);
+      console.log('CHECKOUT stripe price map fallback file path:', info.fallbackFilePath);
+      console.log('CHECKOUT stripe price map tutoring_single:', info.tutoringSingle);
     } catch (e) {
       console.warn('CHECKOUT failed to read Stripe price map debug info:', e);
     }
@@ -429,15 +450,24 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        console.log('CHECKOUT about to create Stripe session:', {
+          stripePriceId,
+          providerId,
+          sessionDate,
+          sessionTime,
+          baseUrl,
+          successUrl: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
+        });
         checkoutSession = await stripe.checkout.sessions.create({
           payment_method_types: ['card'], // Cards are always enabled
           // Apple Pay, Google Pay, Cash App, Affirm, Klarna, Link, etc. are automatically
           // enabled by Stripe Checkout when available for the customer
           // Taxes: Stripe Tax calculates tax based on the customer's address and product tax category.
           // IMPORTANT: This must add tax ON TOP of the listed service price (prices must be tax_behavior='exclusive').
-          automatic_tax: { enabled: true },
+      
           // Collect billing address so Stripe Tax can determine jurisdiction.
-          billing_address_collection: 'required',
+          
           // Optional: allow customers with tax IDs (e.g. VAT/GST) to provide them.
           tax_id_collection: { enabled: true },
           allow_promotion_codes: false,
@@ -472,11 +502,13 @@ export async function POST(request: NextRequest) {
           providerId,
           sessionDate,
           sessionTime,
+          baseUrl,
           stripe: {
             type: (error as any)?.type,
             code: (error as any)?.code,
             statusCode: (error as any)?.statusCode,
             requestId: (error as any)?.requestId,
+            raw: (error as any)?.raw,
           },
         });
 

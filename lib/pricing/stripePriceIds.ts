@@ -54,8 +54,18 @@ let cachedMap: Record<StripeEnvPricingKey, string> | null = null;
 type StripePriceIdMapSource = 'env' | 'dev_fallback';
 let cachedSource: StripePriceIdMapSource | null = null;
 let didLogMapKeys = false;
+let didLogMapDetails = false;
+let lastLoadedFallbackFilePath: string | null = null;
+let didLogLoadSuccess = false;
+let didLogLoadFailure = false;
 
-function tryLoadDevFallbackStripePriceIdMapRaw(): string | null {
+function previewEnvString(s: string, head = 24, tail = 24): string {
+  const raw = String(s);
+  if (raw.length <= head + tail + 3) return raw;
+  return `${raw.slice(0, head)}…${raw.slice(-tail)}`;
+}
+
+function tryLoadDevFallbackStripePriceIdMapRaw(): { raw: string; filePath: string } | null {
   // Only allow fallback in non-production environments.
   if (process.env.NODE_ENV === 'production') return null;
 
@@ -75,7 +85,10 @@ function tryLoadDevFallbackStripePriceIdMapRaw(): string | null {
     for (const abs of candidates) {
       if (fs.existsSync(abs)) {
         const raw = fs.readFileSync(abs, 'utf8');
-        if (typeof raw === 'string' && raw.trim()) return raw;
+        if (typeof raw === 'string' && raw.trim()) {
+          lastLoadedFallbackFilePath = abs;
+          return { raw, filePath: abs };
+        }
       }
     }
   } catch {
@@ -89,55 +102,95 @@ function loadStripePriceIdMapFromEnv(): Record<StripeEnvPricingKey, string> {
   if (cachedMap) return cachedMap;
 
   const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
-  const fallbackRaw = envRaw ? null : tryLoadDevFallbackStripePriceIdMapRaw();
-  const raw = envRaw || fallbackRaw;
-  if (!raw) {
-    throw new Error(
-      'Missing STRIPE_PRICE_IDS_JSON env var (JSON map from pricing key → Stripe price id). For local dev you can alternatively create data/stripe-price-ids.local.json.'
-    );
-  }
+  const fallback = envRaw ? null : tryLoadDevFallbackStripePriceIdMapRaw();
+  const raw = envRaw || fallback?.raw;
 
+  // Log EXACT source decision up front (requested).
   cachedSource = envRaw ? 'env' : 'dev_fallback';
+  if (!envRaw && fallback?.filePath) lastLoadedFallbackFilePath = fallback.filePath;
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be valid JSON)');
-  }
-
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be a JSON object)');
-  }
-
-  const obj = parsed as Record<string, unknown>;
-  const missing: string[] = [];
-  const out: Partial<Record<StripeEnvPricingKey, string>> = {};
-
-  for (const k of REQUIRED_ENV_KEYS) {
-    const v = obj[k];
-    if (typeof v !== 'string' || !v.trim()) {
-      missing.push(k);
-      continue;
-    }
-    const trimmed = v.trim();
-    // Stripe Price IDs look like `price_...` (not `prod_...`).
-    if (!trimmed.startsWith('price_')) {
+    if (!raw) {
       throw new Error(
-        `Invalid STRIPE_PRICE_IDS_JSON value for key=${k}. Expected a Stripe Price ID starting with "price_", got: ${trimmed}`
+        'Missing STRIPE_PRICE_IDS_JSON env var (JSON map from pricing key → Stripe price id). For local dev you can alternatively create data/stripe-price-ids.local.json.'
       );
     }
-    out[k] = trimmed;
-  }
 
-  if (missing.length > 0) {
-    throw new Error(
-      `STRIPE_PRICE_IDS_JSON is missing required keys: ${missing.join(', ')}`
-    );
-  }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const first = String(raw).slice(0, 1);
+      const last = String(raw).slice(-1);
+      // Common prod misconfig: pasting STRIPE_PRICE_IDS_JSON with wrapping single-quotes into Vercel env vars.
+      throw new Error(
+        `Invalid STRIPE_PRICE_IDS_JSON (must be valid JSON). length=${String(raw).length} firstChar=${JSON.stringify(first)} lastChar=${JSON.stringify(last)} preview=${JSON.stringify(previewEnvString(String(raw)))}`
+      );
+    }
 
-  cachedMap = out as Record<StripeEnvPricingKey, string>;
-  return cachedMap;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be a JSON object)');
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    const missing: string[] = [];
+    const out: Partial<Record<StripeEnvPricingKey, string>> = {};
+
+    for (const k of REQUIRED_ENV_KEYS) {
+      const v = obj[k];
+      if (typeof v !== 'string' || !v.trim()) {
+        missing.push(k);
+        continue;
+      }
+      const trimmed = v.trim();
+      // Stripe Price IDs look like `price_...` (not `prod_...`).
+      if (!trimmed.startsWith('price_')) {
+        throw new Error(
+          `Invalid STRIPE_PRICE_IDS_JSON value for key=${k}. Expected a Stripe Price ID starting with "price_", got: ${trimmed}`
+        );
+      }
+      out[k] = trimmed;
+    }
+
+    if (missing.length > 0) {
+      throw new Error(
+        `STRIPE_PRICE_IDS_JSON is missing required keys: ${missing.join(', ')}`
+      );
+    }
+
+    cachedMap = out as Record<StripeEnvPricingKey, string>;
+
+    // Log what got loaded (requested); do not spam.
+    if (!didLogLoadSuccess) {
+      didLogLoadSuccess = true;
+      console.log('[STRIPE_PRICE_IDS_JSON LOADED]', {
+        source: cachedSource,
+        keys: Object.keys(cachedMap).sort(),
+        tutoring_single: cachedMap.tutoring_single,
+        fallbackFilePath: lastLoadedFallbackFilePath,
+        hasEnvVar: typeof envRaw === 'string' && !!envRaw.trim(),
+      });
+    }
+
+    return cachedMap;
+  } catch (e) {
+    // Log exact parse/validation error (requested); do not spam.
+    if (!didLogLoadFailure) {
+      didLogLoadFailure = true;
+      const envPresent = typeof envRaw === 'string' && !!envRaw.trim();
+      console.error('[STRIPE_PRICE_IDS_JSON LOAD FAILED]', {
+        source: cachedSource,
+        message: e instanceof Error ? e.message : String(e),
+        nodeEnv: process.env.NODE_ENV,
+        hasEnvVar: envPresent,
+        envVarLength: envPresent ? envRaw!.length : null,
+        envVarPreview: envPresent ? previewEnvString(envRaw!) : null,
+        fallbackFilePath: lastLoadedFallbackFilePath,
+        cwd: process.cwd(),
+      });
+    }
+    throw e;
+  }
 }
 
 export function getStripePriceIdForPricingKey(pricing_key: PricingKey): string {
@@ -154,13 +207,26 @@ export function getStripePriceIdForPricingKey(pricing_key: PricingKey): string {
 export function getStripePriceIdMapDebugInfo(): {
   source: StripePriceIdMapSource;
   keys: StripeEnvPricingKey[];
+  cwd: string;
+  hasEnvVar: boolean;
+  envVarLength: number | null;
+  envVarPreview: string | null;
+  fallbackFilePath: string | null;
+  tutoringSingle: string | null;
 } {
   const map = loadStripePriceIdMapFromEnv();
   // loadStripePriceIdMapFromEnv always sets cachedSource if it succeeds
   const source = cachedSource || 'env';
+  const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
   return {
     source,
     keys: Object.keys(map).sort() as StripeEnvPricingKey[],
+    cwd: process.cwd(),
+    hasEnvVar: typeof envRaw === 'string' && !!envRaw.trim(),
+    envVarLength: typeof envRaw === 'string' ? envRaw.length : null,
+    envVarPreview: typeof envRaw === 'string' ? previewEnvString(envRaw) : null,
+    fallbackFilePath: lastLoadedFallbackFilePath,
+    tutoringSingle: map.tutoring_single ?? null,
   };
 }
 
@@ -173,6 +239,22 @@ export function debugLogStripePriceIdMapKeysOnce(logPrefix = 'STRIPE_PRICE_IDS')
     console.log(`${logPrefix} map keys:`, info.keys);
   } catch (e) {
     console.warn(`${logPrefix} map load failed:`, e);
+  }
+}
+
+export function debugLogStripePriceIdMapDetailsOnce(logPrefix = 'STRIPE_PRICE_IDS'): void {
+  if (didLogMapDetails) return;
+  didLogMapDetails = true;
+  try {
+    const info = getStripePriceIdMapDebugInfo();
+    console.log(`${logPrefix} cwd:`, info.cwd);
+    console.log(`${logPrefix} env present:`, info.hasEnvVar);
+    console.log(`${logPrefix} env length:`, info.envVarLength);
+    console.log(`${logPrefix} env preview:`, info.envVarPreview);
+    console.log(`${logPrefix} fallback file path:`, info.fallbackFilePath);
+    console.log(`${logPrefix} tutoring_single:`, info.tutoringSingle);
+  } catch (e) {
+    console.warn(`${logPrefix} map debug failed:`, e);
   }
 }
 

@@ -5,6 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.toStripePriceEnvKey = toStripePriceEnvKey;
 exports.getStripePriceIdForPricingKey = getStripePriceIdForPricingKey;
+exports.getStripePriceIdMapDebugInfo = getStripePriceIdMapDebugInfo;
+exports.debugLogStripePriceIdMapKeysOnce = debugLogStripePriceIdMapKeysOnce;
+exports.debugLogStripePriceIdMapDetailsOnce = debugLogStripePriceIdMapDetailsOnce;
 const path_1 = __importDefault(require("path"));
 /**
  * Stripe price id lookup.
@@ -52,6 +55,16 @@ function toStripePriceEnvKey(pricing_key) {
     }
 }
 let cachedMap = null;
+let cachedSource = null;
+let didLogMapKeys = false;
+let didLogMapDetails = false;
+let lastLoadedFallbackFilePath = null;
+function previewEnvString(s, head = 24, tail = 24) {
+    const raw = String(s);
+    if (raw.length <= head + tail + 3)
+        return raw;
+    return `${raw.slice(0, head)}…${raw.slice(-tail)}`;
+}
 function tryLoadDevFallbackStripePriceIdMapRaw() {
     // Only allow fallback in non-production environments.
     if (process.env.NODE_ENV === 'production')
@@ -70,8 +83,10 @@ function tryLoadDevFallbackStripePriceIdMapRaw() {
         for (const abs of candidates) {
             if (fs.existsSync(abs)) {
                 const raw = fs.readFileSync(abs, 'utf8');
-                if (typeof raw === 'string' && raw.trim())
-                    return raw;
+                if (typeof raw === 'string' && raw.trim()) {
+                    lastLoadedFallbackFilePath = abs;
+                    return { raw, filePath: abs };
+                }
             }
         }
     }
@@ -83,16 +98,24 @@ function tryLoadDevFallbackStripePriceIdMapRaw() {
 function loadStripePriceIdMapFromEnv() {
     if (cachedMap)
         return cachedMap;
-    const raw = process.env.STRIPE_PRICE_IDS_JSON || tryLoadDevFallbackStripePriceIdMapRaw();
+    const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
+    const fallback = envRaw ? null : tryLoadDevFallbackStripePriceIdMapRaw();
+    const raw = envRaw || fallback?.raw;
     if (!raw) {
         throw new Error('Missing STRIPE_PRICE_IDS_JSON env var (JSON map from pricing key → Stripe price id). For local dev you can alternatively create data/stripe-price-ids.local.json.');
     }
+    cachedSource = envRaw ? 'env' : 'dev_fallback';
+    if (!envRaw && fallback?.filePath)
+        lastLoadedFallbackFilePath = fallback.filePath;
     let parsed;
     try {
         parsed = JSON.parse(raw);
     }
     catch {
-        throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be valid JSON)');
+        const first = String(raw).slice(0, 1);
+        const last = String(raw).slice(-1);
+        // Common prod misconfig: pasting STRIPE_PRICE_IDS_JSON with wrapping single-quotes into Vercel env vars.
+        throw new Error(`Invalid STRIPE_PRICE_IDS_JSON (must be valid JSON). length=${String(raw).length} firstChar=${JSON.stringify(first)} lastChar=${JSON.stringify(last)} preview=${JSON.stringify(previewEnvString(String(raw)))}`);
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be a JSON object)');
@@ -128,4 +151,50 @@ function getStripePriceIdForPricingKey(pricing_key) {
         throw new Error(`Missing Stripe price id for pricing_key=${pricing_key} (envKey=${envKey})`);
     }
     return id.trim();
+}
+function getStripePriceIdMapDebugInfo() {
+    const map = loadStripePriceIdMapFromEnv();
+    // loadStripePriceIdMapFromEnv always sets cachedSource if it succeeds
+    const source = cachedSource || 'env';
+    const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
+    return {
+        source,
+        keys: Object.keys(map).sort(),
+        cwd: process.cwd(),
+        hasEnvVar: typeof envRaw === 'string' && !!envRaw.trim(),
+        envVarLength: typeof envRaw === 'string' ? envRaw.length : null,
+        envVarPreview: typeof envRaw === 'string' ? previewEnvString(envRaw) : null,
+        fallbackFilePath: lastLoadedFallbackFilePath,
+        tutoringSingle: map.tutoring_single ?? null,
+    };
+}
+function debugLogStripePriceIdMapKeysOnce(logPrefix = 'STRIPE_PRICE_IDS') {
+    if (didLogMapKeys)
+        return;
+    didLogMapKeys = true;
+    try {
+        const info = getStripePriceIdMapDebugInfo();
+        console.log(`${logPrefix} map source:`, info.source);
+        console.log(`${logPrefix} map keys:`, info.keys);
+    }
+    catch (e) {
+        console.warn(`${logPrefix} map load failed:`, e);
+    }
+}
+function debugLogStripePriceIdMapDetailsOnce(logPrefix = 'STRIPE_PRICE_IDS') {
+    if (didLogMapDetails)
+        return;
+    didLogMapDetails = true;
+    try {
+        const info = getStripePriceIdMapDebugInfo();
+        console.log(`${logPrefix} cwd:`, info.cwd);
+        console.log(`${logPrefix} env present:`, info.hasEnvVar);
+        console.log(`${logPrefix} env length:`, info.envVarLength);
+        console.log(`${logPrefix} env preview:`, info.envVarPreview);
+        console.log(`${logPrefix} fallback file path:`, info.fallbackFilePath);
+        console.log(`${logPrefix} tutoring_single:`, info.tutoringSingle);
+    }
+    catch (e) {
+        console.warn(`${logPrefix} map debug failed:`, e);
+    }
 }

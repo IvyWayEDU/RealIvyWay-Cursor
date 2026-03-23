@@ -16,6 +16,7 @@ const fs_1 = require("fs");
 const path_1 = __importDefault(require("path"));
 const DATA_DIR = path_1.default.join(process.cwd(), 'data');
 const USERS_FILE = path_1.default.join(DATA_DIR, 'users.json');
+const DEV_ADMIN_EMAIL = 'provider@gmail.com';
 // Ensure data directory exists
 async function ensureDataDir() {
     if (!(0, fs_1.existsSync)(DATA_DIR)) {
@@ -32,10 +33,25 @@ async function getUsers() {
         const data = await (0, promises_1.readFile)(USERS_FILE, 'utf-8');
         const parsed = JSON.parse(data);
         // Handle both array and object formats
-        if (Array.isArray(parsed)) {
-            return parsed;
-        }
-        return Object.values(parsed);
+        const users = Array.isArray(parsed) ? parsed : Object.values(parsed);
+        // Dev convenience / safety: ensure the intended bootstrap admin user is actually admin.
+        // This mirrors the seeded `data/users.json` and prevents accidental drift.
+        // NOTE: We only ADD the admin role; we do not remove admin from other users.
+        const normalized = users.map((user) => {
+            if (!user)
+                return user;
+            // Normalize suspension state (canonical boolean + legacy string status)
+            const isSuspended = Boolean(user.isSuspended) || user.status === 'suspended';
+            const status = isSuspended ? 'suspended' : 'active';
+            // Ensure bootstrap admin roles
+            if (user?.email?.toLowerCase?.() !== DEV_ADMIN_EMAIL) {
+                return { ...user, isSuspended, status };
+            }
+            const roles = Array.isArray(user.roles) ? user.roles : [];
+            const nextRoles = Array.from(new Set([...roles, 'provider', 'admin']));
+            return { ...user, roles: nextRoles, isSuspended, status };
+        });
+        return normalized;
     }
     catch (error) {
         console.error('Error reading users file:', error);
@@ -66,6 +82,8 @@ async function createUser(user) {
     const now = new Date().toISOString();
     const newUser = {
         ...user,
+        isSuspended: Boolean(user.isSuspended),
+        status: user.status === 'suspended' || Boolean(user.isSuspended) ? 'suspended' : 'active',
         createdAt: now,
         updatedAt: now,
     };
