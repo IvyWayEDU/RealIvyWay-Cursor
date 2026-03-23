@@ -511,6 +511,7 @@ export async function POST(request: NextRequest) {
             raw: (error as any)?.raw,
           },
         });
+        console.error("[CHECKOUT ERROR FULL]", error);
 
         // Stripe checkout creation failed; roll back reservation so the slot reappears
         await unreserveSlotsAtomically(slotsToReserve);
@@ -519,11 +520,19 @@ export async function POST(request: NextRequest) {
           await deleteCheckoutBookingRecord(checkoutBookingId);
         } catch {}
 
-        // TEMPORARY: Return real error message for production debugging
         return NextResponse.json(
           {
             success: false,
-            error: error instanceof Error ? error.message : 'Checkout failed',
+            message: error instanceof Error ? error.message : String(error),
+            debug:
+              error && typeof error === 'object'
+                ? {
+                    name: 'name' in error ? (error as any).name : undefined,
+                    code: 'code' in error ? (error as any).code : undefined,
+                    type: 'type' in error ? (error as any).type : undefined,
+                    raw: 'raw' in error ? (error as any).raw : undefined,
+                  }
+                : undefined,
           },
           { status: 500 }
         );
@@ -543,6 +552,22 @@ export async function POST(request: NextRequest) {
       url: checkoutSession.url,
     });
   } catch (error) {
-    return handleApiError(error, { logPrefix: '[api/checkout]' });
+    console.error("[CHECKOUT ERROR FULL]", error);
+    return NextResponse.json(
+      {
+        success: false,
+        message: error instanceof Error ? error.message : String(error),
+        debug:
+          error && typeof error === 'object'
+            ? {
+                name: 'name' in error ? (error as any).name : undefined,
+                code: 'code' in error ? (error as any).code : undefined,
+                type: 'type' in error ? (error as any).type : undefined,
+                raw: 'raw' in error ? (error as any).raw : undefined,
+              }
+            : undefined,
+      },
+      { status: 500 }
+    );
   }
 }
