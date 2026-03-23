@@ -5,6 +5,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { getUserById } from '@/lib/auth/storage';
 import type { DayAvailability } from '@/lib/availability/types';
+import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const AVAILABILITY_FILE = path.join(DATA_DIR, 'availability.json');
@@ -89,6 +90,9 @@ async function withAvailabilityWriteLock<T>(fn: () => Promise<T>): Promise<T> {
  * Ensure data directory exists
  */
 async function ensureDataDir(): Promise<void> {
+  if (isFilePersistenceDisabled()) {
+    return;
+  }
   if (!existsSync(DATA_DIR)) {
     await mkdir(DATA_DIR, { recursive: true });
   }
@@ -195,6 +199,10 @@ function slotKey(providerId: string, startTimeISO: string, endTimeISO: string): 
 }
 
 export async function readReservedSlotsFile(): Promise<AvailabilitySlot[]> {
+  if (isFilePersistenceDisabled()) {
+    warnFilePersistenceDisabled('reserved-slots.read', { file: RESERVED_SLOTS_FILE });
+    return [];
+  }
   await ensureDataDir();
   if (!existsSync(RESERVED_SLOTS_FILE)) return [];
   try {
@@ -218,6 +226,10 @@ export async function readReservedSlotsFile(): Promise<AvailabilitySlot[]> {
 }
 
 export async function writeReservedSlotsFile(slots: AvailabilitySlot[]): Promise<void> {
+  if (isFilePersistenceDisabled()) {
+    warnFilePersistenceDisabled('reserved-slots.write', { file: RESERVED_SLOTS_FILE, attemptedCount: slots.length });
+    return;
+  }
   await ensureDataDir();
   const tempFile = `${RESERVED_SLOTS_FILE}.tmp`;
   await writeFile(tempFile, JSON.stringify(slots, null, 2), 'utf-8');

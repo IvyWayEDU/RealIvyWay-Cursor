@@ -6,12 +6,14 @@ import { resolveSessionStatusByTime } from '@/lib/sessions/status-resolver';
 import { getEarningsServiceLabel } from '@/lib/earnings/serviceLabel';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
+import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
 // Ensure data directory exists
 function ensureDataDir() {
+  if (isFilePersistenceDisabled()) return;
   if (!existsSync(DATA_DIR)) {
     mkdirSync(DATA_DIR, { recursive: true });
   }
@@ -19,6 +21,10 @@ function ensureDataDir() {
 
 // Read sessions from file
 async function readSessionsRaw(): Promise<Session[]> {
+  if (isFilePersistenceDisabled()) {
+    warnFilePersistenceDisabled('sessions.read', { file: SESSIONS_FILE });
+    return [];
+  }
   ensureDataDir();
   
   if (!existsSync(SESSIONS_FILE)) {
@@ -556,6 +562,10 @@ export async function getSessions(): Promise<Session[]> {
 
 // Write sessions to file
 export async function saveSessions(sessions: Session[]): Promise<void> {
+  if (isFilePersistenceDisabled()) {
+    warnFilePersistenceDisabled('sessions.write', { file: SESSIONS_FILE, attemptedCount: sessions.length });
+    return;
+  }
   ensureDataDir();
   writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
 }

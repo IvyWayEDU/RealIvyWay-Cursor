@@ -188,6 +188,25 @@ export async function GET(request: NextRequest) {
         return [];
       }
     })();
+    const timesFromPackedMetadata: SessionTime[] = (() => {
+      const packed = isNonEmptyString((md as any).sessionsPacked) ? String((md as any).sessionsPacked) : '';
+      if (!packed) return [];
+      const pieces = packed
+        .split(';')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      if (pieces.length === 0) return [];
+      const out: SessionTime[] = [];
+      for (const piece of pieces) {
+        const [rawStart, rawEnd] = piece.split(',').map((p) => p.trim());
+        const s = toIsoOrNull(rawStart);
+        const e = toIsoOrNull(rawEnd);
+        if (!s || !e) return [];
+        if (new Date(e).getTime() <= new Date(s).getTime()) return [];
+        out.push({ startIso: s, endIso: e });
+      }
+      return out;
+    })();
 
     const singleStartIso =
       toIsoOrNull((md as any).scheduledStart || (md as any).startTime || ref?.scheduledStart);
@@ -199,6 +218,8 @@ export async function GET(request: NextRequest) {
         ? timesFromCheckoutStore
         : timesFromMetadata.length > 0
           ? timesFromMetadata
+          : timesFromPackedMetadata.length > 0
+            ? timesFromPackedMetadata
           : (singleStartIso && singleEndIso ? [{ startIso: singleStartIso, endIso: singleEndIso }] : []);
 
     // If we already have any sessions for this stripeSessionId, we still allow "fill in the missing ones"

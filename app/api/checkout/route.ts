@@ -417,6 +417,15 @@ export async function POST(request: NextRequest) {
       schoolId: canonicalServiceType === 'counseling' || canonicalServiceType === 'virtual_tour' ? (schoolId || null) : null,
       schoolName: canonicalServiceType === 'counseling' || canonicalServiceType === 'virtual_tour' ? (schoolName || null) : null,
     });
+    const sessionTimesForMetadata = sessionPayloads.map((p: any) => ({
+      scheduledStart: String(p?.scheduledStart || ''),
+      scheduledEnd: String(p?.scheduledEnd || ''),
+    }));
+    const sessionsJson = JSON.stringify(sessionTimesForMetadata);
+    // Compact, parseable fallback (useful when JSON is too large for Stripe metadata limits)
+    const sessionsPacked = sessionTimesForMetadata
+      .map((t) => `${t.scheduledStart},${t.scheduledEnd}`)
+      .join(';');
 
     // Create Stripe Checkout Session (Stripe must charge EXACTLY purchase_price_cents)
     // Stripe Checkout automatically enables Apple Pay, Google Pay, and other payment methods
@@ -482,7 +491,14 @@ export async function POST(request: NextRequest) {
           metadata: {
             // Keep Stripe metadata minimal; webhook primarily uses client_reference_id + checkout store.
             serviceType: canonicalServiceType,
+            service_type: canonicalServiceType,
+            studentId,
+            providerId,
             checkoutBookingId,
+            // Fallback for serverless runtimes where repo filesystem is read-only (e.g. Vercel):
+            // webhook + /api/checkout-session can reconstruct bundle session times from metadata if needed.
+            sessionsJson: sessionsJson.length <= 500 ? sessionsJson : '',
+            sessionsPacked: sessionsPacked.length <= 500 ? sessionsPacked : '',
             // Helpful context (size-limited; canonical persistence is in checkout store above)
             subject: (subject ? subject.slice(0, 250) : ''),
             topic: (topic ? topic.slice(0, 250) : ''),

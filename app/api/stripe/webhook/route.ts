@@ -336,6 +336,27 @@ export async function POST(request: NextRequest) {
           return null;
         }
       })();
+      const sessionsFromPackedMetadata = (() => {
+        const packed = isNonEmpty((metadata as any).sessionsPacked) ? String((metadata as any).sessionsPacked) : '';
+        if (!packed) return null;
+        const pieces = packed
+          .split(';')
+          .map((p) => p.trim())
+          .filter(Boolean);
+        if (pieces.length === 0) return null;
+        const out: SessionTime[] = [];
+        for (const piece of pieces) {
+          const [rawStart, rawEnd] = piece.split(',').map((p) => p.trim());
+          const s = toIsoOrNull(rawStart);
+          const e = toIsoOrNull(rawEnd);
+          if (!s || !e) return null;
+          const sMs = new Date(s).getTime();
+          const eMs = new Date(e).getTime();
+          if (!Number.isFinite(sMs) || !Number.isFinite(eMs) || eMs <= sMs) return null;
+          out.push({ startIso: s, endIso: e });
+        }
+        return out;
+      })();
 
       const singleStartIso =
         toIsoOrNull(metadata.scheduledStart || metadata.startTime) || (ctx?.startTime ? toIsoOrNull(ctx.startTime) : null);
@@ -347,6 +368,8 @@ export async function POST(request: NextRequest) {
           ? sessionsFromCheckoutStore
           : sessionsFromMetadata && sessionsFromMetadata.length > 0
             ? sessionsFromMetadata
+            : sessionsFromPackedMetadata && sessionsFromPackedMetadata.length > 0
+              ? sessionsFromPackedMetadata
             : (singleStartIso && singleEndIso ? [{ startIso: singleStartIso, endIso: singleEndIso }] : []);
 
       if (sessionTimes.length === 0) {

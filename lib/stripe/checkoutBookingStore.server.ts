@@ -3,6 +3,7 @@ import 'server-only';
 import { readFile, writeFile, mkdir, rename } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
 
 type StoredSessionTime = { scheduledStart: string; scheduledEnd: string };
 
@@ -27,12 +28,19 @@ const DATA_DIR = path.join(process.cwd(), 'data');
 const FILE_PATH = path.join(DATA_DIR, 'checkout-bookings.json');
 
 async function ensureDataDir(): Promise<void> {
+  if (isFilePersistenceDisabled()) {
+    return;
+  }
   if (!existsSync(DATA_DIR)) {
     await mkdir(DATA_DIR, { recursive: true });
   }
 }
 
 async function readAll(): Promise<CheckoutBookingStorage> {
+  if (isFilePersistenceDisabled()) {
+    warnFilePersistenceDisabled('checkout-bookings.readAll', { file: FILE_PATH });
+    return {};
+  }
   await ensureDataDir();
   if (!existsSync(FILE_PATH)) return {};
   try {
@@ -46,6 +54,10 @@ async function readAll(): Promise<CheckoutBookingStorage> {
 }
 
 async function writeAll(next: CheckoutBookingStorage): Promise<void> {
+  if (isFilePersistenceDisabled()) {
+    warnFilePersistenceDisabled('checkout-bookings.writeAll', { file: FILE_PATH, attemptedCount: Object.keys(next || {}).length });
+    return;
+  }
   await ensureDataDir();
   const tmp = `${FILE_PATH}.tmp`;
   await writeFile(tmp, JSON.stringify(next, null, 2), 'utf-8');
