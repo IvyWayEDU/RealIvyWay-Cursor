@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/auth/getServerSession';
 import { getUserById, updateUser } from '@/lib/auth/storage';
 import { normalizeSchoolId } from '@/lib/models/schools';
-import { upsertProviderDataByUserId } from '@/lib/providers/storage';
+import { getProviderByUserId, upsertProviderDataByUserId } from '@/lib/providers/storage';
 import { handleApiError } from '@/lib/errorHandler';
-import { validateRequestBody } from '@/lib/validation/utils';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
 import { SCHOOLS, findSchoolByName } from '@/data/schools';
 
@@ -15,11 +14,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const validationResult = await validateRequestBody(request, profileUpdateSchema);
-    if (!validationResult.success) return validationResult.response;
-    const body = validationResult.data;
+    let rawBody: any;
+    try {
+      rawBody = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON in request body' }, { status: 400 });
+    }
 
-    console.log('PROFILE UPDATE PAYLOAD:', body);
+    console.log("Incoming profile data:", rawBody);
+
+    const parsed = profileUpdateSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      const details = parsed.error.issues.map((err) => ({
+        path: err.path.join('.'),
+        message: err.message,
+      }));
+      return NextResponse.json({ error: 'Validation failed', details }, { status: 400 });
+    }
+    const body = parsed.data;
     
     const user = await getUserById(session.userId);
     if (!user) {
@@ -44,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     // Update primary school (single-field partial update).
     // Supports clients that send `schoolId` / `schoolName` instead of `schoolIds` / `schoolNames`.
-    if (body.schoolId !== undefined || body.schoolName !== undefined) {
+    if (body.schoolId !== undefined || body.schoolName !== undefined || body.school !== undefined) {
       if (!isProviderOrAdmin) {
         return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
       }
@@ -58,7 +70,11 @@ export async function POST(request: NextRequest) {
       let nextPrimarySchoolId =
         typeof body.schoolId === 'string' && body.schoolId.trim() ? body.schoolId.trim() : existingPrimarySchoolId;
       let nextPrimarySchoolName =
-        typeof body.schoolName === 'string' && body.schoolName.trim() ? body.schoolName.trim() : existingPrimarySchoolName;
+        typeof body.school === 'string' && body.school.trim()
+          ? body.school.trim()
+          : typeof body.schoolName === 'string' && body.schoolName.trim()
+            ? body.schoolName.trim()
+            : existingPrimarySchoolName;
 
       if (typeof nextPrimarySchoolId === 'string' && nextPrimarySchoolId) {
         // Prefer canonical snake_case IDs from `data/schools.ts`.
@@ -88,11 +104,13 @@ export async function POST(request: NextRequest) {
       }
 
       if (typeof body.schoolId !== 'undefined') updateData.school_id = nextPrimarySchoolId || undefined;
-      if (typeof body.schoolName !== 'undefined') updateData.school_name = nextPrimarySchoolName || undefined;
+      if (typeof body.school !== 'undefined' || typeof body.schoolName !== 'undefined') {
+        updateData.school_name = nextPrimarySchoolName || undefined;
+      }
     }
 
     // Update roles/services (provider-only)
-    if (body.isTutor !== undefined || body.isCounselor !== undefined || body.services !== undefined || body.offersVirtualTours !== undefined) {
+    if (body.services !== undefined || body.offersVirtualTours !== undefined) {
       if (!isProviderOrAdmin) {
         return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
       }
@@ -101,39 +119,22 @@ export async function POST(request: NextRequest) {
       const existingServices = Array.isArray(existingServicesRaw)
         ? existingServicesRaw.map((s) => String(s ?? '').trim().toLowerCase()).filter(Boolean)
         : [];
-      const existingServiceSet = new Set(existingServices);
-      const existingIsTutor = Boolean((user as any)?.isTutor ?? existingServiceSet.has('tutoring'));
-      const existingIsCounselor = Boolean((user as any)?.isCounselor ?? existingServiceSet.has('college_counseling'));
-      const existingOffersVirtualTours = Boolean((user as any)?.offersVirtualTours ?? false);
 
-      const nextOffersVirtualTours =
-        typeof body.offersVirtualTours === 'boolean' ? body.offersVirtualTours : existingOffersVirtualTours;
+      // `services` is the source of truth (already normalized by schema). If absent, start from existing.
+      let nextServices: string[] = Array.isArray(body.services) ? [...body.services] : [...existingServices];
 
-      // If `services` is explicitly provided, treat it as source of truth (already normalized by schema).
-      let nextServices: string[] | null = Array.isArray(body.services) ? [...body.services] : null;
-
-      if (!nextServices) {
-        // Otherwise, derive services from role flags while preserving unspecified flags.
-        const nextIsTutor = typeof body.isTutor === 'boolean' ? body.isTutor : existingIsTutor;
-        const nextIsCounselor = typeof body.isCounselor === 'boolean' ? body.isCounselor : existingIsCounselor;
-
-        nextServices = [];
-        if (nextIsTutor) nextServices.push('tutoring');
-        if (nextIsCounselor) nextServices.push('college_counseling');
-        if (nextOffersVirtualTours) nextServices.push('virtual_tour');
-      } else {
-        // Keep offersVirtualTours in sync with services when it's explicitly enabled.
-        if (nextOffersVirtualTours && !nextServices.includes('virtual_tour')) nextServices.push('virtual_tour');
+      // If offersVirtualTours is explicitly toggled without a services payload, keep services in sync.
+      if (!Array.isArray(body.services) && typeof body.offersVirtualTours === 'boolean') {
+        if (body.offersVirtualTours && !nextServices.includes('virtual_tour')) nextServices.push('virtual_tour');
+        if (!body.offersVirtualTours) nextServices = nextServices.filter((s) => s !== 'virtual_tour');
       }
 
       // De-dupe while preserving order.
       nextServices = Array.from(new Set(nextServices));
 
       updateData.services = nextServices;
-
-      // Keep legacy flags consistent (used by UI as a fallback).
-      updateData.isTutor = nextServices.includes('tutoring') || nextServices.includes('test_prep');
-      updateData.isCounselor = nextServices.includes('college_counseling');
+      // Keep offersVirtualTours derived from services for consistency.
+      updateData.offersVirtualTours = nextServices.includes('virtual_tour');
     }
 
     // Update schools
@@ -164,17 +165,6 @@ export async function POST(request: NextRequest) {
         );
       }
       updateData.subjects = body.subjects;
-    }
-
-    // Update virtual tours
-    if (body.offersVirtualTours !== undefined) {
-      if (!isProviderOrAdmin) {
-        return NextResponse.json(
-          { error: 'Forbidden: Provider role required' },
-          { status: 403 }
-        );
-      }
-      updateData.offersVirtualTours = body.offersVirtualTours;
     }
 
     // Update email (only if provided and different)
@@ -218,23 +208,26 @@ export async function POST(request: NextRequest) {
 
       if ((hasCounseling || hasVirtualTours) && (!nextSchoolId || !nextSchoolName)) {
         return NextResponse.json(
-          { error: 'School is required for college counseling or virtual tours.' },
+          { error: 'school and schoolId are required when services includes college_counseling or virtual_tour.' },
           { status: 400 }
         );
       }
 
-      // Keep offersVirtualTours derived from services when services are present.
-      if (Array.isArray(updateData.services)) {
-        updateData.offersVirtualTours = services.includes('virtual_tour');
-      }
+      // Keep offersVirtualTours derived from services.
+      updateData.offersVirtualTours = services.includes('virtual_tour');
 
       // Persist canonical provider payload to providers.data as well.
+      const existingProvider = await getProviderByUserId(session.userId).catch(() => null);
+      const existingAvailability = Array.isArray((existingProvider as any)?.availability) ? (existingProvider as any).availability : [];
+      const nextAvailability = Object.prototype.hasOwnProperty.call(rawBody, 'availability')
+        ? (Array.isArray(body.availability) ? body.availability : [])
+        : existingAvailability;
+
       const providerData = {
         services,
         school: nextSchoolName ?? null,
         schoolId: nextSchoolId ?? null,
-        isTutor: services.includes('tutoring') || services.includes('test_prep'),
-        isCounselor: services.includes('college_counseling'),
+        availability: nextAvailability,
         offersVirtualTours: services.includes('virtual_tour'),
       };
 

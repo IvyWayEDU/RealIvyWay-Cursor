@@ -302,19 +302,10 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         phoneNumber,
         profilePhotoUrl,
         services: normalizedServices,
-        // Keep legacy flags in sync for backwards compatibility elsewhere in the app.
-        isTutor: normalizedServices.includes('tutoring') || normalizedServices.includes('test_prep'),
-        isCounselor: normalizedServices.includes('college_counseling'),
         offersVirtualTours: normalizedServices.includes('virtual_tour'),
         // Single-school model (required for counseling OR virtual tours)
-        // Send both canonical + legacy field names; server will persist to providers.data.school + providers.data.schoolId.
         school: schoolSelected ? schoolName : undefined,
         schoolId: schoolSelected ? schoolId : undefined,
-        schoolName: schoolSelected ? schoolName : undefined,
-        school_id: schoolSelected ? schoolId : undefined,
-        school_name: schoolSelected ? schoolName : undefined,
-        schoolIds: schoolSelected ? [schoolId] : undefined,
-        schoolNames: schoolSelected ? [schoolName] : undefined,
         subjects,
       };
 

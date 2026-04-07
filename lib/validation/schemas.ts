@@ -305,8 +305,6 @@ export const profileUpdateSchema = z
       z.string().min(1).max(120).optional()
     ),
     profilePhotoUrl: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(2048)).optional(),
-    isTutor: z.boolean().optional(),
-    isCounselor: z.boolean().optional(),
     schoolId: z.preprocess(
       (v) => {
         if (v === null || typeof v === 'undefined') return undefined;
@@ -315,6 +313,16 @@ export const profileUpdateSchema = z
         return t === '' ? undefined : t;
       },
       z.string().min(1).max(64).optional()
+    ),
+    // Canonical provider school display name (preferred over legacy `schoolName`).
+    school: z.preprocess(
+      (v) => {
+        if (v === null || typeof v === 'undefined') return undefined;
+        if (typeof v !== 'string') return v;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      },
+      z.string().min(1).max(140).optional()
     ),
     schoolName: z.preprocess(
       (v) => {
@@ -348,11 +356,15 @@ export const profileUpdateSchema = z
     ),
     offersVirtualTours: z.boolean().optional(),
     services: providerServicesSchema,
+    // Provider availability can be stored in providers.data.availability.
+    // Allow an empty array and avoid failing validation if present.
+    availability: z.preprocess((v) => (v === null ? undefined : v), z.array(z.any()).optional()),
     email: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().email().max(254)).optional(),
     phoneNumber: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(40)).optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
+    // schoolIds/schoolNames must be provided together (legacy multi-school support)
     const hasSchoolIds = typeof data.schoolIds !== 'undefined';
     const hasSchoolNames = typeof data.schoolNames !== 'undefined';
     if (hasSchoolIds !== hasSchoolNames) {
@@ -368,6 +380,37 @@ export const profileUpdateSchema = z
         path: ['schoolNames'],
         message: 'schoolIds and schoolNames must have the same length',
       });
+    }
+
+    // Updated provider schema rules:
+    // - services: enum array (validated by providerServicesSchema)
+    // - school + schoolId required when services includes college_counseling OR virtual_tour
+    if (Array.isArray(data.services)) {
+      const needsSchool = data.services.includes('college_counseling') || data.services.includes('virtual_tour');
+      if (needsSchool) {
+        const resolvedSchoolId =
+          (typeof data.schoolId === 'string' && data.schoolId.trim() ? data.schoolId.trim() : '') ||
+          (Array.isArray(data.schoolIds) && data.schoolIds.length > 0 ? String(data.schoolIds[0] || '').trim() : '');
+        const resolvedSchool =
+          (typeof data.school === 'string' && data.school.trim() ? data.school.trim() : '') ||
+          (typeof data.schoolName === 'string' && data.schoolName.trim() ? data.schoolName.trim() : '') ||
+          (Array.isArray(data.schoolNames) && data.schoolNames.length > 0 ? String(data.schoolNames[0] || '').trim() : '');
+
+        if (!resolvedSchoolId) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['schoolId'],
+            message: 'schoolId is required when services includes college_counseling or virtual_tour',
+          });
+        }
+        if (!resolvedSchool) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['school'],
+            message: 'school is required when services includes college_counseling or virtual_tour',
+          });
+        }
+      }
     }
   });
 
