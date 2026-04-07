@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
@@ -21,17 +20,38 @@ type CreditBucket = {
 const DATA_DIR = path.join(process.cwd(), 'data');
 const CREDITS_FILE = path.join(DATA_DIR, 'counseling-credits.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
+function getFs() {
+  // Keep fs usage out of production builds / runtimes.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('fs') as typeof import('fs');
+}
+
 function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    const fs = getFs();
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch {
+    return;
   }
 }
 
 function readBuckets(): CreditBucket[] {
+  if (FS_DISABLED_IN_PROD) return [];
   ensureDataDir();
-  if (!existsSync(CREDITS_FILE)) return [];
+  let fs: ReturnType<typeof getFs> | null = null;
   try {
-    const raw = readFileSync(CREDITS_FILE, 'utf-8');
+    fs = getFs();
+  } catch {
+    return [];
+  }
+  if (!fs.existsSync(CREDITS_FILE)) return [];
+  try {
+    const raw = fs.readFileSync(CREDITS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as CreditBucket[]) : [];
   } catch {
@@ -40,11 +60,18 @@ function readBuckets(): CreditBucket[] {
 }
 
 function writeBuckets(buckets: CreditBucket[]) {
+  if (FS_DISABLED_IN_PROD) return;
   ensureDataDir();
-  writeFileSync(CREDITS_FILE, JSON.stringify(buckets, null, 2), 'utf-8');
+  try {
+    const fs = getFs();
+    fs.writeFileSync(CREDITS_FILE, JSON.stringify(buckets, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 export function getCounselingMonthlyCreditsRemaining(userId: string): number {
+  if (FS_DISABLED_IN_PROD) return 0;
   const buckets = readBuckets();
   return buckets
     .filter((b) => b.userId === userId && b.service_type === 'counseling' && b.plan === 'monthly')
@@ -61,6 +88,9 @@ export function grantCounselingMonthlyCredits(params: {
   stripeInvoiceId: string;
   creditsToGrant?: number; // default 4
 }): { bucketId: string; alreadyApplied: boolean } {
+  if (FS_DISABLED_IN_PROD) {
+    return { bucketId: 'disabled', alreadyApplied: true };
+  }
   const now = new Date().toISOString();
   const creditsToGrant = Math.max(0, Math.floor(params.creditsToGrant ?? 4));
   if (!params.userId || !params.stripeSubscriptionId || !params.stripeInvoiceId) {
@@ -112,6 +142,9 @@ export function grantCounselingMonthlyCredits(params: {
  * Consume a single counseling monthly credit. Prefers oldest bucket with remaining > 0.
  */
 export function consumeOneCounselingMonthlyCredit(userId: string): { bucketId: string; stripeSubscriptionId?: string } {
+  if (FS_DISABLED_IN_PROD) {
+    return { bucketId: 'disabled', stripeSubscriptionId: undefined };
+  }
   const buckets = readBuckets();
   const candidates = buckets
     .filter((b) => b.userId === userId && b.service_type === 'counseling' && b.plan === 'monthly' && (b.remaining ?? 0) > 0)

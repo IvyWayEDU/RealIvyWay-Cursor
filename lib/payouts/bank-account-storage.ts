@@ -1,11 +1,11 @@
 'use server';
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const BANK_ACCOUNTS_FILE = path.join(DATA_DIR, 'bank-accounts.json');
+
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
 
 /**
  * Bank account metadata for a provider
@@ -22,32 +22,39 @@ export interface BankAccount {
 
 // Ensure data directory exists
 async function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+  } catch {
+    return;
   }
 }
 
 // Read bank accounts from file
 async function getBankAccounts(): Promise<BankAccount[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   await ensureDataDir();
-  
-  if (!existsSync(BANK_ACCOUNTS_FILE)) {
-    return [];
-  }
-  
+
   try {
-    const data = await readFile(BANK_ACCOUNTS_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(BANK_ACCOUNTS_FILE, 'utf-8');
     return JSON.parse(data);
   } catch (error) {
-    console.error('Error reading bank accounts file:', error);
     return [];
   }
 }
 
 // Write bank accounts to file
 async function saveBankAccounts(accounts: BankAccount[]): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   await ensureDataDir();
-  await writeFile(BANK_ACCOUNTS_FILE, JSON.stringify(accounts, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(BANK_ACCOUNTS_FILE, JSON.stringify(accounts, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 /**

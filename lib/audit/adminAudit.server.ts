@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { promises as fs } from 'fs';
 import path from 'path';
 
 export type AdminAuditAction =
@@ -19,14 +18,22 @@ export type AdminAuditEntry = {
 
 const AUDIT_FILE = path.join(process.cwd(), 'data', 'admin-audit.jsonl');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 /**
  * Append-only audit log (JSON Lines) for admin actions.
  * Stored locally under /data for this codebase's JSON-backed storage model.
  */
 export async function appendAdminAuditEntry(entry: AdminAuditEntry): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dir = path.dirname(AUDIT_FILE);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.appendFile(AUDIT_FILE, `${JSON.stringify(entry)}\n`, 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.appendFile(AUDIT_FILE, `${JSON.stringify(entry)}\n`, 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 

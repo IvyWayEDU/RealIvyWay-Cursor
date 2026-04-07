@@ -9,7 +9,6 @@ import {
   type PayoutRequest,
 } from '@/lib/payouts/payout-requests.server';
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
-import { readFile } from 'fs/promises';
 import path from 'path';
 
 export const runtime = 'nodejs';
@@ -40,9 +39,11 @@ function isBankAccountRow(value: unknown): value is BankAccountRow {
 }
 
 async function readBankAccounts(): Promise<BankAccountRow[]> {
+  if (process.env.NODE_ENV === 'production') return [];
   try {
     const p = path.join(process.cwd(), 'data', 'bank-accounts.json');
-    const raw = await readFile(p, 'utf-8');
+    const fsp = await import('fs/promises');
+    const raw = await fsp.readFile(p, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isBankAccountRow);

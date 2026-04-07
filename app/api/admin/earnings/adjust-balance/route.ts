@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import { handleApiError } from '@/lib/errorHandler';
 
 type Balances = Record<string, { balanceCents: number; updatedAt: string }>;
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 async function readBalances(): Promise<Balances> {
+  if (FS_DISABLED_IN_PROD) return {};
   const file = path.join(process.cwd(), 'data', 'provider-earnings.json');
   try {
-    const raw = await readFile(file, 'utf-8');
+    const fsp = await import('fs/promises');
+    const raw = await fsp.readFile(file, 'utf-8');
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? (parsed as Balances) : {};
   } catch {
@@ -19,10 +21,21 @@ async function readBalances(): Promise<Balances> {
 }
 
 async function writeBalances(balances: Balances): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dir = path.join(process.cwd(), 'data');
-  if (!existsSync(dir)) await mkdir(dir, { recursive: true });
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dir, { recursive: true });
+  } catch {
+    return;
+  }
   const file = path.join(dir, 'provider-earnings.json');
-  await writeFile(file, JSON.stringify(balances, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(file, JSON.stringify(balances, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 export async function POST(request: NextRequest) {

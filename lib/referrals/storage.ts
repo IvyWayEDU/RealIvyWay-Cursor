@@ -8,19 +8,22 @@
  */
 
 import { ReferralCredit, ReferralCreditStatus } from '@/lib/models/types';
-import fs from 'fs/promises';
 import path from 'path';
 import { REFERRAL_CREDIT_EXPIRATION_MS } from './constants';
 
 const STORAGE_FILE = path.join(process.cwd(), 'data', 'referral-credits.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 /**
  * Ensure the data directory exists
  */
 async function ensureDataDirectory(): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dataDir = path.dirname(STORAGE_FILE);
   try {
-    await fs.mkdir(dataDir, { recursive: true });
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dataDir, { recursive: true });
   } catch (error) {
     // Directory might already exist, ignore error
   }
@@ -30,9 +33,11 @@ async function ensureDataDirectory(): Promise<void> {
  * Read all referral credits from storage
  */
 export async function getReferralCredits(): Promise<ReferralCredit[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   try {
     await ensureDataDirectory();
-    const data = await fs.readFile(STORAGE_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(STORAGE_FILE, 'utf-8');
     const credits: ReferralCredit[] = JSON.parse(data);
     
     // Update status for expired credits and recalculate remaining amounts
@@ -83,12 +88,8 @@ export async function getReferralCredits(): Promise<ReferralCredit[]> {
     }
     
     return updatedCredits;
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      // File doesn't exist, return empty array
-      return [];
-    }
-    throw error;
+  } catch {
+    return [];
   }
 }
 
@@ -96,8 +97,14 @@ export async function getReferralCredits(): Promise<ReferralCredit[]> {
  * Save referral credits to storage
  */
 async function saveReferralCredits(credits: ReferralCredit[]): Promise<void> {
-  await ensureDataDirectory();
-  await fs.writeFile(STORAGE_FILE, JSON.stringify(credits, null, 2), 'utf-8');
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    await ensureDataDirectory();
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(STORAGE_FILE, JSON.stringify(credits, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 /**

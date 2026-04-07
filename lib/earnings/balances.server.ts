@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 
 export type ProviderEarningsBalances = Record<
@@ -11,21 +10,30 @@ export type ProviderEarningsBalances = Record<
 
 const BALANCES_FILE = path.join(process.cwd(), 'data', 'provider-earnings.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 async function readBalances(): Promise<ProviderEarningsBalances> {
+  if (FS_DISABLED_IN_PROD) return {};
   try {
-    const raw = await fs.readFile(BALANCES_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const raw = await fsp.readFile(BALANCES_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? (parsed as ProviderEarningsBalances) : {};
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') return {};
-    throw error;
+  } catch {
+    return {};
   }
 }
 
 async function writeBalances(balances: ProviderEarningsBalances): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dataDir = path.dirname(BALANCES_FILE);
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(BALANCES_FILE, JSON.stringify(balances, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dataDir, { recursive: true });
+    await fsp.writeFile(BALANCES_FILE, JSON.stringify(balances, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 export async function getProviderEarningsBalanceCents(providerId: string): Promise<number> {

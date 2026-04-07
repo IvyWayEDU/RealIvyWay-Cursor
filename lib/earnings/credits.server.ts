@@ -5,7 +5,6 @@
  * Each credit represents earnings credited to a provider for a completed session.
  */
 
-import { promises as fs } from 'fs';
 import path from 'path';
 
 export interface Credit {
@@ -19,6 +18,8 @@ export interface Credit {
 const CREDITS_FILE = path.join(process.cwd(), 'data', 'earnings-credits.json');
 const BALANCES_FILE = path.join(process.cwd(), 'data', 'provider-earnings.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 type ProviderEarningsBalances = Record<
   string,
   {
@@ -31,55 +32,65 @@ type ProviderEarningsBalances = Record<
  * Read all credits from JSON file
  */
 export async function readCredits(): Promise<Credit[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   try {
-    const data = await fs.readFile(CREDITS_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(CREDITS_FILE, 'utf-8');
     return JSON.parse(data);
-  } catch (error: any) {
-    // If file doesn't exist, return empty array
-    if (error.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
+  } catch {
+    return [];
   }
 }
 
 async function readBalances(): Promise<ProviderEarningsBalances> {
+  if (FS_DISABLED_IN_PROD) return {};
   try {
-    const data = await fs.readFile(BALANCES_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(BALANCES_FILE, 'utf-8');
     const parsed = JSON.parse(data);
     return (parsed && typeof parsed === 'object') ? (parsed as ProviderEarningsBalances) : {};
-  } catch (error: any) {
-    if (error.code === 'ENOENT') return {};
-    throw error;
+  } catch {
+    return {};
   }
 }
 
 async function writeBalances(balances: ProviderEarningsBalances): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dataDir = path.dirname(BALANCES_FILE);
   try {
-    await fs.mkdir(dataDir, { recursive: true });
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dataDir, { recursive: true });
   } catch (error: any) {
-    if (error.code !== 'EEXIST') throw error;
+    return;
   }
-  await fs.writeFile(BALANCES_FILE, JSON.stringify(balances, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(BALANCES_FILE, JSON.stringify(balances, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 /**
  * Write credits to JSON file
  */
 async function writeCredits(credits: Credit[]): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   // Ensure data directory exists
   const dataDir = path.dirname(CREDITS_FILE);
   try {
-    await fs.mkdir(dataDir, { recursive: true });
-  } catch (error: any) {
-    // Directory might already exist, ignore error
-    if (error.code !== 'EEXIST') {
-      throw error;
-    }
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dataDir, { recursive: true });
+  } catch {
+    return;
   }
   
-  await fs.writeFile(CREDITS_FILE, JSON.stringify(credits, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(CREDITS_FILE, JSON.stringify(credits, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 /**

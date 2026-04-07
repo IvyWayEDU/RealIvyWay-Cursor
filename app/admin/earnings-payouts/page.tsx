@@ -2,7 +2,6 @@ import { getUsers } from '@/lib/auth/storage';
 import { getSessions } from '@/lib/sessions/storage';
 import { readCredits } from '@/lib/earnings/credits.server';
 import AdminEarningsClient from '@/components/admin/AdminEarningsClient';
-import { readFile } from 'fs/promises';
 import path from 'path';
 import { listPendingPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { getProviders } from '@/lib/providers/storage';
@@ -61,9 +60,11 @@ function isBankAccountRow(value: unknown): value is BankAccountRow {
 }
 
 async function readBankAccounts(): Promise<BankAccountRow[]> {
+  if (process.env.NODE_ENV === 'production') return [];
   try {
     const p = path.join(process.cwd(), 'data', 'bank-accounts.json');
-    const raw = await readFile(p, 'utf-8');
+    const fsp = await import('fs/promises');
+    const raw = await fsp.readFile(p, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(isBankAccountRow);
@@ -73,9 +74,11 @@ async function readBankAccounts(): Promise<BankAccountRow[]> {
 }
 
 async function readProviderEarningsBalances(): Promise<Balances> {
+  if (process.env.NODE_ENV === 'production') return {};
   try {
     const p = path.join(process.cwd(), 'data', 'provider-earnings.json');
-    const raw = await readFile(p, 'utf-8');
+    const fsp = await import('fs/promises');
+    const raw = await fsp.readFile(p, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return {};
     const out: Balances = {};

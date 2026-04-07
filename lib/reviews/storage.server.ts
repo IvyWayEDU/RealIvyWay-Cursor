@@ -1,33 +1,34 @@
 'use server';
 
 import { SessionReview } from '@/lib/reviewStore';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const REVIEWS_FILE = path.join(DATA_DIR, 'reviews.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 // Ensure data directory exists
 async function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+  } catch {
+    return;
   }
 }
 
 // Read reviews from file
 export async function getReviews(): Promise<SessionReview[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   await ensureDataDir();
-  
-  if (!existsSync(REVIEWS_FILE)) {
-    return [];
-  }
-  
+
   try {
-    const data = await readFile(REVIEWS_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(REVIEWS_FILE, 'utf-8');
     return JSON.parse(data);
   } catch (error) {
-    console.error('Error reading reviews file:', error);
     return [];
   }
 }

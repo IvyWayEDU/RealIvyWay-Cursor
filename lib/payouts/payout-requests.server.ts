@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 
 // "pending" is the canonical initial status.
@@ -77,28 +76,30 @@ export interface PayoutRequest {
 
 const PAYOUT_REQUESTS_FILE = path.join(process.cwd(), 'data', 'payout-requests.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 async function readAll(): Promise<PayoutRequest[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   try {
-    const raw = await fs.readFile(PAYOUT_REQUESTS_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const raw = await fsp.readFile(PAYOUT_REQUESTS_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as PayoutRequest[]) : [];
-  } catch (error: unknown) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: unknown }).code === 'ENOENT'
-    ) {
-      return [];
-    }
-    throw error;
+  } catch {
+    return [];
   }
 }
 
 async function writeAll(requests: PayoutRequest[]): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dataDir = path.dirname(PAYOUT_REQUESTS_FILE);
-  await fs.mkdir(dataDir, { recursive: true });
-  await fs.writeFile(PAYOUT_REQUESTS_FILE, JSON.stringify(requests, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dataDir, { recursive: true });
+    await fsp.writeFile(PAYOUT_REQUESTS_FILE, JSON.stringify(requests, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 function newId(): string {

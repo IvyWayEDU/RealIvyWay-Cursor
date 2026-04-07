@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
-import fs from 'fs/promises';
 import crypto from 'crypto';
 
 import { requireAuth } from '@/lib/auth/requireAuth';
@@ -8,6 +7,8 @@ import { getDisplayRole } from '@/lib/auth/utils';
 import { addSupportMessage, createSupportTicket } from '@/lib/support/ticketingStorage';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
 
 function safeExtFromName(name: string): string {
   const base = (name || '').trim();
@@ -20,9 +21,15 @@ function safeExtFromName(name: string): string {
   return ext;
 }
 
-async function saveUpload(file: File): Promise<string> {
+async function saveUpload(file: File): Promise<string | null> {
+  if (FS_DISABLED_IN_PROD) return null;
   const uploadsDir = path.join(process.cwd(), 'public', 'support-uploads');
-  await fs.mkdir(uploadsDir, { recursive: true });
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(uploadsDir, { recursive: true });
+  } catch {
+    return null;
+  }
 
   const ext = safeExtFromName(file.name);
   const id = typeof crypto.randomUUID === 'function'
@@ -31,7 +38,12 @@ async function saveUpload(file: File): Promise<string> {
   const filename = ext ? `ticket_${id}.${ext}` : `ticket_${id}`;
 
   const bytes = Buffer.from(await file.arrayBuffer());
-  await fs.writeFile(path.join(uploadsDir, filename), bytes);
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(path.join(uploadsDir, filename), bytes);
+  } catch {
+    return null;
+  }
 
   // Public URL
   return `/support-uploads/${filename}`;

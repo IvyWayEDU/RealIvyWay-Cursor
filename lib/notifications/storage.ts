@@ -7,10 +7,11 @@
  * Notifications are dismissible and won't reappear after dismissal.
  */
 
-import fs from 'fs/promises';
 import path from 'path';
 
 const STORAGE_FILE = path.join(process.cwd(), 'data', 'notifications.json');
+
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
 
 export interface Notification {
   id: string;
@@ -26,9 +27,11 @@ export interface Notification {
  * Ensure the data directory exists
  */
 async function ensureDataDirectory(): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dataDir = path.dirname(STORAGE_FILE);
   try {
-    await fs.mkdir(dataDir, { recursive: true });
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dataDir, { recursive: true });
   } catch (error) {
     // Directory might already exist, ignore error
   }
@@ -38,16 +41,14 @@ async function ensureDataDirectory(): Promise<void> {
  * Read all notifications from storage
  */
 async function getNotifications(): Promise<Notification[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   try {
     await ensureDataDirectory();
-    const data = await fs.readFile(STORAGE_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(STORAGE_FILE, 'utf-8');
     return JSON.parse(data);
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      // File doesn't exist, return empty array
-      return [];
-    }
-    throw error;
+  } catch {
+    return [];
   }
 }
 
@@ -55,8 +56,14 @@ async function getNotifications(): Promise<Notification[]> {
  * Save notifications to storage
  */
 async function saveNotifications(notifications: Notification[]): Promise<void> {
-  await ensureDataDirectory();
-  await fs.writeFile(STORAGE_FILE, JSON.stringify(notifications, null, 2), 'utf-8');
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    await ensureDataDirectory();
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(STORAGE_FILE, JSON.stringify(notifications, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 /**

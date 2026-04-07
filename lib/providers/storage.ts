@@ -1,12 +1,12 @@
 'use server';
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 import { ProviderProfile } from '@/lib/models/types';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PROVIDERS_FILE = path.join(DATA_DIR, 'providers.json');
+
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
 
 export type ProviderPayoutDetails = Pick<
   ProviderProfile,
@@ -23,21 +23,23 @@ export type ProviderPayoutDetails = Pick<
 
 // Ensure data directory exists
 async function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+  } catch {
+    return;
   }
 }
 
 // Read all providers from file
 export async function getProviders(): Promise<ProviderProfile[]> {
+  if (FS_DISABLED_IN_PROD) return [];
   await ensureDataDir();
-  
-  if (!existsSync(PROVIDERS_FILE)) {
-    return [];
-  }
-  
+
   try {
-    const data = await readFile(PROVIDERS_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(PROVIDERS_FILE, 'utf-8');
     const parsed = JSON.parse(data);
     
     // Handle both array and object formats
@@ -48,15 +50,20 @@ export async function getProviders(): Promise<ProviderProfile[]> {
     // If object format, convert to array
     return Object.values(parsed);
   } catch (error) {
-    console.error('Error reading providers file:', error);
     return [];
   }
 }
 
 // Write providers to file
 export async function saveProviders(providers: ProviderProfile[]): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   await ensureDataDir();
-  await writeFile(PROVIDERS_FILE, JSON.stringify(providers, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(PROVIDERS_FILE, JSON.stringify(providers, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 // Get provider by ID

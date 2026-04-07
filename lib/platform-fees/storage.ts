@@ -1,17 +1,21 @@
 'use server';
 
 import { PlatformFee, PlatformFeesConfig, PlatformFeeServiceType, PlatformFeePlanType } from './types';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import path from 'path';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const PLATFORM_FEES_FILE = path.join(DATA_DIR, 'platform-fees.json');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 // Ensure data directory exists
 async function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
+  if (FS_DISABLED_IN_PROD) return;
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+  } catch {
+    return;
   }
 }
 
@@ -99,21 +103,18 @@ function getDefaultPlatformFees(): PlatformFee[] {
  * Read platform fees from file
  */
 export async function getPlatformFeesConfig(): Promise<PlatformFeesConfig> {
-  await ensureDataDir();
-  
-  if (!existsSync(PLATFORM_FEES_FILE)) {
-    // Initialize with defaults if file doesn't exist
+  if (FS_DISABLED_IN_PROD) {
     const defaultFees = getDefaultPlatformFees();
-    const config: PlatformFeesConfig = {
+    return {
       fees: defaultFees,
       lastUpdatedAt: new Date().toISOString(),
     };
-    await savePlatformFeesConfig(config);
-    return config;
   }
-  
+  await ensureDataDir();
+
   try {
-    const data = await readFile(PLATFORM_FEES_FILE, 'utf-8');
+    const fsp = await import('fs/promises');
+    const data = await fsp.readFile(PLATFORM_FEES_FILE, 'utf-8');
     const config = JSON.parse(data) as PlatformFeesConfig;
     
     // Ensure all default fees exist (migration for new fee types)
@@ -128,7 +129,6 @@ export async function getPlatformFeesConfig(): Promise<PlatformFeesConfig> {
     
     return config;
   } catch (error) {
-    console.error('Error reading platform fees file:', error);
     // Return defaults on error
     const defaultFees = getDefaultPlatformFees();
     return {
@@ -142,8 +142,14 @@ export async function getPlatformFeesConfig(): Promise<PlatformFeesConfig> {
  * Save platform fees to file
  */
 export async function savePlatformFeesConfig(config: PlatformFeesConfig): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   await ensureDataDir();
-  await writeFile(PLATFORM_FEES_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.writeFile(PLATFORM_FEES_FILE, JSON.stringify(config, null, 2), 'utf-8');
+  } catch {
+    return;
+  }
 }
 
 /**

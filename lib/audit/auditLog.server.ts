@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
@@ -30,6 +29,8 @@ export type AuditLogRow = {
 
 const AUDIT_FILE = path.join(process.cwd(), 'data', 'audit-logs.jsonl');
 
+const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+
 function newId(): string {
   const uuid = typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -46,8 +47,14 @@ function toIsoOrNow(v: unknown): string {
 }
 
 async function ensureDir(): Promise<void> {
+  if (FS_DISABLED_IN_PROD) return;
   const dir = path.dirname(AUDIT_FILE);
-  await fs.mkdir(dir, { recursive: true });
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.mkdir(dir, { recursive: true });
+  } catch {
+    return;
+  }
 }
 
 export async function logAuditEvent(input: {
@@ -76,8 +83,14 @@ export async function logAuditEvent(input: {
     return row;
   }
 
+  if (FS_DISABLED_IN_PROD) return row;
   await ensureDir();
-  await fs.appendFile(AUDIT_FILE, `${JSON.stringify(row)}\n`, 'utf-8');
+  try {
+    const fsp = await import('fs/promises');
+    await fsp.appendFile(AUDIT_FILE, `${JSON.stringify(row)}\n`, 'utf-8');
+  } catch {
+    return row;
+  }
   return row;
 }
 
@@ -104,6 +117,7 @@ export async function listAuditLogs(args: {
   limit?: number;
   offset?: number;
 }): Promise<{ logs: AuditLogRow[]; totalScanned: number }> {
+  if (FS_DISABLED_IN_PROD) return { logs: [], totalScanned: 0 };
   const limit = Math.max(1, Math.min(1000, Math.floor(Number(args.limit ?? 200))));
   const offset = Math.max(0, Math.floor(Number(args.offset ?? 0)));
   const action = typeof args.action === 'string' && args.action.trim() ? args.action.trim() : null;
@@ -117,10 +131,10 @@ export async function listAuditLogs(args: {
 
   let raw = '';
   try {
-    raw = await fs.readFile(AUDIT_FILE, 'utf-8');
-  } catch (e: any) {
-    if (e?.code === 'ENOENT') return { logs: [], totalScanned: 0 };
-    throw e;
+    const fsp = await import('fs/promises');
+    raw = await fsp.readFile(AUDIT_FILE, 'utf-8');
+  } catch {
+    return { logs: [], totalScanned: 0 };
   }
 
   const lines = raw.split('\n').filter((l) => l.trim().length > 0);
