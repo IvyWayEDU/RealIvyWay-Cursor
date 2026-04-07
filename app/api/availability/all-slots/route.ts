@@ -10,7 +10,7 @@ import {
   bindDateKeyAndMinutesToUtcDate,
   timeStringFromMinutes
 } from '@/lib/availability/engine';
-import { getSessions } from '@/lib/sessions/storage';
+import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { getUsers } from '@/lib/auth/storage';
 import { UserRole } from '@/lib/auth/types';
 import { normalizeSubjectToCanonical, subjectsMatch, normalizeSubjectId } from '@/lib/models/subjects';
@@ -301,102 +301,42 @@ function doesProviderTeachSubject(provider: any, requestedSubject: string | null
 }
 
 /**
- * Comprehensive eligibility check for providers with strict precedence
- * 
- * Rules (STRICT PRECEDENCE):
- * - If isTutor is explicitly boolean false, provider is NOT eligible for tutoring/test_prep (even if roles includes tutor)
- * - If isCounselor is explicitly boolean false, provider is NOT eligible for counseling/virtual_tour (even if roles includes counselor)
- * - Only if isTutor and isCounselor are undefined should we fall back to roles array
- * - Missing or undefined signals = NOT eligible (defensive)
- * 
- * VIRTUAL TOURS AND COLLEGE COUNSELING:
- * - Both use the EXACT SAME eligibility logic: isCounselor === true OR roles.includes('counselor')
- * - School matching is enforced separately in the filtering logic
+ * Provider service eligibility.
+ *
+ * Providers are eligible based on their `services` array (canonical service keys).
+ * Legacy role/flag fields like `isTutor` / `isCounselor` are intentionally NOT used.
  */
 function isProviderEligibleForService(
   provider: any,
   serviceType: string
 ): boolean {
   const normalized = normalizeServiceType(serviceType);
-  
-  // Determine what type of service is requested
-  const tutorRequested = normalized === 'tutoring' || normalized === 'test_prep';
-  const counselorRequested = normalized === 'college_counseling' || normalized === 'virtual_tour';
-  
-  // Check if explicit boolean flags exist
-  const hasTutorFlag = typeof provider.isTutor === 'boolean';
-  const hasCounselorFlag = typeof provider.isCounselor === 'boolean';
-  
-  // Handle tutor services (tutoring, test_prep)
-  // Eligibility is determined by enabled services, not just role flags
-  if (tutorRequested) {
-    // Get services array (check both provider and profile)
-    const services = provider.services || provider.profile?.services || [];
-    
-    // Service-based eligibility check
-    // Provider is eligible if services array includes the requested service
-    // For test_prep, also allow if services includes "tutoring"
-    const isServiceEnabled = Array.isArray(services) && (
-      services.includes(normalized) ||
-      (normalized === 'test_prep' && services.includes('tutoring'))
-    );
-    
-    if (isServiceEnabled) {
-      return true;
+
+  const normalizeServiceEntry = (value: unknown): string | null => {
+    const raw = typeof value === 'string' ? value : String(value ?? '');
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      return normalizeServiceType(trimmed);
+    } catch {
+      return null;
     }
-    
-    // Fallback: if services array doesn't exist or is empty, check role flags
-    // This maintains backward compatibility and ensures we don't loosen eligibility
-    // for users without tutoring enabled
-    if (!Array.isArray(services) || services.length === 0) {
-      if (hasTutorFlag) {
-        // Explicit flag exists - use it as fallback
-        return provider.isTutor === true;
-      } else {
-        // No explicit flag - fall back to roles array
-        const roles = provider.roles || provider.profile?.roles || [];
-        const serviceTypes = provider.serviceTypes || provider.profile?.serviceTypes || [];
-        
-        // Check for explicit tutor signal in roles or serviceTypes
-        const hasTutorRole = Array.isArray(roles) && roles.includes('tutor');
-        const hasTutorServiceType = Array.isArray(serviceTypes) && (
-          serviceTypes.includes('tutoring') ||
-          serviceTypes.includes('test_prep') ||
-          serviceTypes.includes('tutor')
-        );
-        
-        return hasTutorRole || hasTutorServiceType;
-      }
-    }
-    
-    // Services array exists but doesn't include the requested service
-    return false;
-  }
-  
-  // Handle counselor services (college_counseling, virtual_tour)
-  // Both use the EXACT SAME eligibility logic
-  if (counselorRequested) {
-    // Shared counselor eligibility logic for both college_counseling and virtual_tour
-    const isCounselorEligible = hasCounselorFlag
-      ? provider.isCounselor === true
-      : (Array.isArray(provider.roles) && provider.roles.includes('counselor')) ||
-        (Array.isArray(provider.profile?.roles) && provider.profile.roles.includes('counselor'));
-    
-    // Add debug log for virtual tours
-    if (normalized === 'virtual_tour') {
-      console.log('[VIRTUAL_TOUR_ELIGIBILITY]', {
-        providerId: provider.id,
-        roles: provider.roles,
-        isCounselor: provider.isCounselor,
-        schoolId: provider.schoolId,
-        eligible: isCounselorEligible
-      });
-    }
-    
-    return isCounselorEligible;
-  }
-  
-  // Unknown service type = NOT eligible
+  };
+
+  // Provider services can live on provider or provider.profile
+  const servicesRaw = provider?.services ?? provider?.profile?.services ?? [];
+  const services = Array.isArray(servicesRaw)
+    ? (servicesRaw.map(normalizeServiceEntry).filter((s): s is string => !!s) as Array<string>)
+    : [];
+
+  // Booking services eligibility rules
+  if (normalized === 'college_counseling') return services.includes('college_counseling');
+  if (normalized === 'tutoring') return services.includes('tutoring');
+  if (normalized === 'test_prep') return services.includes('test_prep');
+
+  // Virtual tours currently also support an explicit boolean flag.
+  if (normalized === 'virtual_tour') return provider?.offersVirtualTours === true || services.includes('virtual_tour');
+
   return false;
 }
 
@@ -582,9 +522,6 @@ export async function GET(req: NextRequest) {
         .map((s) => `${s.providerId}|${s.startTime}|${s.endTime}`)
     );
     
-    // Get all sessions to filter out booked slots
-    const allSessions = await getSessions();
-    
     // Get all users to check provider roles and filter
     const allUsers = await getUsers();
     const userMap = new Map(allUsers.map(u => [u.id, u]));
@@ -608,22 +545,13 @@ export async function GET(req: NextRequest) {
         if (!user) continue;
         
         // Check eligibility and prepare debug info
-        const hasTutorFlag = typeof (user as any).isTutor === 'boolean';
-        const hasCounselorFlag = typeof (user as any).isCounselor === 'boolean';
         const eligible = isProviderEligibleForService(user, normalizedServiceType);
         
         // [ELIGIBILITY_DEBUG] Log eligibility check for each provider
         console.log('[ELIGIBILITY_DEBUG]', {
           providerId: user.id,
           requestedService: normalizedServiceType,
-          isTutor: (user as any).isTutor,
-          isCounselor: (user as any).isCounselor,
-          roles: user.roles,
           services: (user as any).services || (user as any).profile?.services,
-          usedFlags: {
-            hasTutorFlag,
-            hasCounselorFlag
-          },
           eligible
         });
         
@@ -631,10 +559,9 @@ export async function GET(req: NextRequest) {
           continue; // Skip providers not eligible for the service
         }
         
-        // For tutoring (and test_prep, now normalized to tutoring): apply STRICT subject-based filtering
+        // For tutoring/test_prep: apply STRICT subject-based filtering
         // This ensures providers only appear for subjects they actually teach
-        // Test Prep is a SUBJECT, not a service - use SAME subject-matching path as Math or English
-        if (normalizedServiceType === 'tutoring') {
+        if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
           // Subject is REQUIRED for tutoring/test_prep - validation should catch this, but double-check
           if (!subjectParam) {
             continue; // Skip if subject is missing (should not happen due to validation)
@@ -839,8 +766,6 @@ export async function GET(req: NextRequest) {
       startTimeISO: string;
       displayTime: string;
       startMinutes: number;
-      isTutor: boolean;
-      isCounselor: boolean;
     }> = [];
 
     // Debug: ensure time-only availability is bound to requested date before any comparisons/slot generation.
@@ -907,6 +832,48 @@ export async function GET(req: NextRequest) {
       countsByServiceType: countsByServiceType,
       exampleRow: exampleRow,
     });
+
+    // Fetch booked sessions from Supabase `sessions` table (canonical fields).
+    // We query a small window around the requested day to catch overlaps at boundaries.
+    const providerIdsForSessionQuery = Array.from(
+      new Set(
+        availabilityRows
+          .map((e) => (typeof (e as any)?.providerId === 'string' ? String((e as any).providerId).trim() : ''))
+          .filter(Boolean)
+      )
+    );
+
+    const requestedDayStartUTC = bindDateKeyAndMinutesToUtcDate(dateKey, 0, 'America/New_York');
+    const requestedDayEndUTC = new Date(requestedDayStartUTC.getTime() + 24 * 60 * 60 * 1000);
+    const sessionQueryStartISO = new Date(requestedDayStartUTC.getTime() - 60 * 60 * 1000).toISOString();
+    const sessionQueryEndISO = new Date(requestedDayEndUTC.getTime() + 60 * 60 * 1000).toISOString();
+
+    const bookedWindows = await getBookedSessionWindowsForProviders({
+      providerIds: providerIdsForSessionQuery,
+      rangeStartISO: sessionQueryStartISO,
+      rangeEndISO: sessionQueryEndISO,
+      defaultDurationMinutesWhenMissingEnd: 60,
+    });
+
+    const bookedWindowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
+    for (const w of bookedWindows) {
+      const arr = bookedWindowsByProvider.get(w.providerId) || [];
+      arr.push({ sessionStartMs: w.sessionStartMs, sessionEndMs: w.sessionEndMs });
+      bookedWindowsByProvider.set(w.providerId, arr);
+    }
+
+    const slotOverlapsBookedSession = (providerId: string, slotStartISO: string, durationMinutes: number): boolean => {
+      const slotStartMs = new Date(slotStartISO).getTime();
+      if (!Number.isFinite(slotStartMs)) return false;
+      const slotEndMs = slotStartMs + Math.max(1, durationMinutes) * 60 * 1000;
+      const windows = bookedWindowsByProvider.get(providerId) || [];
+      for (const s of windows) {
+        // Exclude slot if:
+        // (slot_start < session_end) AND (slot_end > session_start)
+        if (slotStartMs < s.sessionEndMs && slotEndMs > s.sessionStartMs) return true;
+      }
+      return false;
+    };
     
     // Safety check: if requestedService is tutoring (or was test_prep) and rows are still zero
     if (normalizedServiceType === 'tutoring' && availabilityRowCount === 0) {
@@ -1016,18 +983,7 @@ export async function GET(req: NextRequest) {
           const endTimeISO = new Date(new Date(startTimeISO).getTime() + durationMinutes * 60 * 1000).toISOString();
           const reservationKey = `${providerId}|${startTimeISO}|${endTimeISO}`;
           if (reservedSet.has(reservationKey)) return false;
-
-          const isBooked = allSessions.some(session => {
-            if (session.status !== 'upcoming' && session.status !== 'paid' && session.status !== 'scheduled') {
-              return false;
-            }
-            const sessionStart = new Date(session.scheduledStartTime);
-            const sessionEnd = new Date(session.scheduledEndTime);
-            const slotStart = new Date(startTimeISO);
-            const slotEnd = new Date(endTimeISO);
-            return sessionStart < slotEnd && sessionEnd > slotStart && session.providerId === providerId;
-          });
-          return !isBooked;
+          return !slotOverlapsBookedSession(providerId, startTimeISO, durationMinutes);
         });
 
         if (hasAtLeastOneAvailableSlot) {
@@ -1183,32 +1139,12 @@ export async function GET(req: NextRequest) {
       for (const startTimeISO of slotISOs) {
           // Check if this slot is already booked
           const endTimeISO = new Date(new Date(startTimeISO).getTime() + durationMinutes * 60 * 1000).toISOString();
-          
-          const isBooked = allSessions.some(session => {
-            // Only check active bookings
-            if (session.status !== 'upcoming' && session.status !== 'paid' && session.status !== 'scheduled') {
-              return false;
-            }
-            
-            // Check if session overlaps with this slot
-            const sessionStart = new Date(session.scheduledStartTime);
-            const sessionEnd = new Date(session.scheduledEndTime);
-            const slotStart = new Date(startTimeISO);
-            const slotEnd = new Date(endTimeISO);
-            
-            // Overlap check: sessionStart < slotEnd AND sessionEnd > slotStart
-            return sessionStart < slotEnd && sessionEnd > slotStart && session.providerId === providerId;
-          });
-          
+
+          const isBooked = slotOverlapsBookedSession(providerId, startTimeISO, durationMinutes);
           const reservationKey = `${providerId}|${startTimeISO}|${endTimeISO}`;
           const isReserved = reservedSet.has(reservationKey);
 
           if (!isBooked && !isReserved) {
-            // Get provider role info
-            const user = userMap.get(providerId);
-            const isTutor = user ? (user.isTutor ?? user.roles.includes('tutor')) : false;
-            const isCounselor = user ? (user.isCounselor ?? user.roles.includes('counselor')) : false;
-            
             // Convert ISO to display time for compatibility (in America/New_York timezone)
             const slotDate = new Date(startTimeISO);
             const formatter = new Intl.DateTimeFormat('en-US', {
@@ -1227,8 +1163,6 @@ export async function GET(req: NextRequest) {
               startTimeISO,
               displayTime: timeStringFromMinutes(startMinutes),
               startMinutes,
-              isTutor,
-              isCounselor,
             });
           }
         }

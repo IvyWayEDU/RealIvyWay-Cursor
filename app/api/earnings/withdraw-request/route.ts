@@ -5,7 +5,6 @@ import { withdrawalRequestSchema } from '@/lib/validation/schemas';
 import { getProviderByUserId } from '@/lib/providers/storage';
 import { createPayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { getSessionsByProviderId } from '@/lib/sessions/storage';
-import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { getProviderPayoutRequestTotals } from '@/lib/payouts/payout-requests.server';
 import Stripe from 'stripe';
 import type { ProviderProfile, Session } from '@/lib/models/types';
@@ -49,7 +48,14 @@ export async function POST(request: NextRequest) {
 
     const validationResult = await validateRequestBody(request, withdrawalRequestSchema);
     if (!validationResult.success) return validationResult.response;
-    const { amountCents } = validationResult.data;
+    const requestedAmount = validationResult.data.requestedAmount ?? validationResult.data.amount;
+    const requestedCents =
+      typeof requestedAmount === 'number' && Number.isFinite(requestedAmount)
+        ? Math.round(requestedAmount * 100)
+        : Math.round(Number(validationResult.data.amountCents || 0));
+    if (requestedCents <= 0) {
+      return Response.json({ success: false, error: 'Invalid amount' }, { status: 400 });
+    }
 
     const providerId = session.userId;
 
@@ -98,22 +104,27 @@ export async function POST(request: NextRequest) {
 
     // Always calculate the available balance fresh from the database (no Stripe balance API, no stored field).
     const sessions = (await getSessionsByProviderId(providerId)) as unknown as Session[];
-    const completedLike = new Set<string>(['completed', 'completed_provider_show', 'completed_no_show_student']);
     const totalEarningsCents = sessions
-      .filter((s) => completedLike.has(String(s?.status || '')) && String(s?.providerId || '') === providerId)
-      .reduce((sum: number, s) => sum + calculateProviderPayoutCentsFromSession(s), 0);
+      .filter(
+        (s: any) =>
+          String(s?.status || '') === 'completed' &&
+          String(s?.providerId || '') === providerId &&
+          (s?.providerEligibleForPayout === true || s?.provider_eligible_for_payout === true)
+      )
+      .reduce((sum: number, session: any) => {
+        const earningsCents = session?.providerPayoutCents || session?.provider_payout_cents || 0;
+        return sum + Math.max(0, Math.floor(Number(earningsCents || 0)));
+      }, 0);
     const totals = await getProviderPayoutRequestTotals(providerId);
     const totalWithdrawnCents = totals.withdrawnCents;
     const pendingPayoutsCents = totals.pendingCents;
     const availableBalanceCents = Math.max(0, totalEarningsCents - totalWithdrawnCents - pendingPayoutsCents);
-    if (amountCents > availableBalanceCents) {
+    const availableCents = Math.max(0, Math.floor(availableBalanceCents));
+    if (requestedCents > availableCents) {
       return Response.json(
         {
           success: false,
-          error: `Invalid amount. Amount cannot exceed available balance of $${(availableBalanceCents / 100).toFixed(
-            2
-          )}.`,
-          availableBalanceCents,
+          error: 'Insufficient balance',
         },
         { status: 400 }
       );
@@ -121,7 +132,7 @@ export async function POST(request: NextRequest) {
 
     const payoutRequest = await createPayoutRequest({
       providerId,
-      amountCents,
+      amountCents: requestedCents,
       payoutMethod: 'Stripe',
       payoutDestinationMasked: maskStripeAccountDestination(stripeConnectAccountId),
       // legacy

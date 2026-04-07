@@ -4,40 +4,126 @@ import { Session, SessionStatus, CancellationReason } from '@/lib/models/types';
 import { getSessionEndTimeMs, isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { resolveSessionStatusByTime } from '@/lib/sessions/status-resolver';
 import { getEarningsServiceLabel } from '@/lib/earnings/serviceLabel';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
-import path from 'path';
-import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
-
-// Ensure data directory exists
-function ensureDataDir() {
-  if (isFilePersistenceDisabled()) return;
-  if (!existsSync(DATA_DIR)) {
-    mkdirSync(DATA_DIR, { recursive: true });
-  }
+function toIsoStringOrNull(v: unknown): string | null {
+  if (v == null) return null;
+  // Accept strings, numbers (timestamps), and Date-like objects.
+  const d = v instanceof Date ? v : new Date(v as any);
+  const t = d.getTime();
+  if (!Number.isFinite(t)) return null;
+  return d.toISOString();
 }
 
-// Read sessions from file
+type SessionDbRow = {
+  id: string | null;
+  datetime: string | null;
+  end_datetime: string | null;
+  status: string | null;
+  provider_joined_at: string | null;
+  student_joined_at: string | null;
+  data: any;
+};
+
+function mergeDbRowIntoSession(row: SessionDbRow): Session | null {
+  const base: any = row?.data && typeof row.data === 'object' ? row.data : {};
+  const s: any = { ...base };
+
+  const rowId = typeof row?.id === 'string' ? row.id.trim() : '';
+  if (!rowId) return null;
+  // IMPORTANT: The DB row id is canonical. Never allow `data.id` to override it,
+  // otherwise reads/normalization can "upsert" under a different id and create duplicates.
+  s.id = rowId;
+
+  // Canonical start/end come from DB columns: datetime/end_datetime (per product spec).
+  // Fallbacks: legacy JSON fields when DB columns are missing.
+  // End defaults to start + 60 minutes when end_datetime is missing.
+  const startIso =
+    toIsoStringOrNull(row?.datetime) ||
+    toIsoStringOrNull(s.startTime) ||
+    toIsoStringOrNull(s.scheduledStartTime) ||
+    toIsoStringOrNull(s.scheduledStart);
+
+  if (startIso) {
+    s.startTime = startIso;
+    s.scheduledStartTime = toIsoStringOrNull(s.scheduledStartTime) || startIso;
+    s.scheduledStart = toIsoStringOrNull(s.scheduledStart) || s.scheduledStartTime || startIso;
+  }
+
+  const endIsoFromRow = toIsoStringOrNull(row?.end_datetime);
+  const endIsoDefault =
+    startIso ? new Date(new Date(startIso).getTime() + 60 * 60 * 1000).toISOString() : null;
+  const endIsoFromData =
+    toIsoStringOrNull(s.endTime) || toIsoStringOrNull(s.scheduledEndTime) || toIsoStringOrNull(s.scheduledEnd);
+  const endIso = endIsoFromRow || endIsoDefault || endIsoFromData;
+
+  if (endIso) {
+    s.endTime = endIso;
+    s.scheduledEndTime = toIsoStringOrNull(s.scheduledEndTime) || endIso;
+    s.scheduledEnd = toIsoStringOrNull(s.scheduledEnd) || s.scheduledEndTime || endIso;
+  }
+
+  // Expose canonical DB columns to the frontend (source-of-truth fields).
+  // CRITICAL: callers rely on `session.datetime` and `session.end_datetime` (snake_case)
+  // for join gating and other UI logic.
+  if (startIso) {
+    s.datetime = startIso;
+  }
+  if (endIsoFromRow) {
+    s.end_datetime = endIsoFromRow;
+  } else if (endIso) {
+    // When DB end is missing, still provide a best-effort end_datetime for UI logic.
+    s.end_datetime = endIso;
+  }
+
+  // Prefer DB column status when present (authoritative for querying).
+  if (typeof row?.status === 'string' && row.status.trim()) {
+    s.status = row.status.trim();
+  }
+
+  // Mirror join evidence columns into JSON if missing/invalid there.
+  const providerJoinedAtData = toIsoStringOrNull(s.providerJoinedAt);
+  const studentJoinedAtData = toIsoStringOrNull(s.studentJoinedAt);
+  const providerJoinedAtRow = toIsoStringOrNull(row?.provider_joined_at);
+  const studentJoinedAtRow = toIsoStringOrNull(row?.student_joined_at);
+  if (!providerJoinedAtData && providerJoinedAtRow) s.providerJoinedAt = providerJoinedAtRow;
+  if (!studentJoinedAtData && studentJoinedAtRow) s.studentJoinedAt = studentJoinedAtRow;
+
+  // Also expose the join columns directly (snake_case) for UI consumers.
+  s.provider_joined_at = providerJoinedAtRow || providerJoinedAtData || null;
+  s.student_joined_at = studentJoinedAtRow || studentJoinedAtData || null;
+
+  return s as Session;
+}
+
+// Read sessions from Supabase (DB columns + JSON payload).
 async function readSessionsRaw(): Promise<Session[]> {
-  if (isFilePersistenceDisabled()) {
-    warnFilePersistenceDisabled('sessions.read', { file: SESSIONS_FILE });
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
+    .order('datetime', { ascending: true });
+  if (error) {
+    console.error('[sessions.storage] Error reading sessions from Supabase:', error);
     return [];
   }
-  ensureDataDir();
-  
-  if (!existsSync(SESSIONS_FILE)) {
-    return [];
-  }
-  
-  try {
-    const data = readFileSync(SESSIONS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error reading sessions file:', error);
-    return [];
-  }
+  return (data ?? [])
+    .map((row: any) => mergeDbRowIntoSession(row as SessionDbRow))
+    .filter(Boolean) as Session[];
+}
+
+async function readSessionByIdRaw(id: string): Promise<Session | null> {
+  const sid = String(id || '').trim();
+  if (!sid) return null;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('sessions')
+    .select('id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
+    .eq('id', sid)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return mergeDbRowIntoSession(data as any);
 }
 
 type NormalizedSessionFields = {
@@ -56,15 +142,6 @@ function isNonEmptyString(v: unknown): v is string {
 
 function isIsoDateYYYYMMDD(v: unknown): v is string {
   return isNonEmptyString(v) && /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
-function toIsoStringOrNull(v: unknown): string | null {
-  if (v == null) return null;
-  // Accept strings, numbers (timestamps), and Date-like objects.
-  const d = v instanceof Date ? v : new Date(v as any);
-  const t = d.getTime();
-  if (!Number.isFinite(t)) return null;
-  return d.toISOString();
 }
 
 function isoDateFromIso(iso: string): string | null {
@@ -151,7 +228,7 @@ function looksLikeLegacyOrTestProviderRef(session: any): boolean {
   const providerId = isNonEmptyString(session?.providerId) ? String(session.providerId) : '';
   if (!providerId) return true;
 
-  // Obvious legacy/test id patterns seen in `data/sessions.json`
+  // Obvious legacy/test id patterns seen in older seed data
   if (providerId.startsWith('provider-')) return true;
   if (/^\d+$/.test(providerId)) return true;
   if (providerId.toLowerCase() === 'pending') return true;
@@ -261,16 +338,20 @@ function requireStrictPaidSessionFields(session: any, nowMs: number): boolean {
     }
     // Canonicalize legacy variants to the supported lifecycle model (best-effort, non-destructive).
     // We keep auxiliary metadata fields (e.g., refund amounts) intact; only the status label is normalized.
-    if (
-      normalized === 'provider_no_show' ||
-      normalized === 'no_show_provider' ||
-      normalized === 'no_show_student' ||
-      normalized === 'no_show_both' ||
-      normalized === 'student_no_show' ||
-      normalized === 'no-show' ||
-      normalized === 'expired_provider_no_show' ||
-      normalized === 'expired'
-    ) {
+    if (normalized === 'no_show_provider' || normalized === 'expired_provider_no_show') {
+      session.status = 'provider_no_show';
+    }
+    if (normalized === 'no_show_student') {
+      session.status = 'student_no_show';
+    }
+    if (normalized === 'no_show_both') {
+      session.status = 'provider_no_show';
+      session.noShowParty = 'both';
+    }
+    if (normalized === 'no-show') {
+      session.status = 'provider_no_show';
+    }
+    if (normalized === 'expired') {
       session.status = 'confirmed';
     }
     if (normalized === 'cancelled-late') {
@@ -321,6 +402,8 @@ function requireStrictPaidSessionFields(session: any, nowMs: number): boolean {
     'confirmed',
     'completed',
     'cancelled',
+    'provider_no_show',
+    'student_no_show',
   ]);
   if (!allowedStatuses.has(session.status as SessionStatus)) return false;
 
@@ -455,11 +538,8 @@ function normalizeSessionShape(session: any, userNameById: Map<string, string>, 
   }
   // IMPORTANT:
   // Do NOT default payout-eligibility fields to false when missing.
-  // Many legacy/real sessions omit these fields entirely, and our earnings code treats
-  // "missing" as eligible (only explicit false means withheld).
-  //
-  // Defaulting them to false would incorrectly withhold provider earnings and prevent
-  // available balance from updating after completion.
+  // Many legacy/real sessions omit these fields entirely.
+  // We now derive missing eligibility strictly from join evidence to prevent accidental payouts.
 
   // Backfill canonical attendance/payout for completed sessions if missing/legacy.
   if (String(s.status || '') === 'completed') {
@@ -472,6 +552,13 @@ function normalizeSessionShape(session: any, userNameById: Map<string, string>, 
     const noShowParty = String((s as any)?.noShowParty || '').trim().toLowerCase();
     const attendance = String((s as any)?.attendanceFlag || '').trim().toLowerCase();
 
+    const joinedIso = String(s.providerJoinedAt || '').trim();
+    const joinedMs = joinedIso ? new Date(joinedIso).getTime() : NaN;
+    const hasProviderJoinEvidence = Number.isFinite(joinedMs);
+
+    // Canonical payout eligibility:
+    // Provider gets paid if they showed up (join evidence exists), regardless of student attendance.
+    // Explicit "withheld" markers still win when present.
     const looksWithheld =
       explicitEarned === false ||
       explicitEligible === false ||
@@ -481,7 +568,7 @@ function normalizeSessionShape(session: any, userNameById: Map<string, string>, 
       attendance === 'provider_no_show' ||
       attendance === 'full_no_show';
 
-    const canonicalEligible = looksWithheld ? false : true;
+    const canonicalEligible = looksWithheld ? false : hasProviderJoinEvidence;
 
     if (typeof (s as any).providerEligibleForPayout !== 'boolean') {
       (s as any).providerEligibleForPayout = canonicalEligible;
@@ -526,6 +613,7 @@ export async function getSessions(): Promise<Session[]> {
 
     // Normalize/validate strict sessions where possible, but do NOT drop legacy/invalid records.
     const beforeStatus = typeof (s as any)?.status === 'string' ? String((s as any).status) : '';
+    const beforeFlagNoShowStudent = Boolean((s as any)?.flagNoShowStudent);
     const isStrict = requireStrictPaidSessionFields(s as any, nowMs);
     const afterStatus = typeof (s as any)?.status === 'string' ? String((s as any).status) : '';
     if (beforeStatus !== afterStatus) localChanged = true;
@@ -536,14 +624,66 @@ export async function getSessions(): Promise<Session[]> {
     //   session.completedAt = new Date().toISOString()
     // }
     const patch = resolveSessionStatusByTime(s as any, nowMs);
-    if (patch && (patch as any).status === 'completed') {
+    if (patch && typeof (patch as any).status === 'string' && String((patch as any).status).trim()) {
       Object.assign(s as any, {
         ...patch,
         // Ensure timestamps are always set.
-        completedAt: (patch as any).completedAt || (s as any).completedAt || nowISO,
+        completedAt:
+          String((patch as any).status) === 'completed'
+            ? (patch as any).completedAt || (s as any).completedAt || nowISO
+            : (s as any).completedAt,
         updatedAt: (patch as any).updatedAt || nowISO,
       });
       localChanged = true;
+    }
+
+    // Transactional email triggers (no-show only) when we auto-resolve lifecycle.
+    // - Provider no-show: status transitions into `provider_no_show`
+    // - Student no-show: status transitions into `completed` with `flagNoShowStudent=true`
+    try {
+      const statusNow = typeof (s as any)?.status === 'string' ? String((s as any).status).trim() : '';
+      const noShowPartyNow = typeof (s as any)?.noShowParty === 'string' ? String((s as any).noShowParty).trim().toLowerCase() : '';
+      const flagNoShowStudentNow = Boolean((s as any)?.flagNoShowStudent);
+
+      const transitionedToProviderNoShow = beforeStatus !== 'provider_no_show' && statusNow === 'provider_no_show';
+      if (transitionedToProviderNoShow) {
+        const alreadyStudent = Boolean((s as any)?.providerNoShowEmailStudentSentAt);
+        const alreadyProvider = Boolean((s as any)?.providerNoShowEmailProviderSentAt);
+        if (!alreadyStudent || !alreadyProvider) {
+          const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+          const sendResult = await sendNoShowEmailsForSession(s as any);
+          const sentAt = new Date().toISOString();
+          if (sendResult.studentEmailSent) (s as any).providerNoShowEmailStudentSentAt = sentAt;
+          if (sendResult.providerEmailSent) (s as any).providerNoShowEmailProviderSentAt = sentAt;
+          if (sendResult.studentEmailSent && sendResult.providerEmailSent) (s as any).providerNoShowEmailsSentAt = sentAt;
+          (s as any).updatedAt = sentAt;
+          localChanged = true;
+        }
+      }
+
+      const becameStudentNoShow =
+        !beforeFlagNoShowStudent &&
+        flagNoShowStudentNow &&
+        (noShowPartyNow === 'student' || statusNow === 'student_no_show');
+      if (becameStudentNoShow) {
+        const alreadyStudent = Boolean((s as any)?.studentNoShowEmailStudentSentAt);
+        const alreadyProvider = Boolean((s as any)?.studentNoShowEmailProviderSentAt);
+        if (!alreadyStudent || !alreadyProvider) {
+          const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+          const sendResult = await sendNoShowEmailsForSession(s as any);
+          const sentAt = new Date().toISOString();
+          if (sendResult.studentEmailSent) (s as any).studentNoShowEmailStudentSentAt = sentAt;
+          if (sendResult.providerEmailSent) (s as any).studentNoShowEmailProviderSentAt = sentAt;
+          if (sendResult.studentEmailSent && sendResult.providerEmailSent) (s as any).studentNoShowEmailsSentAt = sentAt;
+          (s as any).updatedAt = sentAt;
+          localChanged = true;
+        }
+      }
+    } catch (e) {
+      console.warn('[email] no-show email trigger failed (non-blocking)', {
+        sessionId: String((s as any)?.id || ''),
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
 
     // Keep legacy/invalid sessions as-is (normalized shape only). Strict validation is best-effort.
@@ -562,12 +702,41 @@ export async function getSessions(): Promise<Session[]> {
 
 // Write sessions to file
 export async function saveSessions(sessions: Session[]): Promise<void> {
-  if (isFilePersistenceDisabled()) {
-    warnFilePersistenceDisabled('sessions.write', { file: SESSIONS_FILE, attemptedCount: sessions.length });
-    return;
-  }
-  ensureDataDir();
-  writeFileSync(SESSIONS_FILE, JSON.stringify(sessions, null, 2), 'utf-8');
+  const supabase = getSupabaseAdmin();
+  const nowIso = new Date().toISOString();
+
+  const rows = (sessions || [])
+    .filter(Boolean)
+    .map((s: any) => {
+      const id = String(s?.id || '').trim();
+      const startIso = String(s?.startTime || s?.scheduledStartTime || s?.scheduledStart || '').trim();
+      const endIso = String(s?.endTime || s?.scheduledEndTime || s?.scheduledEnd || '').trim();
+      const datetime = startIso || nowIso;
+      const providerJoinedAt = typeof s?.providerJoinedAt === 'string' && s.providerJoinedAt.trim() ? s.providerJoinedAt : null;
+      const studentJoinedAt = typeof s?.studentJoinedAt === 'string' && s.studentJoinedAt.trim() ? s.studentJoinedAt : null;
+
+      return {
+        id,
+        student_id: String(s?.studentId || '').trim(),
+        provider_id: String(s?.providerId || '').trim(),
+        datetime,
+        end_datetime: endIso || null,
+        status: String(s?.status || '').trim() || 'confirmed',
+        // Mirror join evidence into queryable columns (source of truth remains `data.*JoinedAt`).
+        provider_joined_at: providerJoinedAt,
+        student_joined_at: studentJoinedAt,
+        // Keep `data.id` consistent with the row id to avoid future drift.
+        data: { ...(s || {}), id },
+        created_at: String(s?.createdAt || nowIso),
+        updated_at: String(s?.updatedAt || nowIso),
+      };
+    })
+    .filter((r) => r.id && r.student_id && r.provider_id && r.datetime);
+
+  if (rows.length === 0) return;
+
+  const { error } = await supabase.from('sessions').upsert(rows, { onConflict: 'id' });
+  if (error) throw error;
 }
 
 // Find sessions by student ID
@@ -584,8 +753,19 @@ export async function getSessionsByProviderId(providerId: string): Promise<Sessi
 
 // Get session by ID
 export async function getSessionById(id: string): Promise<Session | null> {
-  const sessions = await getSessions();
-  return sessions.find(session => session.id === id) || null;
+  const session = await readSessionByIdRaw(id);
+  if (!session) return null;
+
+  // Evaluate status on read (idempotent) so single-session fetches also auto-resolve
+  // provider/student no-shows and join-evidence completion.
+  const patch = resolveSessionStatusByTime(session, Date.now());
+  if (patch && typeof (patch as any).status === 'string' && String((patch as any).status).trim()) {
+    // Persist best-effort; lenient to avoid legacy shape blocking lifecycle transitions.
+    await updateSessionLenient(String((session as any)?.id || id), patch);
+    return { ...(session as any), ...(patch as any) } as Session;
+  }
+
+  return session;
 }
 
 export async function getSessionsForUser(
@@ -693,7 +873,6 @@ function normalizeSessionTimes<T extends Record<string, any>>(session: T): T {
 
 // Create new session
 export async function createSession(session: Omit<Session, 'createdAt' | 'updatedAt'>): Promise<Session> {
-  const sessions = await getSessions();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
 
@@ -713,23 +892,27 @@ export async function createSession(session: Omit<Session, 'createdAt' | 'update
   }
 
   // Prevent booking the same provider+time slot more than once (active sessions only)
-  const dup = sessions.find((s: any) => {
-    const sStart = s?.startTime || s?.scheduledStartTime || s?.scheduledStart;
-    const sEnd = s?.endTime || s?.scheduledEndTime || s?.scheduledEnd;
-    return (
-      s?.providerId === base.providerId &&
-      sStart === base.startTime &&
-      sEnd === base.endTime &&
-      typeof s?.status === 'string' &&
-      s.status !== 'cancelled'
-    );
-  });
-  if (dup) {
+  const startIso = String((base as any)?.startTime || (base as any)?.scheduledStartTime || (base as any)?.scheduledStart || '').trim();
+  const endIso = String((base as any)?.endTime || (base as any)?.scheduledEndTime || (base as any)?.scheduledEnd || '').trim();
+  if (!startIso || !endIso) {
+    throw new Error('Strict session creation rejected: missing start/end time');
+  }
+
+  const supabase = getSupabaseAdmin();
+  const { data: dupRows, error: dupErr } = await supabase
+    .from('sessions')
+    .select('id')
+    .eq('provider_id', String((base as any).providerId))
+    .eq('datetime', startIso)
+    .eq('end_datetime', endIso)
+    .neq('status', 'cancelled')
+    .limit(1);
+  if (dupErr) throw dupErr;
+  if (Array.isArray(dupRows) && dupRows.length > 0) {
     throw new Error('Strict session creation rejected: slot already booked');
   }
 
-  sessions.push(base as Session);
-  await saveSessions(sessions);
+  await saveSessions([base as Session]);
   return base as Session;
 }
 
@@ -738,16 +921,13 @@ export async function createSession(session: Omit<Session, 'createdAt' | 'update
  * Used across API routes and resolvers.
  */
 export async function updateSession(id: string, patch: Partial<Session>): Promise<boolean> {
-  const sessions = await readSessionsRaw();
-  const idx = sessions.findIndex(s => s.id === id);
-  if (idx < 0) return false;
-
-  const existing = sessions[idx] as any;
+  const existing = await readSessionByIdRaw(id);
+  if (!existing) return false;
   const nowMs = Date.now();
   const nowISO = new Date(nowMs).toISOString();
 
   const mergedRaw: any = normalizeSessionTimes({
-    ...existing,
+    ...(existing as any),
     ...(patch as any),
     updatedAt: (patch as any)?.updatedAt || nowISO,
   });
@@ -755,8 +935,54 @@ export async function updateSession(id: string, patch: Partial<Session>): Promis
   // Keep storage strict: reject updates that would make a session invalid
   if (!requireStrictPaidSessionFields(mergedRaw, nowMs)) return false;
 
-  sessions[idx] = mergedRaw as any;
-  await saveSessions(sessions as any);
+  // Transactional email trigger for manual no-show marking (idempotent).
+  try {
+    const beforeStatus = typeof (existing as any)?.status === 'string' ? String((existing as any).status).trim() : '';
+    const afterStatus = typeof (mergedRaw as any)?.status === 'string' ? String((mergedRaw as any).status).trim() : '';
+    const beforeFlagNoShowStudent = Boolean((existing as any)?.flagNoShowStudent);
+    const afterFlagNoShowStudent = Boolean((mergedRaw as any)?.flagNoShowStudent);
+    const afterNoShowParty = typeof (mergedRaw as any)?.noShowParty === 'string' ? String((mergedRaw as any).noShowParty).trim().toLowerCase() : '';
+
+    const transitionedToProviderNoShow = beforeStatus !== 'provider_no_show' && afterStatus === 'provider_no_show';
+    if (transitionedToProviderNoShow) {
+      const alreadyStudent = Boolean((mergedRaw as any)?.providerNoShowEmailStudentSentAt);
+      const alreadyProvider = Boolean((mergedRaw as any)?.providerNoShowEmailProviderSentAt);
+      if (!alreadyStudent || !alreadyProvider) {
+        const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+        const sendResult = await sendNoShowEmailsForSession(mergedRaw as any);
+        const sentAt = new Date().toISOString();
+        if (sendResult.studentEmailSent) (mergedRaw as any).providerNoShowEmailStudentSentAt = sentAt;
+        if (sendResult.providerEmailSent) (mergedRaw as any).providerNoShowEmailProviderSentAt = sentAt;
+        if (sendResult.studentEmailSent && sendResult.providerEmailSent) (mergedRaw as any).providerNoShowEmailsSentAt = sentAt;
+        (mergedRaw as any).updatedAt = sentAt;
+      }
+    }
+
+    const becameStudentNoShow =
+      !beforeFlagNoShowStudent &&
+      afterFlagNoShowStudent &&
+      (afterNoShowParty === 'student' || afterStatus === 'student_no_show');
+    if (becameStudentNoShow) {
+      const alreadyStudent = Boolean((mergedRaw as any)?.studentNoShowEmailStudentSentAt);
+      const alreadyProvider = Boolean((mergedRaw as any)?.studentNoShowEmailProviderSentAt);
+      if (!alreadyStudent || !alreadyProvider) {
+        const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+        const sendResult = await sendNoShowEmailsForSession(mergedRaw as any);
+        const sentAt = new Date().toISOString();
+        if (sendResult.studentEmailSent) (mergedRaw as any).studentNoShowEmailStudentSentAt = sentAt;
+        if (sendResult.providerEmailSent) (mergedRaw as any).studentNoShowEmailProviderSentAt = sentAt;
+        if (sendResult.studentEmailSent && sendResult.providerEmailSent) (mergedRaw as any).studentNoShowEmailsSentAt = sentAt;
+        (mergedRaw as any).updatedAt = sentAt;
+      }
+    }
+  } catch (e) {
+    console.warn('[email] manual no-show email trigger failed (non-blocking)', {
+      sessionId: String((existing as any)?.id || id),
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  await saveSessions([mergedRaw as any]);
   return true;
 }
 
@@ -768,11 +994,8 @@ export async function updateSession(id: string, patch: Partial<Session>): Promis
  * can still be transitioned to `completed` / `flagged` / `cancelled` and remain queryable.
  */
 export async function updateSessionLenient(id: string, patch: Partial<Session>): Promise<boolean> {
-  const sessions = await readSessionsRaw();
-  const idx = sessions.findIndex(s => s.id === id);
-  if (idx < 0) return false;
-
-  const existing = sessions[idx] as any;
+  const existing = await readSessionByIdRaw(id);
+  if (!existing) return false;
   const nowISO = new Date().toISOString();
 
   const mergedRaw: any = normalizeSessionTimes({
@@ -797,17 +1020,25 @@ export async function updateSessionLenient(id: string, patch: Partial<Session>):
     if (normalized === 'flagged') {
       mergedRaw.status = 'confirmed';
     }
-    if (
-      normalized === 'provider_no_show' ||
-      normalized === 'no_show_provider' ||
-      normalized === 'no_show_student' ||
-      normalized === 'no_show_both' ||
-      normalized === 'student_no_show' ||
-      normalized === 'no-show' ||
-      normalized === 'expired_provider_no_show' ||
-      normalized === 'expired' ||
-      normalized === 'requires_review'
-    ) {
+    // No-show statuses are canonical terminal outcomes (do NOT normalize away).
+    if (normalized === 'no_show_provider' || normalized === 'expired_provider_no_show') {
+      mergedRaw.status = 'provider_no_show';
+    }
+    if (normalized === 'no_show_student') {
+      mergedRaw.status = 'student_no_show';
+    }
+    if (normalized === 'no_show_both') {
+      // Preserve "both" outcome via noShowParty while using provider_no_show as the status.
+      mergedRaw.status = 'provider_no_show';
+      mergedRaw.noShowParty = 'both';
+    }
+    if (normalized === 'no-show') {
+      mergedRaw.status = 'provider_no_show';
+    }
+    if (normalized === 'expired') {
+      mergedRaw.status = 'confirmed';
+    }
+    if (normalized === 'requires_review') {
       mergedRaw.status = 'confirmed';
     }
     if (normalized === 'cancelled-late' || normalized === 'refunded') {
@@ -815,8 +1046,54 @@ export async function updateSessionLenient(id: string, patch: Partial<Session>):
     }
   }
 
-  sessions[idx] = mergedRaw as any;
-  await saveSessions(sessions as any);
+  // Transactional email trigger for no-show marking through lenient updates (idempotent).
+  try {
+    const beforeStatus = typeof (existing as any)?.status === 'string' ? String((existing as any).status).trim() : '';
+    const afterStatus = typeof (mergedRaw as any)?.status === 'string' ? String((mergedRaw as any).status).trim() : '';
+    const beforeFlagNoShowStudent = Boolean((existing as any)?.flagNoShowStudent);
+    const afterFlagNoShowStudent = Boolean((mergedRaw as any)?.flagNoShowStudent);
+    const afterNoShowParty = typeof (mergedRaw as any)?.noShowParty === 'string' ? String((mergedRaw as any).noShowParty).trim().toLowerCase() : '';
+
+    const transitionedToProviderNoShow = beforeStatus !== 'provider_no_show' && afterStatus === 'provider_no_show';
+    if (transitionedToProviderNoShow) {
+      const alreadyStudent = Boolean((mergedRaw as any)?.providerNoShowEmailStudentSentAt);
+      const alreadyProvider = Boolean((mergedRaw as any)?.providerNoShowEmailProviderSentAt);
+      if (!alreadyStudent || !alreadyProvider) {
+        const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+        const sendResult = await sendNoShowEmailsForSession(mergedRaw as any);
+        const sentAt = new Date().toISOString();
+        if (sendResult.studentEmailSent) (mergedRaw as any).providerNoShowEmailStudentSentAt = sentAt;
+        if (sendResult.providerEmailSent) (mergedRaw as any).providerNoShowEmailProviderSentAt = sentAt;
+        if (sendResult.studentEmailSent && sendResult.providerEmailSent) (mergedRaw as any).providerNoShowEmailsSentAt = sentAt;
+        (mergedRaw as any).updatedAt = sentAt;
+      }
+    }
+
+    const becameStudentNoShow =
+      !beforeFlagNoShowStudent &&
+      afterFlagNoShowStudent &&
+      (afterNoShowParty === 'student' || afterStatus === 'student_no_show');
+    if (becameStudentNoShow) {
+      const alreadyStudent = Boolean((mergedRaw as any)?.studentNoShowEmailStudentSentAt);
+      const alreadyProvider = Boolean((mergedRaw as any)?.studentNoShowEmailProviderSentAt);
+      if (!alreadyStudent || !alreadyProvider) {
+        const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+        const sendResult = await sendNoShowEmailsForSession(mergedRaw as any);
+        const sentAt = new Date().toISOString();
+        if (sendResult.studentEmailSent) (mergedRaw as any).studentNoShowEmailStudentSentAt = sentAt;
+        if (sendResult.providerEmailSent) (mergedRaw as any).studentNoShowEmailProviderSentAt = sentAt;
+        if (sendResult.studentEmailSent && sendResult.providerEmailSent) (mergedRaw as any).studentNoShowEmailsSentAt = sentAt;
+        (mergedRaw as any).updatedAt = sentAt;
+      }
+    }
+  } catch (e) {
+    console.warn('[email] lenient no-show email trigger failed (non-blocking)', {
+      sessionId: String((existing as any)?.id || id),
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  await saveSessions([mergedRaw as any]);
   return true;
 }
 
@@ -827,13 +1104,9 @@ export async function cancelSession(
   reason: CancellationReason,
   note?: string
 ): Promise<Session | null> {
-  const sessions = await getSessions();
-  const session = sessions.find(s => s.id === id);
-  
-  if (!session) {
-    return null;
-  }
-  
+  const session = await readSessionByIdRaw(id);
+  if (!session) return null;
+
   const now = new Date();
   const startIso = (session as any).scheduledStartTime || (session as any).scheduledStart;
   const sessionStart = startIso ? new Date(startIso) : new Date(NaN);
@@ -846,8 +1119,11 @@ export async function cancelSession(
   session.cancellationReason = reason;
   session.cancellationNote = note;
   session.updatedAt = now.toISOString();
-  
-  await saveSessions(sessions);
+
+  // Backwards-compatible local var (used by earlier implementations/debugging)
+  void hoursUntilStart;
+
+  await saveSessions([session]);
   return session;
 }
 
@@ -857,13 +1133,9 @@ export async function completeSession(
   actualStartTime?: string,
   actualEndTime?: string
 ): Promise<Session | null> {
-  const sessions = await getSessions();
-  const session = sessions.find(s => s.id === id);
-  
-  if (!session) {
-    return null;
-  }
-  
+  const session = await readSessionByIdRaw(id);
+  if (!session) return null;
+
   session.status = 'completed';
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -879,8 +1151,8 @@ export async function completeSession(
   session.endTime = endIso || (session as any).endTime || (session as any).scheduledEndTime || (session as any).scheduledEnd || nowIso;
   session.date = isoDateFromIso(session.startTime ?? nowIso) || new Date(nowMs).toISOString().slice(0, 10);
   session.updatedAt = nowIso;
-  
-  await saveSessions(sessions);
+
+  await saveSessions([session]);
   return session;
 }
 

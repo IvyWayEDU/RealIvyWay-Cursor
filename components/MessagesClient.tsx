@@ -5,6 +5,10 @@ import { Session } from '@/lib/auth/types';
 import { useSearchParams } from 'next/navigation';
 import { getUserDisplayInfoById } from '@/lib/sessions/actions';
 import {
+  containsPersonalContactInfo,
+  PERSONAL_CONTACT_INFO_BLOCK_MESSAGE,
+} from '@/lib/messages/contentFilter';
+import {
   getConversationMessages,
   getInboxConversations,
   sendMessage,
@@ -275,6 +279,10 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
     if (!inputValue.trim()) return;
 
     const text = inputValue.trim();
+    if (containsPersonalContactInfo(text)) {
+      setSendError(PERSONAL_CONTACT_INFO_BLOCK_MESSAGE);
+      return;
+    }
     const recipientId = selectedConversationId
       ? conversations.find((c) => c.id === selectedConversationId)?.participantId
       : draftParticipantId;
@@ -319,13 +327,6 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
         (typeof err?.message === 'string' && err.message.trim()) ||
         'Message could not be sent. Please try again.';
       setSendError(msg);
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
     }
   };
 
@@ -511,7 +512,13 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
                     }}
-                    onKeyPress={handleKeyPress}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter') return;
+                      if (e.shiftKey) return;
+                      if ((e.nativeEvent as unknown as { isComposing?: boolean } | null)?.isComposing) return;
+                      e.preventDefault();
+                      void handleSendMessage();
+                    }}
                     placeholder="Type a message…"
                     rows={1}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent resize-none text-sm overflow-y-auto"

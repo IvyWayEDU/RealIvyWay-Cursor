@@ -14,12 +14,13 @@ const GRACE_WINDOW_MS = 10 * 60 * 1000;
  * - meeting.participant_joined: Participant joined the meeting
  * - meeting.ended: Meeting has ended
  * 
- * Session completion logic (unified):
- * - Provider join is recorded as providerJoinedAt (first join)
- * - At startTime + 10 minutes:
- *   - If providerJoinedAt exists: mark completed (eligible for payout)
- *   - If providerJoinedAt does NOT exist: mark flagged (no payout)
- * - Student join does NOT affect completion/payout
+ * Session lifecycle + payout (unified):
+ * - Provider join is recorded as providerJoinedAt (first join).
+ * - Student join is recorded as studentJoinedAt (first join).
+ * - No-show resolution at startTime + 10 minutes:
+ *   - If providerJoinedAt is NULL → status = 'provider_no_show' (no payout)
+ *   - If providerJoinedAt is NOT NULL → status = 'completed' (provider is paid), regardless of student join
+ * - Student absence should NOT block provider payment (tracked via internal flags only).
  */
 
 interface ZoomWebhookEvent {
@@ -164,7 +165,7 @@ async function handleParticipantJoined(event: ZoomWebhookEvent) {
     });
     
     // Track provider join using unified resolver
-    // This will set providerJoinedAt if join is within the 10-minute window
+    // This records providerJoinedAt (first join); payout is not blocked by student absence.
     try {
       const result = await trackProviderJoinUnified(session.id, joinTime);
       if (result.success) {

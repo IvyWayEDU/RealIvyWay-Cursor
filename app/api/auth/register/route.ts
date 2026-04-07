@@ -8,9 +8,15 @@ import { createProvider } from '@/lib/providers/storage';
 import crypto from 'crypto';
 import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
 import { handleApiError } from '@/lib/errorHandler';
+import { sendWelcomeEmailForUser } from '@/lib/email/transactional';
 
 export async function POST(request: NextRequest) {
   try {
+    console.log("ENV CHECK", {
+      hasUrl: !!process.env.SUPABASE_URL,
+      hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+    });
+
     const body = await request.json();
     const { name, email, password, role } = body;
     
@@ -129,6 +135,13 @@ export async function POST(request: NextRequest) {
     
     // Create session
     await createSession(user.id, user.email, user.name, user.roles);
+
+    // Transactional email (best-effort; never block registration)
+    try {
+      await sendWelcomeEmailForUser({ email: user.email, name: user.name, roles: user.roles } as any);
+    } catch (e) {
+      console.warn('[email] welcome email failed (non-blocking)', e);
+    }
     
     return NextResponse.json({
       user: {

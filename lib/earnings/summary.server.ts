@@ -7,7 +7,6 @@
 
 import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { getProviderPayoutRequestTotals } from '@/lib/payouts/payout-requests.server';
-import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { computeProviderEarningsTotals } from '@/lib/earnings/providerEarningsSummary';
 
 /**
@@ -34,17 +33,18 @@ export async function getProviderEarningsSummary(providerId: string): Promise<{
   // IMPORTANT:
   // The Earnings Breakdown table currently shows sessions where `status === "completed"`.
   // To keep totals consistent across the app, this summary MUST use the exact same row set.
-  const completedSessions = sessions.filter((s: any) => String(s?.status || '') === 'completed');
+  const completedSessions = sessions.filter(
+    (s: any) =>
+      String(s?.status || '') === 'completed' &&
+      (s?.providerEligibleForPayout === true || s?.provider_eligible_for_payout === true)
+  );
 
   const totals = await getProviderPayoutRequestTotals(providerId);
 
-  // IMPORTANT:
-  // Totals must be derived from the SAME per-session payout calculation used by the breakdown table.
-  // Also, per requirements, do NOT gate earnings totals on flags like:
-  // - providerEarned
-  // - providerEligibleForPayout
-  // The breakdown table includes those rows, so totals must too.
-  const earningsRowAmountsCents = completedSessions.map((s: any) => calculateProviderPayoutCentsFromSession(s));
+  const earningsRowAmountsCents = completedSessions.map((session: any) => {
+    const earningsCents = session?.providerPayoutCents || session?.provider_payout_cents || 0;
+    return Math.max(0, Math.floor(Number(earningsCents || 0)));
+  });
   const positiveEarningsRows = earningsRowAmountsCents.filter((c) => Number(c || 0) > 0).length;
 
   const computed = computeProviderEarningsTotals({

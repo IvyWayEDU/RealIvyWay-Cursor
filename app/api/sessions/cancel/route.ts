@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/auth/getServerSession';
-import { getSessionById, cancelSession } from '@/lib/sessions/storage';
+import { getSessionById, cancelSession, updateSession } from '@/lib/sessions/storage';
 import { CancellationReason } from '@/lib/models/types';
 import { handleApiError } from '@/lib/errorHandler';
+import { sendCancellationEmailsForSession } from '@/lib/email/transactional';
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,6 +63,30 @@ export async function POST(request: NextRequest) {
     
     // Cancel session
     const cancelled = await cancelSession(sessionId, session.userId, reason, note);
+
+    // Transactional email: cancellation (idempotent per-session)
+    if (cancelled) {
+      try {
+        const alreadyStudent = Boolean((cancelled as any)?.cancellationEmailStudentSentAt);
+        const alreadyProvider = Boolean((cancelled as any)?.cancellationEmailProviderSentAt);
+        if (!alreadyStudent || !alreadyProvider) {
+          const sendResult = await sendCancellationEmailsForSession(cancelled as any);
+          const nowISO = new Date().toISOString();
+          await updateSession(sessionId, {
+            cancellationEmailStudentSentAt: sendResult.studentEmailSent ? nowISO : (cancelled as any)?.cancellationEmailStudentSentAt,
+            cancellationEmailProviderSentAt: sendResult.providerEmailSent ? nowISO : (cancelled as any)?.cancellationEmailProviderSentAt,
+            cancellationEmailsSentAt:
+              sendResult.studentEmailSent && sendResult.providerEmailSent ? nowISO : (cancelled as any)?.cancellationEmailsSentAt,
+            updatedAt: nowISO,
+          } as any);
+        }
+      } catch (e) {
+        console.warn('[email] cancellation send failed (non-blocking)', {
+          sessionId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
     
     return NextResponse.json({ session: cancelled });
   } catch (error) {

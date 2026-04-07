@@ -12,6 +12,10 @@ import {
   type StoredConversation,
   type StoredMessage,
 } from '@/lib/messages/storage';
+import {
+  containsPersonalContactInfo,
+  PERSONAL_CONTACT_INFO_BLOCK_MESSAGE,
+} from '@/lib/messages/contentFilter';
 
 export type ServiceTypeLabel = 'Tutoring' | 'Counseling' | 'Test Prep' | 'College Planning';
 
@@ -92,9 +96,28 @@ function safeDateMs(iso?: string | null): number {
 }
 
 function getSessionStartEndMs(s: Session): { startMs: number; endMs: number } {
-  const startIso = (s as any).scheduledStartTime || (s as any).scheduledStart || (s as any).startTime;
-  const endIso = (s as any).scheduledEndTime || (s as any).scheduledEnd || (s as any).endTime;
-  return { startMs: safeDateMs(startIso), endMs: safeDateMs(endIso) };
+  // Canonical (Supabase) fields: datetime + end_datetime
+  const startIso =
+    (s as any).datetime ||
+    (s as any).scheduledStartTime ||
+    (s as any).scheduledStart ||
+    (s as any).startTime;
+  const endIso =
+    (s as any).end_datetime ||
+    (s as any).scheduledEndTime ||
+    (s as any).scheduledEnd ||
+    (s as any).endTime;
+
+  const startMs = safeDateMs(startIso);
+  const parsedEndMs = safeDateMs(endIso);
+  // If end is missing/invalid, fall back to a 1-hour session duration.
+  const endMs = Number.isFinite(parsedEndMs)
+    ? parsedEndMs
+    : Number.isFinite(startMs)
+      ? startMs + 60 * 60 * 1000
+      : NaN;
+
+  return { startMs, endMs };
 }
 
 function sanitizeMessageText(raw: string): { text: string; changed: boolean } {
@@ -107,12 +130,8 @@ function sanitizeMessageText(raw: string): { text: string; changed: boolean } {
     text = next;
   };
 
-  // Emails
-  replaceAll(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi);
   // URLs (http(s), www.)
   replaceAll(/\b(?:https?:\/\/|www\.)[^\s]+\b/gi);
-  // Phone numbers (very loose; catches common US/international formats)
-  replaceAll(/\b(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}\b/g);
   // Social media handles (e.g. @john_doe)
   replaceAll(/(^|\s)@[A-Za-z0-9_]{2,}\b/g);
 
@@ -143,23 +162,30 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
   // Must have at least one real booked session together.
   const eligibleStatuses = new Set<Session['status']>([
     'paid',
+    'confirmed',
     'upcoming',
     'scheduled',
     'in_progress',
     'in_progress_pending_join',
+    'flagged',
     'completed',
+    'completed_provider_show',
+    'completed_no_show_provider',
+    'completed_no_show_student',
     'requires_review',
     'no-show',
     'no_show_student',
     'no_show_provider',
+    'no_show_both',
     'student_no_show',
     'provider_no_show',
     'expired_provider_no_show',
   ]);
 
+  const windowError = 'Messaging is only available 24 hours before and after a booked session';
   const eligible = pair.filter((s) => eligibleStatuses.has(s.status));
   if (eligible.length === 0) {
-    throw makeFriendlyError('Messaging is only available between users who have a booked session together.');
+    throw makeFriendlyError(windowError);
   }
 
   const nowMs = Date.now();
@@ -168,15 +194,12 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
   const inWindow = eligible.some((s) => {
     const { startMs, endMs } = getSessionStartEndMs(s);
     if (!Number.isFinite(startMs)) return false;
-    // If end time is missing, fall back to start time for the post window.
-    const effectiveEndMs = Number.isFinite(endMs) ? endMs : startMs;
-    return nowMs >= (startMs - windowMs) && nowMs <= (effectiveEndMs + windowMs);
+    if (!Number.isFinite(endMs)) return false;
+    return nowMs >= startMs - windowMs && nowMs <= endMs + windowMs;
   });
 
   if (!inWindow) {
-    throw makeFriendlyError(
-      'Messaging is only available from 24 hours before a scheduled session until 24 hours after it ends.'
-    );
+    throw makeFriendlyError(windowError);
   }
 }
 
@@ -250,6 +273,11 @@ export async function sendMessage(params: {
 
   // Enforce session-based messaging restrictions server-side.
   await assertMessagingAllowed(senderId, recipientId);
+
+  // Hard-block personal contact info attempts (to prevent off-platform payment bypass).
+  if (containsPersonalContactInfo(rawText)) {
+    throw makeFriendlyError(PERSONAL_CONTACT_INFO_BLOCK_MESSAGE);
+  }
 
   // Enforce content filtering before saving.
   const { text, changed } = sanitizeMessageText(rawText);

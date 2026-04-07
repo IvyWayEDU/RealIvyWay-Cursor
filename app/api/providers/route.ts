@@ -35,24 +35,11 @@ export async function GET(request: NextRequest) {
         }
         if (serviceTypeRaw === 'college_counseling' || serviceTypeRaw === 'counseling') {
           // Eligibility: provider offers college counseling (do NOT filter by schoolId here).
-          const hasCounselorFlag = typeof u?.isCounselor === 'boolean' ? u.isCounselor === true : null;
-          if (hasCounselorFlag !== null) return hasCounselorFlag;
-          const roles = Array.isArray(u?.roles) ? u.roles : [];
-          const profileRoles = Array.isArray(u?.profile?.roles) ? u.profile.roles : [];
-          const services = Array.isArray(u?.services)
-            ? u.services.map((s: any) => String(s || '').trim().toLowerCase().replace(/-/g, '_'))
-            : [];
-          const profileServices = Array.isArray(u?.profile?.services)
-            ? u.profile.services.map((s: any) => String(s || '').trim().toLowerCase().replace(/-/g, '_'))
-            : [];
-          return (
-            roles.includes('counselor') ||
-            profileRoles.includes('counselor') ||
-            services.includes('college_counseling') ||
-            services.includes('counseling') ||
-            profileServices.includes('college_counseling') ||
-            profileServices.includes('counseling')
-          );
+          // Providers are eligible based on `services` (legacy flags/roles are intentionally ignored).
+          const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
+          const services = Array.isArray(u?.services) ? u.services.map(norm) : [];
+          const profileServices = Array.isArray(u?.profile?.services) ? u.profile.services.map(norm) : [];
+          return services.includes('college_counseling') || services.includes('counseling') || profileServices.includes('college_counseling') || profileServices.includes('counseling');
         }
         // Future-proof: fallback to services array matching
         const services = Array.isArray(u?.services) ? u.services.map((s: any) => String(s || '').trim().toLowerCase().replace(/-/g, '_')) : [];

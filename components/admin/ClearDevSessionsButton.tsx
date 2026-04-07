@@ -1,12 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { clearSessions } from '@/lib/sessions/devActions';
 
 export default function ClearDevSessionsButton() {
   const [isClearing, setIsClearing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV !== 'development') {
     return null;
   }
 
@@ -16,25 +16,12 @@ export default function ClearDevSessionsButton() {
     }
 
     setIsClearing(true);
-    setMessage(null);
 
     try {
-      const response = await fetch('/api/dev/clear-sessions', {
-        method: 'POST',
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setMessage(`Successfully cleared ${data.deletedCount || 0} sessions.`);
-        // Clear message after 5 seconds
-        setTimeout(() => setMessage(null), 5000);
-      } else {
-        setMessage(data.error || 'Failed to clear sessions.');
-      }
+      await clearSessions();
+      window.location.reload();
     } catch (error) {
       console.error('Error clearing sessions:', error);
-      setMessage('An error occurred while clearing sessions.');
     } finally {
       setIsClearing(false);
     }
@@ -45,15 +32,10 @@ export default function ClearDevSessionsButton() {
       <button
         onClick={handleClear}
         disabled={isClearing}
-        className="w-full rounded-md border border-red-300 bg-white px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
       >
         {isClearing ? 'Clearing...' : 'Clear Dev Sessions'}
       </button>
-      {message && (
-        <div className={`mt-2 text-sm ${message.includes('Success') ? 'text-green-600' : 'text-red-600'}`}>
-          {message}
-        </div>
-      )}
     </div>
   );
 }

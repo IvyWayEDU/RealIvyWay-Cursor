@@ -185,8 +185,12 @@ export const providersQuerySchema = z.object({
  * Payout schemas
  */
 export const withdrawalRequestSchema = z.object({
-  amountCents: z.number().int().positive('Amount must be greater than 0'),
-});
+  // Accept either integer cents (`amountCents`) or dollars (`requestedAmount` / `amount`).
+  // Server routes will normalize + validate with cents-based logic.
+  amountCents: z.coerce.number().optional(),
+  requestedAmount: z.coerce.number().optional(),
+  amount: z.coerce.number().optional(),
+}).strict();
 
 /**
  * Support schemas
@@ -223,28 +227,127 @@ export const supportTicketMessageSchema = z
   })
   .strict();
 
+const CANONICAL_PROVIDER_SERVICE_TYPES = [
+  'tutoring',
+  'college_counseling',
+  'testprep',
+  'virtual_tour',
+] as const;
+
+function normalizeProviderServiceType(input: unknown): string {
+  const raw = typeof input === 'string' ? input : String(input ?? '');
+  const v = raw.trim().toLowerCase();
+  if (!v) return '';
+
+  // Normalize separators (keep underscores since some canonical keys use them)
+  const key = v.replace(/\s+/g, ' ').trim();
+  const underscored = key.replace(/[\s-]+/g, '_');
+
+  if (underscored === 'tutoring' || underscored === 'tutor' || underscored === 'tutors') return 'tutoring';
+
+  if (
+    underscored === 'college_counseling' ||
+    underscored === 'college_counselling' ||
+    underscored === 'college_planning' ||
+    underscored === 'counseling' ||
+    underscored === 'counselling'
+  ) {
+    return 'college_counseling';
+  }
+
+  if (
+    underscored === 'testprep' ||
+    underscored === 'test_prep' ||
+    underscored === 'test_preparation' ||
+    underscored === 'test_preparations'
+  ) {
+    return 'testprep';
+  }
+
+  if (
+    underscored === 'virtual_tour' ||
+    underscored === 'virtual_tours' ||
+    underscored === 'virtualtour' ||
+    underscored === 'virtualtours'
+  ) {
+    return 'virtual_tour';
+  }
+
+  // Unknown service type: return normalized string so validation can fail clearly.
+  return underscored;
+}
+
+const providerServicesSchema = z.preprocess(
+  (v) => {
+    if (v === null || typeof v === 'undefined') return undefined;
+    const arr = Array.isArray(v) ? v : typeof v === 'string' ? [v] : [];
+    const normalized = arr
+      .map(normalizeProviderServiceType)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // De-dupe while preserving order
+    return Array.from(new Set(normalized));
+  },
+  z.array(z.enum(CANONICAL_PROVIDER_SERVICE_TYPES)).max(10).optional()
+);
+
 /**
  * Profile update schema (user profile, not provider payout details)
  */
 export const profileUpdateSchema = z
   .object({
-    name: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(120)).optional(),
+    name: z.preprocess(
+      (v) => {
+        if (typeof v !== 'string') return v;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      },
+      z.string().min(1).max(120).optional()
+    ),
     profilePhotoUrl: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(2048)).optional(),
     isTutor: z.boolean().optional(),
     isCounselor: z.boolean().optional(),
-    schoolIds: z
-      .array(z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(64)))
-      .max(20)
-      .optional(),
-    schoolNames: z
-      .array(z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(140)))
-      .max(20)
-      .optional(),
-    subjects: z
-      .array(z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().min(1).max(80)))
-      .max(50)
-      .optional(),
+    schoolId: z.preprocess(
+      (v) => {
+        if (v === null || typeof v === 'undefined') return undefined;
+        if (typeof v !== 'string') return v;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      },
+      z.string().min(1).max(64).optional()
+    ),
+    schoolName: z.preprocess(
+      (v) => {
+        if (v === null || typeof v === 'undefined') return undefined;
+        if (typeof v !== 'string') return v;
+        const t = v.trim();
+        return t === '' ? undefined : t;
+      },
+      z.string().min(1).max(140).optional()
+    ),
+    schoolIds: z.preprocess(
+      (v) => (v === null ? undefined : v),
+      z
+        .array(z.preprocess((vv) => (typeof vv === 'string' ? vv.trim() : vv), z.string().min(1).max(64)))
+        .max(20)
+        .optional()
+    ),
+    schoolNames: z.preprocess(
+      (v) => (v === null ? undefined : v),
+      z
+        .array(z.preprocess((vv) => (typeof vv === 'string' ? vv.trim() : vv), z.string().min(1).max(140)))
+        .max(20)
+        .optional()
+    ),
+    subjects: z.preprocess(
+      (v) => (v === null ? undefined : v),
+      z
+        .array(z.preprocess((vv) => (typeof vv === 'string' ? vv.trim() : vv), z.string().min(1).max(80)))
+        .max(50)
+        .optional()
+    ),
     offersVirtualTours: z.boolean().optional(),
+    services: providerServicesSchema,
     email: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().email().max(254)).optional(),
     phoneNumber: z.preprocess((v) => (typeof v === 'string' ? v.trim() : v), z.string().max(40)).optional(),
   })

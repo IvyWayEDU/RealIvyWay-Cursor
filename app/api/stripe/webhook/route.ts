@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { createSession, getSessions, updateSession } from '@/lib/sessions/storage';
+import { createSession, getSessionById, getSessions, updateSession } from '@/lib/sessions/storage';
 import crypto from 'crypto';
 import { getUserById, getUsers, updateUser } from '@/lib/auth/storage';
 import { createZoomMeeting, isZoomConfigured } from '@/lib/zoom/api';
@@ -8,6 +8,8 @@ import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as Pric
 import { grantCounselingMonthlyCredits } from '@/lib/credits/counselingCredits.server';
 import { getProviderPayout } from '@/lib/payouts/getProviderPayout';
 import { deleteCheckoutBookingRecord, readCheckoutBookingRecord } from '@/lib/stripe/checkoutBookingStore.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { sendBookingConfirmationEmailsForSession } from '@/lib/email/transactional';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -418,7 +420,75 @@ export async function POST(request: NextRequest) {
           return `${String(sStart || '')}|${String(sEnd || '')}`;
         })
       );
+      const hasZoomJoinUrl = (s: any): boolean => {
+        const b = typeof s?.zoom_join_url === 'string' ? s.zoom_join_url.trim() : '';
+        return Boolean(b);
+      };
+      const hasZoomMeetingId = (s: any): boolean => {
+        const a = typeof s?.zoomMeetingId === 'string' ? s.zoomMeetingId.trim() : '';
+        const b = typeof s?.zoom_meeting_id === 'string' ? s.zoom_meeting_id.trim() : '';
+        return Boolean(a || b);
+      };
+
+      // If sessions already exist for this payment intent, we still may need to backfill Zoom URLs
+      // (e.g., a previous attempt created the session but failed before persisting Zoom).
       if (alreadyForPayment.length >= sessionTimes.length) {
+        if (isZoomConfigured()) {
+          for (const s of alreadyForPayment) {
+            if (!s?.id) continue;
+            if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) continue; // idempotency: never create duplicates
+            const startIso =
+              toIsoOrNull((s as any)?.datetime) ||
+              toIsoOrNull((s as any)?.startTime) ||
+              toIsoOrNull((s as any)?.scheduledStartTime) ||
+              toIsoOrNull((s as any)?.scheduledStart) ||
+              null;
+            if (!startIso) continue;
+            try {
+              console.log("Creating Zoom meeting for session:", String(s.id), (s as any)?.datetime ?? startIso);
+              const zoom = await createZoomMeeting({
+                topic: 'IvyWay Session',
+                startTime: startIso,
+                duration: 60,
+              });
+              const join_url = zoom.joinUrl;
+              await updateSession(String(s.id), {
+                zoomMeetingId: zoom.meetingId,
+                zoom_meeting_id: zoom.meetingId,
+                zoom_join_url: join_url,
+                zoomStartUrl: zoom.startUrl,
+                zoom_start_url: zoom.startUrl,
+                zoomStatus: 'created',
+              } as any);
+              // Persist to dedicated DB column (source-of-truth for `sessions.zoom_join_url`)
+              try {
+                const supabase = getSupabaseAdmin();
+                const { error } = await supabase
+                  .from('sessions')
+                  .update({ zoom_join_url: join_url })
+                  .eq('id', String(s.id));
+                if (error) throw error;
+                console.log("Saved to DB:", join_url);
+              } catch (e) {
+                console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
+                  sessionId: String(s.id),
+                  error: e instanceof Error ? e.message : String(e),
+                });
+              }
+            } catch (error) {
+              console.error("Zoom meeting creation failed");
+              console.error('[ZOOM_MEETING_CREATE_FAILED]', {
+                stripeSessionId: session.id,
+                paymentIntentId,
+                sessionId: String(s.id),
+                error: error instanceof Error ? error.message : String(error),
+              });
+              try {
+                await updateSession(String(s.id), { zoomStatus: 'failed' } as any);
+              } catch {}
+            }
+          }
+        }
         return NextResponse.json({ received: true });
       }
 
@@ -546,9 +616,6 @@ export async function POST(request: NextRequest) {
         });
         if (alreadySlot) continue;
 
-        const startMs = new Date(startIso).getTime();
-        const endMs = new Date(endIso).getTime();
-        const durationMinutes = Math.round((endMs - startMs) / (1000 * 60));
         const perSessionCents = pricing.session_price_cents;
         const payoutServiceType = service_type === 'counseling' ? 'college_counseling' : service_type;
         const providerPayout = getProviderPayout(payoutServiceType);
@@ -615,28 +682,38 @@ export async function POST(request: NextRequest) {
         // Best-effort Zoom meeting creation (must NOT block booking).
         if (isZoomConfigured()) {
           try {
-            const topic =
-              canonicalServiceType === 'tutoring'
-                ? `Tutoring${subject ? ` - ${subject}` : ''}`
-                : canonicalServiceType === 'test_prep'
-                  ? `Test Prep${subject ? ` - ${subject}` : ''}`
-                  : canonicalServiceType === 'virtual_tour'
-                    ? `Virtual Tour${providerSchoolName ? ` - ${providerSchoolName}` : ''}`
-                    : `College Counseling${providerSchoolName ? ` - ${providerSchoolName}` : ''}`;
-
+            console.log("Creating Zoom meeting for session:", created.id, (created as any)?.datetime ?? startIso);
             const zoom = await createZoomMeeting({
-              topic,
+              topic: 'IvyWay Session',
               startTime: startIso,
-              duration: durationMinutes,
+              duration: 60,
             });
 
-            const patched = await updateSession(created.id, {
+            const join_url = zoom.joinUrl;
+            await updateSession(created.id, {
               zoomMeetingId: zoom.meetingId,
-              zoomJoinUrl: zoom.joinUrl,
+              zoom_meeting_id: zoom.meetingId,
+              zoom_join_url: join_url,
               zoomStartUrl: zoom.startUrl,
+              zoom_start_url: zoom.startUrl,
               zoomStatus: 'created',
             } as any);
 
+            // Persist to dedicated DB column (source-of-truth for `sessions.zoom_join_url`)
+            try {
+              const supabase = getSupabaseAdmin();
+              const { error } = await supabase
+                .from('sessions')
+                .update({ zoom_join_url: join_url })
+                .eq('id', String(created.id));
+              if (error) throw error;
+              console.log("Saved to DB:", join_url);
+            } catch (e) {
+              console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
+                sessionId: String(created.id),
+                error: e instanceof Error ? e.message : String(e),
+              });
+            }
             console.log('[ZOOM_MEETING_CREATED]', {
               stripeSessionId: session.id,
               paymentIntentId,
@@ -644,6 +721,7 @@ export async function POST(request: NextRequest) {
               zoomMeetingId: zoom.meetingId,
             });
           } catch (error) {
+            console.error("Zoom meeting creation failed");
             console.error('[ZOOM_MEETING_CREATE_FAILED]', {
               stripeSessionId: session.id,
               paymentIntentId,
@@ -655,6 +733,31 @@ export async function POST(request: NextRequest) {
               await updateSession(created.id, { zoomStatus: 'failed' } as any);
             } catch {}
           }
+        }
+
+        // Transactional email: booking confirmation (idempotent per-session)
+        try {
+          const latest = await getSessionById(created.id);
+          const s = latest || (created as any);
+          const alreadyStudent = Boolean((s as any)?.bookingEmailStudentSentAt);
+          const alreadyProvider = Boolean((s as any)?.bookingEmailProviderSentAt);
+          if (!alreadyStudent || !alreadyProvider) {
+            const sendResult = await sendBookingConfirmationEmailsForSession(s as any);
+            const nowISO = new Date().toISOString();
+            await updateSession(created.id, {
+              bookingEmailStudentSentAt: sendResult.studentEmailSent ? nowISO : (s as any)?.bookingEmailStudentSentAt,
+              bookingEmailProviderSentAt: sendResult.providerEmailSent ? nowISO : (s as any)?.bookingEmailProviderSentAt,
+              confirmationEmailsSent: sendResult.studentEmailSent && sendResult.providerEmailSent,
+              confirmationEmailsSentAt:
+                sendResult.studentEmailSent && sendResult.providerEmailSent ? nowISO : (s as any)?.confirmationEmailsSentAt,
+              updatedAt: nowISO,
+            } as any);
+          }
+        } catch (e) {
+          console.warn('[email] booking confirmation send failed (non-blocking)', {
+            sessionId: created.id,
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
 
         // Availability is READ-ONLY. Booked slots are excluded via sessions + reserved slots.

@@ -1,9 +1,6 @@
 import 'server-only';
 
-import { readFile, writeFile, mkdir, rename } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
-import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 type StoredSessionTime = { scheduledStart: string; scheduledEnd: string };
 
@@ -24,46 +21,6 @@ export type CheckoutBookingRecord = {
 
 type CheckoutBookingStorage = Record<string, CheckoutBookingRecord>;
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const FILE_PATH = path.join(DATA_DIR, 'checkout-bookings.json');
-
-async function ensureDataDir(): Promise<void> {
-  if (isFilePersistenceDisabled()) {
-    return;
-  }
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
-  }
-}
-
-async function readAll(): Promise<CheckoutBookingStorage> {
-  if (isFilePersistenceDisabled()) {
-    warnFilePersistenceDisabled('checkout-bookings.readAll', { file: FILE_PATH });
-    return {};
-  }
-  await ensureDataDir();
-  if (!existsSync(FILE_PATH)) return {};
-  try {
-    const raw = await readFile(FILE_PATH, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return {};
-    return parsed as CheckoutBookingStorage;
-  } catch {
-    return {};
-  }
-}
-
-async function writeAll(next: CheckoutBookingStorage): Promise<void> {
-  if (isFilePersistenceDisabled()) {
-    warnFilePersistenceDisabled('checkout-bookings.writeAll', { file: FILE_PATH, attemptedCount: Object.keys(next || {}).length });
-    return;
-  }
-  await ensureDataDir();
-  const tmp = `${FILE_PATH}.tmp`;
-  await writeFile(tmp, JSON.stringify(next, null, 2), 'utf-8');
-  await rename(tmp, FILE_PATH);
-}
-
 function toIsoOrNull(v: unknown): string | null {
   if (typeof v !== 'string' || !v.trim()) return null;
   const d = new Date(v);
@@ -72,15 +29,25 @@ function toIsoOrNull(v: unknown): string | null {
 
 export async function writeCheckoutBookingRecord(record: CheckoutBookingRecord): Promise<void> {
   if (!record?.id) throw new Error('Missing checkout booking id');
-  const all = await readAll();
-  all[record.id] = record;
-  await writeAll(all);
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from('bookings').upsert(
+    {
+      id: record.id,
+      checkout_session_id: null,
+      data: record,
+      created_at: record.createdAt || new Date().toISOString(),
+    },
+    { onConflict: 'id' }
+  );
+  if (error) throw error;
 }
 
 export async function readCheckoutBookingRecord(id: string): Promise<CheckoutBookingRecord | null> {
   if (!id) return null;
-  const all = await readAll();
-  const found = all[id];
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.from('bookings').select('data').eq('id', id).maybeSingle();
+  if (error) throw error;
+  const found = (data as any)?.data as CheckoutBookingRecord | undefined;
   if (!found) return null;
   // Normalize defensively
   const sessionTimes: StoredSessionTime[] = Array.isArray(found.sessionTimes)
@@ -119,10 +86,18 @@ export async function readCheckoutBookingRecord(id: string): Promise<CheckoutBoo
 
 export async function deleteCheckoutBookingRecord(id: string): Promise<void> {
   if (!id) return;
-  const all = await readAll();
-  if (!all[id]) return;
-  delete all[id];
-  await writeAll(all);
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from('bookings').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function setCheckoutBookingCheckoutSessionId(bookingId: string, checkoutSessionId: string): Promise<void> {
+  const bid = String(bookingId || '').trim();
+  const sid = String(checkoutSessionId || '').trim();
+  if (!bid || !sid) return;
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from('bookings').update({ checkout_session_id: sid }).eq('id', bid);
+  if (error) throw error;
 }
 
 

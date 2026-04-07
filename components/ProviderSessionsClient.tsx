@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
-import { getSessionEndTimeMs, isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
+import { getSessionEndTimeMs, isSessionCompleted, isSessionNoShow, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import ReviewModal from '@/components/ReviewModal';
 import { getCurrentUserId } from '@/lib/sessions/actions';
@@ -16,6 +16,7 @@ interface SessionCardProps {
   isCompleted?: boolean;
   viewerRole?: 'student' | 'provider';
   currentUserId?: string | null;
+  statusBadgeOverride?: { label: string; className: string } | null;
   onMessage?: (session: Session) => void;
   onLeaveReview?: (session: Session) => void;
 }
@@ -25,6 +26,7 @@ function SessionCard({
   isCompleted = false,
   viewerRole = 'provider',
   currentUserId,
+  statusBadgeOverride = null,
   onMessage,
   onLeaveReview,
 }: SessionCardProps) {
@@ -54,6 +56,15 @@ function SessionCard({
   const topicLabel = getCanonicalTopicLabel(session);
 
   const getStatusBadge = () => {
+    if (statusBadgeOverride) {
+      return (
+        <span
+          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusBadgeOverride.className}`}
+        >
+          {statusBadgeOverride.label}
+        </span>
+      );
+    }
     if (isCompleted) {
       return (
         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -125,7 +136,7 @@ function SessionCard({
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
-            {viewerRole !== 'provider' && getStatusBadge()}
+            {getStatusBadge()}
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
               {serviceTypeLabel}
             </span>
@@ -277,6 +288,7 @@ export default function ProviderSessionsClient({
 }) {
   void canUseTestCompletionOverride;
   const [upcomingSessions, setUpcomingSessions] = useState<Session[]>([]);
+  const [noShowSessions, setNoShowSessions] = useState<Session[]>([]);
   const [completedSessions, setCompletedSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
   const lastJsonRef = useRef<string>('');
@@ -309,6 +321,14 @@ export default function ProviderSessionsClient({
         const upcomingSorted = all
           .filter((s) => isSessionUpcoming(s, nowMs) && !isSessionCompleted(s, nowMs))
           .sort((a, b) => getStartMs(a) - getStartMs(b));
+        const noShowsSorted = all
+          .filter((s) => isSessionNoShow(s))
+          .sort((a, b) => {
+            const ea = getSessionEndTimeMs(a) ?? 0;
+            const eb = getSessionEndTimeMs(b) ?? 0;
+            if (eb !== ea) return eb - ea;
+            return getStartMs(b) - getStartMs(a);
+          });
         const completedSorted = all
           .filter((s) => isSessionCompleted(s, nowMs))
           .sort((a, b) => {
@@ -318,11 +338,12 @@ export default function ProviderSessionsClient({
             return getStartMs(b) - getStartMs(a);
           });
 
-        const nextStr = JSON.stringify({ upcoming: upcomingSorted, completed: completedSorted });
+        const nextStr = JSON.stringify({ upcoming: upcomingSorted, noShows: noShowsSorted, completed: completedSorted });
         const changed = nextStr !== lastJsonRef.current;
         if (changed) {
           lastJsonRef.current = nextStr;
           setUpcomingSessions(upcomingSorted as Session[]);
+          setNoShowSessions(noShowsSorted as Session[]);
           setCompletedSessions(completedSorted as Session[]);
         }
 
@@ -330,6 +351,7 @@ export default function ProviderSessionsClient({
         console.error('Error fetching sessions:', error);
         if (!didInitialLoadRef.current) {
           setUpcomingSessions([]);
+          setNoShowSessions([]);
           setCompletedSessions([]);
         }
       } finally {
@@ -427,8 +449,47 @@ export default function ProviderSessionsClient({
           </div>
         </div>
 
-        {/* Completed Sessions */}
-        <div className="space-y-4">
+        {/* Right column: No Shows + Completed */}
+        <div className="space-y-6">
+          {/* No Shows */}
+          <div className="overflow-hidden rounded-lg bg-white shadow-sm border border-gray-200">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">No Shows</h2>
+              <p className="mt-1 text-sm text-gray-500">Sessions where one party did not attend</p>
+            </div>
+            <div className="p-6 min-h-[140px]">
+              {noShowSessions.length === 0 ? (
+                <div className="text-center py-6">
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">No no-show sessions</h3>
+                </div>
+              ) : (
+                <div className="space-y-4 max-h-[320px] overflow-auto">
+                  {noShowSessions.map((session) => {
+                    const status = String((session as any)?.status || '');
+                    const badge =
+                      status === 'provider_no_show' || status === 'no_show_provider' || status === 'expired_provider_no_show'
+                        ? { label: 'Provider No Show', className: 'bg-red-100 text-red-800' }
+                        : status === 'student_no_show' || status === 'no_show_student'
+                          ? { label: 'Student No Show', className: 'bg-red-100 text-red-800' }
+                          : { label: 'No Show', className: 'bg-red-100 text-red-800' };
+                    return (
+                      <SessionCard
+                        key={session.id}
+                        session={session}
+                        isCompleted={false}
+                        viewerRole={role}
+                        currentUserId={currentUserId}
+                        statusBadgeOverride={badge}
+                        onMessage={handleMessage}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Completed Sessions */}
           <div className="overflow-hidden rounded-lg bg-white shadow-sm border border-gray-200">
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-xl font-semibold text-gray-900">Completed Sessions</h2>
@@ -449,12 +510,8 @@ export default function ProviderSessionsClient({
                       d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">
-                    No completed sessions
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Your completed sessions will appear here
-                  </p>
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">No completed sessions</h3>
+                  <p className="mt-1 text-sm text-gray-500">Your completed sessions will appear here</p>
                 </div>
               ) : (
                 <div className="space-y-4 max-h-[520px] overflow-auto">

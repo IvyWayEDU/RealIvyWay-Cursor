@@ -1,15 +1,7 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
 const schools_1 = require("../data/schools");
-function readJson(filePath) {
-    const raw = fs_1.default.readFileSync(filePath, 'utf-8');
-    return JSON.parse(raw);
-}
+const storage_1 = require("../lib/auth/storage");
 function isProvider(u) {
     const roles = Array.isArray(u?.roles) ? u.roles : [];
     return roles.includes('provider') || roles.includes('counselor') || roles.includes('tutor');
@@ -38,12 +30,10 @@ function bestSchoolIdFromLegacy(name) {
         .replace(/^_+|_+$/g, '');
     return normalized || null;
 }
-function main() {
+async function main() {
     const args = new Set(process.argv.slice(2));
     const shouldFix = args.has('--fix');
-    const usersFile = path_1.default.join(process.cwd(), 'data', 'users.json');
-    const parsed = readJson(usersFile);
-    const users = Array.isArray(parsed) ? parsed : Object.values(parsed);
+    const users = (await (0, storage_1.getUsers)());
     const providers = users.filter(isProvider);
     const issues = [];
     for (const p of providers) {
@@ -100,11 +90,11 @@ function main() {
         console.log(`- ${badge} provider=${it.id} name="${it.name}" school_id="${it.school_id ?? ''}" school_name="${it.school_name ?? ''}" -> suggested "${it.suggested_school_id ?? ''}" "${it.suggested_school_name ?? ''}"`);
     }
     if (shouldFix) {
-        fs_1.default.writeFileSync(usersFile, JSON.stringify(Array.isArray(parsed) ? users : Object.fromEntries(users.map((u) => [u.id, u])), null, 2));
-        console.log(`[audit-provider-schools] wrote fixes to ${usersFile}`);
+        await (0, storage_1.saveUsers)(users);
+        console.log('[audit-provider-schools] wrote fixes to Supabase users');
     }
     else {
-        console.log('[audit-provider-schools] run with --fix to write suggested school_id/school_name into data/users.json');
+        console.log('[audit-provider-schools] run with --fix to write suggested school_id/school_name into Supabase users');
     }
     // Targeted Yale check (requested)
     const yaleId = 'yale_university';
@@ -123,4 +113,7 @@ function main() {
         console.log(`  - yale_mismatch provider=${String(p.id)} name="${String(p.name || '')}" school_id="${String(p.school_id || '')}" school_name="${String(p.school_name || '')}"`);
     }
 }
-main();
+main().catch((e) => {
+    console.error('[audit-provider-schools] failed', e);
+    process.exit(1);
+});

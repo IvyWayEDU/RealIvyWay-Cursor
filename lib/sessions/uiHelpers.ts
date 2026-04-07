@@ -36,21 +36,60 @@ export function getSessionStartTimeMs(session: Session & { [key: string]: any })
 }
 
 /**
+ * Canonical (Supabase) session start time in epoch ms.
+ * Source of truth: `session.datetime` (NOT legacy `startTime`).
+ */
+export function getSessionDatetimeMs(session: Session & { [key: string]: any }): number | null {
+  return parseUtcEpochMs((session as any)?.datetime);
+}
+
+/**
+ * Canonical (Supabase) session end time in epoch ms.
+ * Source of truth: `session.end_datetime`.
+ *
+ * If `end_datetime` is null/missing, assume a 60 minute duration.
+ */
+export function getSessionEndDatetimeMs(session: Session & { [key: string]: any }): number | null {
+  const explicitEnd = parseUtcEpochMs((session as any)?.end_datetime);
+  if (explicitEnd !== null) return explicitEnd;
+
+  const startMs = getSessionDatetimeMs(session);
+  if (startMs === null) return null;
+  return startMs + 60 * 60 * 1000;
+}
+
+/**
+ * Join button timing logic:
+ * - Enabled starting exactly 10 minutes before `session.datetime`
+ * - Stays enabled through the session end time (inclusive)
+ */
+export function canJoinSessionNow(session: Session & { [key: string]: any }, nowMs: number): boolean {
+  const startMs = getSessionDatetimeMs(session);
+  if (startMs === null) return false;
+
+  const endMs = getSessionEndDatetimeMs(session);
+  if (endMs === null) return false;
+
+  const openMs = startMs - 10 * 60 * 1000;
+  return nowMs >= openMs && nowMs <= endMs;
+}
+
+/**
  * Normalize Zoom join URL from session object.
  * Checks multiple possible fields to find a Zoom join URL.
  * 
  * @param session - The session object
- * @returns The normalized zoomJoinUrl, or undefined if none found
+ * @returns The normalized Zoom join URL, or undefined if none found
  */
 export function normalizeZoomJoinUrl(session: Session & { [key: string]: any }): string | undefined {
   // Check in order of preference:
-  // 1. zoomJoinUrl (standard field)
+  // 1. zoom_join_url (snake_case; stored in Supabase `sessions.data` and/or in a dedicated column)
   // 2. joinUrl (alternative field name)
   // 3. zoom_url (alternative field name)
   // 4. meeting?.join_url (nested object)
   
-  if (session.zoomJoinUrl) {
-    return session.zoomJoinUrl;
+  if ((session as any).zoom_join_url) {
+    return (session as any).zoom_join_url;
   }
   
   if (session.joinUrl) {
@@ -106,8 +145,8 @@ export function shouldShowJoinSessionButton(session: Session & { [key: string]: 
 
   // For sessions created after this fix, require Zoom URL
   // For legacy sessions, show button if they have Zoom data
-  const zoomJoinUrl = normalizeZoomJoinUrl(session);
-  if (!zoomJoinUrl && !session.zoomMeetingId) {
+  const joinUrl = normalizeZoomJoinUrl(session);
+  if (!joinUrl && !session.zoomMeetingId) {
     // Legacy test session without Zoom data - ignore
     return false;
   }

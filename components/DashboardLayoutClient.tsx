@@ -32,7 +32,8 @@ export default function DashboardLayoutClient({
 }: DashboardLayoutClientProps) {
   const pathname = usePathname() || '';
   const roleFromPath = getRoleFromPath(pathname);
-  const showSupportWidget = userRole !== 'admin';
+  const showSupportWidget = userRole !== 'admin' && !pathname.includes('/dashboard/ai');
+  const layoutStyle = { ['--sidebar-width' as any]: '16rem' } as React.CSSProperties;
 
   const isCheckoutPage =
     pathname === '/dashboard/book/summary' ||
@@ -50,9 +51,9 @@ export default function DashboardLayoutClient({
   }
   
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-gray-100" style={layoutStyle}>
       <Sidebar role={userRole} session={session} />
-      <div className="flex-1 flex flex-col">
+      <div className="relative flex-1 flex flex-col">
         <DashboardHeader session={session} />
         <main className="flex-1 overflow-y-auto min-h-0">
           <div className="p-8">{children}</div>

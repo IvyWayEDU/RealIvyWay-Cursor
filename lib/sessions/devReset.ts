@@ -1,8 +1,9 @@
-import { getSessions, saveSessions } from './storage';
+import { getSessions } from './storage';
 import {
   readReservedSlotsFile,
   writeReservedSlotsFile,
 } from '@/lib/availability/store.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 export async function clearUpcomingSessionsForDev(): Promise<number> {
   if (process.env.NODE_ENV === 'production') {
@@ -25,7 +26,9 @@ export async function clearUpcomingSessionsForDev(): Promise<number> {
   }
 
   // 2) Delete all sessions by saving an empty array
-  await saveSessions([]);
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from('sessions').delete().neq('student_id', '');
+  if (error) throw error;
 
   console.log('[DEV RESET] DEV-ONLY: Cleared', sessionCount, 'sessions and reserved slots');
   return sessionCount;

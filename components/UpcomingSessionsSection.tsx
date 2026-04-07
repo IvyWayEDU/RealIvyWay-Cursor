@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
 import ZoomJoinModal from './ZoomJoinModal';
-import { getSessionStartTimeMs } from '@/lib/sessions/uiHelpers';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 
 export default function UpcomingSessionsSection() {
@@ -102,11 +101,11 @@ export default function UpcomingSessionsSection() {
 
   const getStartIso = (s: any) => s?.startTime || s?.scheduledStartTime || s?.scheduledStart;
   const getEndIso = (s: any) => s?.endTime || s?.scheduledEndTime || s?.scheduledEnd;
-  // Per spec: always navigate to session.zoomJoinUrl when available (participants join link).
+  // Per spec: always navigate to session.zoom_join_url when available (participants join link).
   // Keep legacy fallbacks for older/dev sessions.
   const getJoinUrl = (s: any): string | null =>
-    (typeof s?.zoomJoinUrl === 'string' && s.zoomJoinUrl.trim().length > 0
-      ? s.zoomJoinUrl
+    (typeof s?.zoom_join_url === 'string' && s.zoom_join_url.trim().length > 0
+      ? s.zoom_join_url
       : typeof s?.meetingUrl === 'string' && s.meetingUrl.trim().length > 0
         ? s.meetingUrl
         : typeof s?.zoomUrl === 'string' && s.zoomUrl.trim().length > 0
@@ -268,26 +267,55 @@ export default function UpcomingSessionsSection() {
 
                       {(() => {
                         const joinUrl = getJoinUrl(session as any);
-                        const startTimeMs = getSessionStartTimeMs(session as any) ?? NaN;
-                        const canJoinSession = Number.isFinite(startTimeMs) ? nowMs >= startTimeMs : false;
+                        const sessionDatetime = (session as any)?.datetime;
+
+                        if (process.env.NODE_ENV !== 'production') {
+                          console.log({
+                            sessionDatetime: sessionDatetime,
+                            now: new Date().toISOString(),
+                            startTime: new Date(sessionDatetime).getTime(),
+                            nowTime: Date.now(),
+                            canJoin: Date.now() >= (new Date(sessionDatetime).getTime() - 10 * 60 * 1000),
+                          });
+                        }
+
+                        const sessionStart = new Date(sessionDatetime).getTime();
+                        const now = nowMs;
+
+                        const canJoinSession =
+                          Number.isFinite(sessionStart) &&
+                          now >= sessionStart - 10 * 60 * 1000 &&
+                          now <= sessionStart + 60 * 60 * 1000;
                         return (
-                          <button
-                            type="button"
-                            disabled={!canJoinSession}
-                            onClick={() => {
-                              if (!joinUrl) return;
-                              // Early clicks are blocked via disabled button only.
-                              setJoinConfirm({ joinUrl, sessionId: session.id });
-                            }}
-                            className={`inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                              canJoinSession
-                                ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
-                                : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                            }`}
-                            title="Join Session"
-                          >
-                            Join Session
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              disabled={!canJoinSession}
+                              onClick={() => {
+                                if (!joinUrl) return;
+                                // Early clicks are blocked via disabled button only.
+                                setJoinConfirm({ joinUrl, sessionId: session.id });
+                              }}
+                              className={`inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                canJoinSession
+                                  ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
+                                  : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                              }`}
+                              title="Join Session"
+                            >
+                              Join Session
+                            </button>
+
+                            {process.env.NODE_ENV !== 'production' && (
+                              <div className="mt-1 max-w-[360px] text-[10px] leading-snug text-gray-500 break-words">
+                                {JSON.stringify({
+                                  datetime: sessionDatetime,
+                                  now: new Date().toISOString(),
+                                  canJoin: canJoinSession,
+                                })}
+                              </div>
+                            )}
+                          </>
                         );
                       })()}
                     </div>

@@ -1,8 +1,8 @@
 'use server';
 
 import { readAvailabilityFile, readReservedSlotsFile } from './store.server';
-import { generateSlotsForBlocks, normalizeServiceType } from './engine';
-import { getSessions } from '@/lib/sessions/storage';
+import { bindDateKeyAndMinutesToUtcDate, generateSlotsForBlocks, normalizeServiceType } from './engine';
+import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 
 export interface TimeSlot {
   start: string; // ISO 8601 UTC timestamp
@@ -44,7 +44,6 @@ export async function generateSlots(
   const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
 
   const availabilityStorage = await readAvailabilityFile();
-  const allSessions = await getSessions();
 
   const reserved = await readReservedSlotsFile();
   const reservedSet = new Set(
@@ -70,6 +69,45 @@ export async function generateSlots(
     Saturday: 6,
   };
   const dayOfWeek = dayOfWeekMap[dayName] ?? 0;
+
+  // Fetch booked sessions from Supabase `sessions` table (canonical fields).
+  const providerIdsForSessionQuery = Array.from(
+    new Set(
+      Object.values(availabilityStorage)
+        .map((e: any) => (typeof e?.providerId === 'string' ? String(e.providerId).trim() : ''))
+        .filter(Boolean)
+    )
+  );
+
+  const requestedDayStartUTC = bindDateKeyAndMinutesToUtcDate(date, 0, 'America/New_York');
+  const requestedDayEndUTC = new Date(requestedDayStartUTC.getTime() + 24 * 60 * 60 * 1000);
+  const sessionQueryStartISO = new Date(requestedDayStartUTC.getTime() - 60 * 60 * 1000).toISOString();
+  const sessionQueryEndISO = new Date(requestedDayEndUTC.getTime() + 60 * 60 * 1000).toISOString();
+
+  const bookedWindows = await getBookedSessionWindowsForProviders({
+    providerIds: providerIdsForSessionQuery,
+    rangeStartISO: sessionQueryStartISO,
+    rangeEndISO: sessionQueryEndISO,
+    defaultDurationMinutesWhenMissingEnd: 60,
+  });
+
+  const bookedWindowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
+  for (const w of bookedWindows) {
+    const arr = bookedWindowsByProvider.get(w.providerId) || [];
+    arr.push({ sessionStartMs: w.sessionStartMs, sessionEndMs: w.sessionEndMs });
+    bookedWindowsByProvider.set(w.providerId, arr);
+  }
+
+  const slotOverlapsBookedSession = (providerId: string, slotStartISO: string, durationMinutes: number): boolean => {
+    const slotStartMs = new Date(slotStartISO).getTime();
+    if (!Number.isFinite(slotStartMs)) return false;
+    const slotEndMs = slotStartMs + Math.max(1, durationMinutes) * 60 * 1000;
+    const windows = bookedWindowsByProvider.get(providerId) || [];
+    for (const s of windows) {
+      if (slotStartMs < s.sessionEndMs && slotEndMs > s.sessionStartMs) return true;
+    }
+    return false;
+  };
 
   const slots: TimeSlot[] = [];
 
@@ -103,21 +141,7 @@ export async function generateSlots(
       const reservationKey = `${providerId}|${startTimeISO}|${endTimeISO}`;
       if (reservedSet.has(reservationKey)) continue;
 
-      const isBooked = allSessions.some((s: any) => {
-        if (s?.providerId !== providerId) return false;
-        const status = s?.status;
-        if (status !== 'upcoming' && status !== 'paid' && status !== 'scheduled') return false;
-        const sStartIso = s?.scheduledStartTime || s?.scheduledStart;
-        const sEndIso = s?.scheduledEndTime || s?.scheduledEnd;
-        const sStart = sStartIso ? new Date(sStartIso) : new Date(NaN);
-        const sEnd = sEndIso ? new Date(sEndIso) : new Date(NaN);
-        if (isNaN(sStart.getTime()) || isNaN(sEnd.getTime())) return false;
-        const slotStart = new Date(startTimeISO);
-        const slotEnd = new Date(endTimeISO);
-        return sStart < slotEnd && sEnd > slotStart;
-      });
-
-      if (isBooked) continue;
+      if (slotOverlapsBookedSession(providerId, startTimeISO, durationMinutes)) continue;
 
       slots.push({
         providerId,

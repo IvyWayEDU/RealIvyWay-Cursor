@@ -9,20 +9,26 @@ import { getSessions } from '@/lib/sessions/storage';
  * ALL service types are handled identically.
  *
  * CANONICAL RULES (AUTHORITATIVE):
- * - Sessions only store: confirmed | completed | cancelled
- * - A session becomes `completed` when:
- *   currentTimeUTC >= session.scheduledEnd
+ * - Sessions may store terminal outcomes:
+ *   confirmed | completed | cancelled | provider_no_show | student_no_show
+ * - Provider attendance takes priority for outcome + payout.
+ * - After the 10-minute grace window from scheduled start:
+ *   - providerJoinedAt is NOT NULL → completed (provider gets paid), regardless of student join
+ *   - providerJoinedAt is NULL → provider_no_show (no payout)
+ * - Student absence should be tracked only via internal flags (e.g. noShowParty/flagNoShowStudent),
+ *   not as a terminal status that blocks provider payment.
  *
  * TRIGGERING:
  * - Resolver runs on fetches (API/server) and is idempotent.
  */
 
-// Note: status transitions are time-based and handled during `getSessions()` reads.
+// Note: status transitions are handled during `getSessions()` reads.
 
 /**
  * Unified session lifecycle resolver
  * 
  * This is the ONLY place where sessions can move to `completed` automatically.
+ * (And the only place we auto-resolve no-show outcomes.)
  * 
  * @param triggerSource - Source of the call for logging purposes
  */

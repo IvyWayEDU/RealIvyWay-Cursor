@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { getSessionPricingCents, ServiceType, Plan } from '../lib/pricing/catalog';
+import { getSessions, saveSessions } from '../lib/sessions/storage';
 
 type AnySession = Record<string, any>;
 
@@ -28,15 +29,9 @@ function groupKeyForSession(s: AnySession): string {
   return `session:${String(s.id || '')}`;
 }
 
-function backfill() {
-  const sessionsFile = path.join(process.cwd(), 'data', 'sessions.json');
-  if (!existsSync(sessionsFile)) {
-    throw new Error(`sessions.json not found at ${sessionsFile}`);
-  }
-
-  const raw = readFileSync(sessionsFile, 'utf-8');
-  const sessions = JSON.parse(raw) as AnySession[];
-  assert.ok(Array.isArray(sessions), 'sessions.json must be an array');
+async function backfill() {
+  const sessions = (await getSessions()) as AnySession[];
+  assert.ok(Array.isArray(sessions), 'sessions must be an array');
 
   const groups = new Map<string, AnySession[]>();
   for (const s of sessions) {
@@ -129,11 +124,8 @@ function backfill() {
     }
   }
 
-  const backupPath = sessionsFile.replace(/sessions\.json$/, `sessions.backup.${Date.now()}.json`);
-  writeFileSync(backupPath, raw, 'utf-8');
-  writeFileSync(sessionsFile, JSON.stringify(sessions, null, 2), 'utf-8');
-
-  console.log('Backfill complete', { patchedCount, skippedCount, backupPath });
+  await saveSessions(sessions as any);
+  console.log('Backfill complete', { patchedCount, skippedCount });
 
   // Also repair earnings credits/balances if they exist.
   const creditsFile = path.join(process.cwd(), 'data', 'earnings-credits.json');
@@ -168,6 +160,9 @@ function backfill() {
   }
 }
 
-backfill();
+backfill().catch((e) => {
+  console.error('[backfill-pricing] failed', e);
+  process.exit(1);
+});
 
 

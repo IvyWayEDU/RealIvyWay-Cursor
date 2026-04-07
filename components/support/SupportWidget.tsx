@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import SupportBubble from './SupportBubble';
 import SupportChatPanel from './SupportChatPanel';
@@ -54,10 +54,10 @@ export default function SupportWidget(props: {
   const [messages, setMessages] = useState<SupportChatMessage[]>([]);
   const [pendingTicket, setPendingTicket] = useState<PendingTicketOffer | null>(null);
 
-  async function createTicketFromTranscript(args: {
+  const createTicketFromTranscript = useCallback(async (args: {
     subject: string;
     transcript: Array<{ role: 'user' | 'assistant'; text: string }>;
-  }): Promise<{ ok: true } | { ok: false; error: string }> {
+  }): Promise<{ ok: true } | { ok: false; error: string }> => {
     try {
       const fd = new FormData();
       fd.append('subject', args.subject);
@@ -71,9 +71,9 @@ export default function SupportWidget(props: {
     } catch {
       return { ok: false, error: 'Unable to send message.' };
     }
-  }
+  }, [role]);
 
-  async function handleUserSend(raw: string) {
+  const handleUserSend = useCallback(async (raw: string) => {
     const text = raw.trim();
     if (!text || isBusy) return;
 
@@ -172,25 +172,33 @@ export default function SupportWidget(props: {
       },
     ]);
     setIsBusy(false);
-  }
+  }, [createTicketFromTranscript, isBusy, messages, pendingTicket, role]);
+
+  const handleClose = useCallback(() => setOpen(false), []);
+  const handleToggle = useCallback(() => setOpen((v) => !v), []);
+
+  const handlePickQuickAction = useCallback(
+    (m: string) => {
+      setOpen(true);
+      void handleUserSend(m);
+    },
+    [handleUserSend]
+  );
 
   return (
     <>
       <SupportChatPanel
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={handleClose}
         messages={messages}
         draft={draft}
         onDraftChange={setDraft}
-        onSend={() => handleUserSend(draft)}
+        onSend={handleUserSend}
         quickActions={quickActions}
-        onPickQuickAction={(m) => {
-          setOpen(true);
-          handleUserSend(m);
-        }}
+        onPickQuickAction={handlePickQuickAction}
         isBusy={isBusy}
       />
-      <SupportBubble isOpen={open} onToggle={() => setOpen((v) => !v)} />
+      <SupportBubble isOpen={open} onToggle={handleToggle} />
     </>
   );
 }

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { getCurrentUserId } from '@/lib/sessions/actions';
-import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { getEarningsServiceLabel } from '@/lib/earnings/serviceLabel';
 import { getCanonicalServiceType } from '@/lib/sessions/sessionDisplay';
 
@@ -101,7 +100,10 @@ export default function ProviderEarningsClient(props: {
 
         // Source of truth: completed sessions for this provider.
         const completedSessions = allSessions.filter(
-          (s) => s.providerId === userId && s.status === 'completed'
+          (s) =>
+            s.providerId === userId &&
+            s.status === 'completed' &&
+            ((s as any).providerEligibleForPayout === true || (s as any).provider_eligible_for_payout === true)
         );
         const nextStr = JSON.stringify(completedSessions);
         if (nextStr !== lastJsonRef.current) {
@@ -128,7 +130,15 @@ export default function ProviderEarningsClient(props: {
 
   // Convert sessions to bookings format for the graph
   const bookings: Booking[] = sessions.map((session) => {
-    const providerPayoutCents = calculateProviderPayoutCentsFromSession(session);
+    const earningsCents =
+      (session as any).providerPayoutCents || (session as any).provider_payout_cents || 0;
+    const earnings = earningsCents / 100;
+
+    console.log('Earnings display:', {
+      providerPayoutCents: (session as any).providerPayoutCents,
+      computed: earnings,
+    });
+
     const payoutStatus =
       (session.payoutStatus as any) ||
       ('available' as 'available' | 'pending_payout' | 'approved' | 'paid' | 'paid_out');
@@ -137,7 +147,7 @@ export default function ProviderEarningsClient(props: {
 
     return {
       id: session.id,
-      providerPayoutCents,
+      providerPayoutCents: earningsCents,
       payoutStatus,
       serviceLabel,
       completedAt: session.actualEndTime || session.scheduledEndTime,
@@ -342,7 +352,7 @@ export default function ProviderEarningsClient(props: {
                     return dateB.getTime() - dateA.getTime(); // Most recent first
                   })
                   .map((booking) => {
-                    const session = sessions.find(s => s.id === booking.id);
+                    const earnings = booking.providerPayoutCents / 100;
                     return (
                       <tr key={booking.id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -352,7 +362,7 @@ export default function ProviderEarningsClient(props: {
                           {booking.serviceLabel}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {formatCurrency(booking.providerPayoutCents)}
+                          {`$${earnings.toFixed(2)}`}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           {getStatusBadge(booking.payoutStatus)}

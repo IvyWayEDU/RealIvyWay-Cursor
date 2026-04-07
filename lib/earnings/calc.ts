@@ -25,6 +25,24 @@ export function getSessionGrossCents(session: Session): number {
 export function calculateProviderPayoutCentsFromSession(
   session: Session
 ): number {
+  // Payout eligibility gate (canonical):
+  // Provider gets paid ONLY if:
+  // - providerJoinedAt is NOT NULL
+  // - providerJoinedAt <= scheduledStart + 10 minutes
+  const providerJoinedAtRaw = (session as any)?.providerJoinedAt;
+  const scheduledStartIso =
+    (session as any)?.startTime ||
+    (session as any)?.scheduledStartTime ||
+    (session as any)?.scheduledStart ||
+    null;
+  const startMs = scheduledStartIso ? new Date(scheduledStartIso).getTime() : NaN;
+  const joinedMs =
+    typeof providerJoinedAtRaw === 'string' && providerJoinedAtRaw.trim()
+      ? new Date(providerJoinedAtRaw).getTime()
+      : NaN;
+  if (!Number.isFinite(startMs) || !Number.isFinite(joinedMs)) return 0;
+  if (joinedMs > startMs + 10 * 60 * 1000) return 0;
+
   // 1) If already persisted on the session record, trust it (immutable once booked).
   const persistedDollars = toFiniteNumber((session as any)?.providerPayout);
   if (persistedDollars != null) {

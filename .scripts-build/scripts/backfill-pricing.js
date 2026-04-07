@@ -7,6 +7,7 @@ const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
 const strict_1 = __importDefault(require("node:assert/strict"));
 const catalog_1 = require("../lib/pricing/catalog");
+const storage_1 = require("../lib/sessions/storage");
 function normalizeServiceTypeFromSession(s) {
     const raw = s.service_type ??
         s.serviceType ??
@@ -33,14 +34,9 @@ function groupKeyForSession(s) {
         return `cs:${cs}`;
     return `session:${String(s.id || '')}`;
 }
-function backfill() {
-    const sessionsFile = node_path_1.default.join(process.cwd(), 'data', 'sessions.json');
-    if (!(0, node_fs_1.existsSync)(sessionsFile)) {
-        throw new Error(`sessions.json not found at ${sessionsFile}`);
-    }
-    const raw = (0, node_fs_1.readFileSync)(sessionsFile, 'utf-8');
-    const sessions = JSON.parse(raw);
-    strict_1.default.ok(Array.isArray(sessions), 'sessions.json must be an array');
+async function backfill() {
+    const sessions = (await (0, storage_1.getSessions)());
+    strict_1.default.ok(Array.isArray(sessions), 'sessions must be an array');
     const groups = new Map();
     for (const s of sessions) {
         const k = groupKeyForSession(s);
@@ -124,10 +120,8 @@ function backfill() {
             }
         }
     }
-    const backupPath = sessionsFile.replace(/sessions\.json$/, `sessions.backup.${Date.now()}.json`);
-    (0, node_fs_1.writeFileSync)(backupPath, raw, 'utf-8');
-    (0, node_fs_1.writeFileSync)(sessionsFile, JSON.stringify(sessions, null, 2), 'utf-8');
-    console.log('Backfill complete', { patchedCount, skippedCount, backupPath });
+    await (0, storage_1.saveSessions)(sessions);
+    console.log('Backfill complete', { patchedCount, skippedCount });
     // Also repair earnings credits/balances if they exist.
     const creditsFile = node_path_1.default.join(process.cwd(), 'data', 'earnings-credits.json');
     const balancesFile = node_path_1.default.join(process.cwd(), 'data', 'provider-earnings.json');
@@ -162,4 +156,7 @@ function backfill() {
         console.log('Rebuilt provider earnings balances', { providerCount: Object.keys(balances).length });
     }
 }
-backfill();
+backfill().catch((e) => {
+    console.error('[backfill-pricing] failed', e);
+    process.exit(1);
+});

@@ -317,7 +317,7 @@ export async function confirmSessionPayment(sessionId: string): Promise<{
 export async function createZoomMeetingForSessionData(sessionData: Session): Promise<{
   success: boolean;
   error?: string;
-  zoomJoinUrl?: string;
+  zoom_join_url?: string;
   zoomMeetingId?: string;
   zoomStartUrl?: string;
 }> {
@@ -340,6 +340,8 @@ export async function createZoomMeetingForSessionData(sessionData: Session): Pro
       : `${sessionData.sessionType} Session`;
 
     // Create Zoom meeting
+    const session: any = sessionData as any;
+    console.log("Creating Zoom meeting for session:", session.id, session.datetime ?? session.scheduledStartTime ?? session.scheduledStart ?? session.startTime);
     const zoomMeeting = await createZoomMeeting({
       topic,
       startTime: sessionData.scheduledStartTime,
@@ -348,7 +350,7 @@ export async function createZoomMeetingForSessionData(sessionData: Session): Pro
 
     return {
       success: true,
-      zoomJoinUrl: zoomMeeting.joinUrl,
+      zoom_join_url: zoomMeeting.joinUrl,
       zoomMeetingId: zoomMeeting.meetingId,
       zoomStartUrl: zoomMeeting.startUrl,
     };
@@ -369,7 +371,7 @@ export async function createZoomMeetingForSessionData(sessionData: Session): Pro
 export async function createZoomMeetingForSession(sessionId: string): Promise<{
   success: boolean;
   error?: string;
-  zoomJoinUrl?: string;
+  zoom_join_url?: string;
   zoomMeetingId?: string;
 }> {
   try {
@@ -541,12 +543,60 @@ export async function markSessionCompletedWithEarnings(
 
     const creditEarnings = args.creditEarnings !== false; // default true
     const providerId = (existing as any)?.providerId;
-    const nextStatus = args.status || 'completed';
+    let nextStatus = args.status || 'completed';
+
+    // Attendance + payout validation (canonical).
+    const scheduledStartIso =
+      (existing as any)?.scheduledStartTime || (existing as any)?.scheduledStart || (existing as any)?.startTime || null;
+    const startMs = scheduledStartIso ? new Date(scheduledStartIso).getTime() : NaN;
+    const providerJoinedAtRaw =
+      (existing as any)?.providerJoinedAt ??
+      (typeof args.actualStartTime === 'string' && args.actualStartTime.trim() ? args.actualStartTime : null);
+    const studentJoinedAtRaw = (existing as any)?.studentJoinedAt ?? null;
+    const providerJoinedAt =
+      typeof providerJoinedAtRaw === 'string' && providerJoinedAtRaw.trim() ? new Date(providerJoinedAtRaw) : null;
+    const studentJoinedAt =
+      typeof studentJoinedAtRaw === 'string' && studentJoinedAtRaw.trim() ? new Date(studentJoinedAtRaw) : null;
+
+    const providerJoinedAtIso =
+      providerJoinedAt && Number.isFinite(providerJoinedAt.getTime()) ? providerJoinedAt.toISOString() : null;
+    const studentJoinedAtIso =
+      studentJoinedAt && Number.isFinite(studentJoinedAt.getTime()) ? studentJoinedAt.toISOString() : null;
+
+    const _providerJoinedWithin10Min =
+      Boolean(providerJoinedAtIso) &&
+      Number.isFinite(startMs) &&
+      (providerJoinedAt as Date).getTime() <= startMs + 10 * 60 * 1000;
+    void _providerJoinedWithin10Min;
+
+    // Provider attendance takes priority:
+    // - Provider join evidence is required to mark a session `completed`.
+    // - Student absence MUST NOT block completion or payout.
+    // If a caller attempts to complete without provider join evidence, downgrade to provider no-show.
+    if (nextStatus === 'completed') {
+      if (!providerJoinedAtIso) nextStatus = 'provider_no_show';
+    }
+
+    // Canonical payout rule:
+    // Provider gets paid if they showed up (providerJoinedAt exists), regardless of student attendance.
+    const noPayoutStatuses = new Set(['provider_no_show', 'cancelled', 'cancelled-late', 'refunded']);
+    const computedProviderEarned =
+      typeof args.providerEarned === 'boolean'
+        ? args.providerEarned
+        : Boolean(providerJoinedAtIso) && !noPayoutStatuses.has(String(nextStatus || '').trim());
+    const computedEligibleForPayout =
+      typeof args.providerEarned === 'boolean'
+        ? args.providerEarned
+        : Boolean(providerJoinedAtIso) && !noPayoutStatuses.has(String(nextStatus || '').trim());
 
     // Calculate payout + platform take (cents)
     // Provider payout is a flat per-session amount (stored on session); NEVER derived from Stripe charge minus fees.
     const grossCents = existing ? getSessionGrossCents(existing as any) : 0;
-    const providerPayoutCents = creditEarnings && existing ? calculateProviderPayoutCentsFromSession(existing as any) : 0;
+    const baseProviderPayoutCents = existing ? calculateProviderPayoutCentsFromSession(existing as any) : 0;
+    const providerPayoutCents =
+      creditEarnings && computedProviderEarned !== false && computedEligibleForPayout !== false
+        ? Math.max(0, Math.floor(baseProviderPayoutCents))
+        : 0;
     const platformFeeCents = Math.max(0, Math.floor(grossCents - providerPayoutCents));
     const providerPayoutAmount = Math.floor(providerPayoutCents) / 100;
     const basePriceCents = Math.max(
@@ -582,18 +632,6 @@ export async function markSessionCompletedWithEarnings(
       platformShareCents,
     });
 
-    // Default payout eligibility for plain completed sessions:
-    // - If we're marking a session as `completed` (normal completion), the provider should be paid by default.
-    // - No-show / refund / cancel flows must explicitly set providerEarned/providerEligibleForPayout to false.
-    const defaultProviderEarned =
-      nextStatus === 'completed' && typeof args.providerEarned !== 'boolean' ? true : args.providerEarned;
-    const defaultEligible =
-      nextStatus === 'completed' && typeof args.providerEarned !== 'boolean'
-        ? true
-        : typeof args.providerEarned === 'boolean'
-          ? args.providerEarned
-          : undefined;
-
     const patch: any = {
       status: nextStatus,
       completedAt,
@@ -613,18 +651,28 @@ export async function markSessionCompletedWithEarnings(
     if (args.flag) {
       patch.flag = args.flag;
     }
-    if (typeof defaultProviderEarned === 'boolean') {
-      patch.providerEarned = defaultProviderEarned;
-    }
-    // Keep payout eligibility consistent with providerEarned when we can infer it.
-    if (typeof defaultEligible === 'boolean') {
-      patch.providerEligibleForPayout = defaultEligible;
+    patch.providerEarned = Boolean(computedProviderEarned);
+    patch.providerEligibleForPayout = Boolean(computedEligibleForPayout);
+
+    // If no-show statuses were derived, persist canonical markers.
+    if (nextStatus === 'provider_no_show') {
+      patch.attendanceFlag = 'provider_no_show';
+      patch.noShowParty = studentJoinedAtIso ? 'provider' : 'both';
+      patch.flagNoShowProvider = true;
+      patch.flagNoShowStudent = !studentJoinedAtIso;
     }
     // If we are completing normally and the caller didn't provide explicit attendance fields,
     // treat it as attended (not a no-show). No-show flows should set these explicitly.
     if (nextStatus === 'completed') {
       if (typeof patch.attendanceFlag !== 'string') patch.attendanceFlag = 'none';
       if (typeof patch.flagNoShowProvider !== 'boolean') patch.flagNoShowProvider = false;
+      // Analytics-only: student absence should not block completion/payout.
+      if (!studentJoinedAtIso) {
+        if (typeof patch.flagNoShowStudent !== 'boolean') patch.flagNoShowStudent = true;
+        if (typeof patch.noShowParty !== 'string') patch.noShowParty = 'student';
+      } else {
+        if (typeof patch.flagNoShowStudent !== 'boolean') patch.flagNoShowStudent = false;
+      }
     }
     if (typeof args.flagNoShowProvider === 'boolean') {
       patch.flagNoShowProvider = args.flagNoShowProvider;
@@ -659,11 +707,14 @@ export async function markSessionCompletedWithEarnings(
     }
 
     // Persist provider earnings ONLY when a session transitions confirmed -> completed AND provider should be paid.
-    const earned = typeof patch.providerEarned === 'boolean' ? patch.providerEarned : true;
-    const eligible = typeof patch.providerEligibleForPayout === 'boolean' ? patch.providerEligibleForPayout : true;
+    const earned = typeof patch.providerEarned === 'boolean' ? patch.providerEarned : false;
+    const eligible = typeof patch.providerEligibleForPayout === 'boolean' ? patch.providerEligibleForPayout : false;
     const shouldCredit = nextStatus === 'completed' && earned !== false && eligible !== false;
 
     if (creditEarnings && providerIdAfter && providerPayoutCents > 0 && shouldCredit) {
+      // SAFETY CHECK (required): never create earnings without provider join evidence.
+      if (!providerJoinedAtIso) return { success: true };
+
       // Idempotency:
       // - credit store is idempotent by sessionId
       // - we also persist session.earningsCredited to prevent double-crediting across retry paths

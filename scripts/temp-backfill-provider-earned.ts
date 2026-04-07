@@ -11,7 +11,7 @@
  *
  * Safety:
  * - Default mode is DRY RUN (prints what it would change)
- * - Pass `--apply` to actually write to `data/sessions.json`
+ * - Pass `--apply` to actually write to Supabase
  *
  * Run:
  *   npm -C ivyway-web run -s pricing:validate   # (optional sanity check that scripts build)
@@ -20,8 +20,7 @@
  *   node .scripts-build/scripts/temp-backfill-provider-earned.js --apply
  */
 
-import { promises as fs } from 'fs';
-import path from 'path';
+import { getSessions, saveSessions } from '../lib/sessions/storage';
 
 type AnySession = Record<string, any>;
 
@@ -38,15 +37,12 @@ function isNoShowMarked(s: AnySession): boolean {
 
 async function main() {
   const apply = process.argv.includes('--apply');
-  const file = path.join(process.cwd(), 'data', 'sessions.json');
-
-  const raw = await fs.readFile(file, 'utf-8');
-  const parsed = JSON.parse(raw);
-  const sessions: AnySession[] = Array.isArray(parsed) ? parsed : [];
+  const sessions = (await getSessions()) as AnySession[];
 
   const nowISO = new Date().toISOString();
   let candidates = 0;
   let changed = 0;
+  const changedSessions: AnySession[] = [];
 
   for (const s of sessions) {
     if (String(s?.status || '') !== 'completed') continue;
@@ -69,18 +65,18 @@ async function main() {
     s.noShowParty = s.noShowParty === 'provider' || s.noShowParty === 'both' ? null : s.noShowParty;
     s.updatedAt = nowISO;
     changed += 1;
+    changedSessions.push(s);
   }
 
   console.log('[temp-backfill-provider-earned]', {
-    file,
     mode: apply ? 'APPLY' : 'DRY_RUN',
     candidates,
     changed,
   });
 
   if (apply) {
-    await fs.writeFile(file, JSON.stringify(sessions, null, 2), 'utf-8');
-    console.log('[temp-backfill-provider-earned] wrote sessions.json');
+    await saveSessions(changedSessions as any);
+    console.log('[temp-backfill-provider-earned] wrote updates to Supabase');
   } else {
     console.log('[temp-backfill-provider-earned] no changes written (pass --apply)');
   }

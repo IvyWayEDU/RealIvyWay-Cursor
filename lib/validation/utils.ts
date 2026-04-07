@@ -23,18 +23,20 @@ export type RequestBodyValidationError =
  * Validates request body against a Zod schema and returns parsed data or error response
  * Strips unknown fields to reject unexpected data
  */
-export async function validateRequestBody<T>(
+export async function validateRequestBody<S extends z.ZodTypeAny>(
   request: NextRequest,
-  schema: z.ZodSchema<T>
+  schema: S
 ): Promise<
-  | { success: true; data: T }
+  | { success: true; data: z.output<S> }
   | { success: false; response: NextResponse; error: RequestBodyValidationError }
 > {
   try {
     const body = await request.json();
     // Use strict mode to reject unknown fields (when schema supports it)
     const strictSchema =
-      typeof (schema as any)?.strict === 'function' ? ((schema as any).strict() as z.ZodSchema<T>) : schema;
+      typeof (schema as any)?.strict === 'function'
+        ? ((schema as any).strict() as S)
+        : schema;
     const parsed = strictSchema.parse(body);
     return { success: true, data: parsed };
   } catch (error) {
@@ -79,10 +81,10 @@ export async function validateRequestBody<T>(
 /**
  * Validates query parameters against a Zod schema
  */
-export function validateQueryParams<T>(
+export function validateQueryParams<S extends z.ZodTypeAny>(
   request: NextRequest,
-  schema: z.ZodSchema<T>
-): { success: true; data: T } | { success: false; response: NextResponse } {
+  schema: S
+): { success: true; data: z.output<S> } | { success: false; response: NextResponse } {
   try {
     const searchParams = request.nextUrl.searchParams;
     const params: Record<string, string | string[]> = {};
@@ -99,7 +101,7 @@ export function validateQueryParams<T>(
     }
     
     const strictSchema =
-      typeof (schema as any)?.strict === 'function' ? ((schema as any).strict() as z.ZodSchema<T>) : schema;
+      typeof (schema as any)?.strict === 'function' ? ((schema as any).strict() as S) : schema;
     const parsed = strictSchema.parse(params);
     return { success: true, data: parsed };
   } catch (error) {

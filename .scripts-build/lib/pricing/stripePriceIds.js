@@ -8,6 +8,7 @@ exports.getStripePriceIdForPricingKey = getStripePriceIdForPricingKey;
 exports.getStripePriceIdMapDebugInfo = getStripePriceIdMapDebugInfo;
 exports.debugLogStripePriceIdMapKeysOnce = debugLogStripePriceIdMapKeysOnce;
 exports.debugLogStripePriceIdMapDetailsOnce = debugLogStripePriceIdMapDetailsOnce;
+const catalog_1 = require("./catalog");
 const path_1 = __importDefault(require("path"));
 /**
  * Stripe price id lookup.
@@ -18,47 +19,35 @@ const path_1 = __importDefault(require("path"));
  * Provide as a JSON map in env:
  *   STRIPE_PRICE_IDS_JSON='{"tutoring_single":"price_...","tutoring_monthly":"price_...","counseling_single":"price_...","counseling_monthly":"price_...","testprep_single":"price_...","testprep_monthly":"price_...","virtual_tour_single":"price_...","ai_basic_monthly":"price_...","ai_pro_monthly":"price_...","ai_pro_yearly":"price_..."}'
  */
-const REQUIRED_ENV_KEYS = [
-    'tutoring_single',
-    'tutoring_monthly',
-    'counseling_single',
-    'counseling_monthly',
-    'testprep_single',
-    'testprep_monthly',
-    'virtual_tour_single',
-    'ai_basic_monthly',
-    'ai_pro_monthly',
-    'ai_pro_yearly',
-];
+const STRIPE_ENV_KEY_BY_PRICING_KEY = {
+    tutoring_single: 'tutoring_single',
+    tutoring_monthly: 'tutoring_monthly',
+    counseling_single: 'counseling_single',
+    counseling_monthly: 'counseling_monthly',
+    test_prep_single: 'testprep_single',
+    test_prep_monthly: 'testprep_monthly',
+    virtual_tour_single: 'virtual_tour_single',
+    ivyway_ai_basic_monthly: 'ai_basic_monthly',
+    ivyway_ai_pro_monthly: 'ai_pro_monthly',
+    ivyway_ai_pro_yearly: 'ai_pro_yearly',
+};
 function toStripePriceEnvKey(pricing_key) {
-    switch (pricing_key) {
-        case 'tutoring_single':
-            return 'tutoring_single';
-        case 'tutoring_monthly':
-            return 'tutoring_monthly';
-        case 'counseling_single':
-            return 'counseling_single';
-        case 'counseling_monthly':
-            return 'counseling_monthly';
-        case 'test_prep_single':
-            return 'testprep_single';
-        case 'test_prep_monthly':
-            return 'testprep_monthly';
-        case 'virtual_tour_single':
-            return 'virtual_tour_single';
-        case 'ivyway_ai_basic_monthly':
-            return 'ai_basic_monthly';
-        case 'ivyway_ai_pro_monthly':
-            return 'ai_pro_monthly';
-        case 'ivyway_ai_pro_yearly':
-            return 'ai_pro_yearly';
+    return STRIPE_ENV_KEY_BY_PRICING_KEY[pricing_key];
+}
+function getRequiredStripeEnvKeys() {
+    const set = new Set();
+    for (const item of Object.values(catalog_1.PRICING_CATALOG)) {
+        set.add(toStripePriceEnvKey(item.key));
     }
+    return Array.from(set).sort();
 }
 let cachedMap = null;
 let cachedSource = null;
 let didLogMapKeys = false;
 let didLogMapDetails = false;
 let lastLoadedFallbackFilePath = null;
+let didLogLoadSuccess = false;
+let didLogLoadFailure = false;
 function previewEnvString(s, head = 24, tail = 24) {
     const raw = String(s);
     if (raw.length <= head + tail + 3)
@@ -101,46 +90,79 @@ function loadStripePriceIdMapFromEnv() {
     const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
     const fallback = envRaw ? null : tryLoadDevFallbackStripePriceIdMapRaw();
     const raw = envRaw || fallback?.raw;
-    if (!raw) {
-        throw new Error('Missing STRIPE_PRICE_IDS_JSON env var (JSON map from pricing key → Stripe price id). For local dev you can alternatively create data/stripe-price-ids.local.json.');
-    }
+    const requiredKeys = getRequiredStripeEnvKeys();
+    // Log EXACT source decision up front (requested).
     cachedSource = envRaw ? 'env' : 'dev_fallback';
     if (!envRaw && fallback?.filePath)
         lastLoadedFallbackFilePath = fallback.filePath;
-    let parsed;
     try {
-        parsed = JSON.parse(raw);
-    }
-    catch {
-        const first = String(raw).slice(0, 1);
-        const last = String(raw).slice(-1);
-        // Common prod misconfig: pasting STRIPE_PRICE_IDS_JSON with wrapping single-quotes into Vercel env vars.
-        throw new Error(`Invalid STRIPE_PRICE_IDS_JSON (must be valid JSON). length=${String(raw).length} firstChar=${JSON.stringify(first)} lastChar=${JSON.stringify(last)} preview=${JSON.stringify(previewEnvString(String(raw)))}`);
-    }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be a JSON object)');
-    }
-    const obj = parsed;
-    const missing = [];
-    const out = {};
-    for (const k of REQUIRED_ENV_KEYS) {
-        const v = obj[k];
-        if (typeof v !== 'string' || !v.trim()) {
-            missing.push(k);
-            continue;
+        if (!raw) {
+            throw new Error('Missing STRIPE_PRICE_IDS_JSON env var (JSON map from pricing key → Stripe price id). For local dev you can alternatively create data/stripe-price-ids.local.json.');
         }
-        const trimmed = v.trim();
-        // Stripe Price IDs look like `price_...` (not `prod_...`).
-        if (!trimmed.startsWith('price_')) {
-            throw new Error(`Invalid STRIPE_PRICE_IDS_JSON value for key=${k}. Expected a Stripe Price ID starting with "price_", got: ${trimmed}`);
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
         }
-        out[k] = trimmed;
+        catch {
+            const first = String(raw).slice(0, 1);
+            const last = String(raw).slice(-1);
+            // Common prod misconfig: pasting STRIPE_PRICE_IDS_JSON with wrapping single-quotes into Vercel env vars.
+            throw new Error(`Invalid STRIPE_PRICE_IDS_JSON (must be valid JSON). length=${String(raw).length} firstChar=${JSON.stringify(first)} lastChar=${JSON.stringify(last)} preview=${JSON.stringify(previewEnvString(String(raw)))}`);
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('Invalid STRIPE_PRICE_IDS_JSON (must be a JSON object)');
+        }
+        const obj = parsed;
+        const missing = [];
+        const out = {};
+        for (const k of requiredKeys) {
+            const v = obj[k];
+            if (typeof v !== 'string' || !v.trim()) {
+                missing.push(k);
+                continue;
+            }
+            const trimmed = v.trim();
+            // Stripe Price IDs look like `price_...` (not `prod_...`).
+            if (!trimmed.startsWith('price_')) {
+                throw new Error(`Invalid STRIPE_PRICE_IDS_JSON value for key=${k}. Expected a Stripe Price ID starting with "price_", got: ${trimmed}`);
+            }
+            out[k] = trimmed;
+        }
+        if (missing.length > 0) {
+            throw new Error(`STRIPE_PRICE_IDS_JSON is missing required keys: ${missing.join(', ')}`);
+        }
+        cachedMap = out;
+        // Log what got loaded (requested); do not spam.
+        if (!didLogLoadSuccess) {
+            didLogLoadSuccess = true;
+            console.log('[STRIPE_PRICE_IDS_JSON LOADED]', {
+                source: cachedSource,
+                keys: Object.keys(cachedMap).sort(),
+                tutoring_single: cachedMap.tutoring_single,
+                fallbackFilePath: lastLoadedFallbackFilePath,
+                hasEnvVar: typeof envRaw === 'string' && !!envRaw.trim(),
+            });
+        }
+        return cachedMap;
     }
-    if (missing.length > 0) {
-        throw new Error(`STRIPE_PRICE_IDS_JSON is missing required keys: ${missing.join(', ')}`);
+    catch (e) {
+        // Log exact parse/validation error (requested); do not spam.
+        if (!didLogLoadFailure) {
+            didLogLoadFailure = true;
+            const envPresent = typeof envRaw === 'string' && !!envRaw.trim();
+            console.error('[STRIPE_PRICE_IDS_JSON LOAD FAILED]', {
+                source: cachedSource,
+                message: e instanceof Error ? e.message : String(e),
+                nodeEnv: process.env.NODE_ENV,
+                hasEnvVar: envPresent,
+                envVarLength: envPresent ? envRaw.length : null,
+                envVarPreview: envPresent ? previewEnvString(envRaw) : null,
+                fallbackFilePath: lastLoadedFallbackFilePath,
+                cwd: process.cwd(),
+            });
+        }
+        throw e;
     }
-    cachedMap = out;
-    return cachedMap;
 }
 function getStripePriceIdForPricingKey(pricing_key) {
     const envKey = toStripePriceEnvKey(pricing_key);

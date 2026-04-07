@@ -212,5 +212,30 @@
     "approvedAt": "2026-03-15T01:52:52.345Z",
     "updatedAt": "2026-03-15T01:52:58.598Z",
     "paidAt": "2026-03-15T01:52:58.598Z"
+  },
+  {
+    "id": "payoutreq_1775589292100_ybv0mdsy",
+    "providerId": "73c16ff1-3c56-41f4-8c24-7d4dbb2189c4",
+    "amountCents": 2500,
+    "status": "paid",
+    "createdAt": "2026-04-07T19:14:52.100Z",
+    "allocations": [
+      {
+        "sessionId": "__unattributed__",
+        "amountCents": 2500
+      }
+    ],
+    "payoutMethod": "Bank Transfer",
+    "payoutDestinationMasked": "test •••• 2345",
+    "payoutDestination": "test •••• 2345",
+    "bankName": "test",
+    "bankAccountNumber": "12345",
+    "bankRoutingNumber": "123456789",
+    "bankCountry": "US",
+    "accountHolderName": "testing",
+    "stripeTransferId": null,
+    "approvedAt": "2026-04-07T19:15:44.433Z",
+    "updatedAt": "2026-04-07T19:15:50.268Z",
+    "paidAt": "2026-04-07T19:15:50.268Z"
   }
 ]

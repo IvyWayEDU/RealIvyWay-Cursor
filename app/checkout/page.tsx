@@ -4,11 +4,23 @@ import { Elements } from '@stripe/react-stripe-js';
 import { PaymentElement } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
-);
+const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
 
 export default function CheckoutPage() {
+  if (!stripePromise) {
+    return (
+      <div className="min-h-screen w-full bg-gray-50 flex justify-center py-12 px-4">
+        <div className="w-full max-w-xl bg-white rounded-lg shadow p-6">
+          <h1 className="text-xl font-semibold mb-2">Checkout</h1>
+          <p className="text-sm text-gray-600">
+            Stripe is not configured. Please set <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-gray-50 flex justify-center py-12 px-4">
       <div className="w-full max-w-xl bg-white rounded-lg shadow p-6">

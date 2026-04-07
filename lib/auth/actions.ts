@@ -9,6 +9,7 @@ import { redirect } from 'next/navigation';
 import crypto from 'crypto';
 import { createProvider } from '@/lib/providers/storage';
 import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
+import { sendWelcomeEmailForUser } from '@/lib/email/transactional';
 
 export interface SignupResult {
   success: boolean;
@@ -121,6 +122,13 @@ export async function signup(
 
     // Create session
     await createSession(created.id, created.email, created.name, created.roles);
+
+    // Transactional email (best-effort; never block signup)
+    try {
+      await sendWelcomeEmailForUser({ email: created.email, name: created.name, roles: created.roles } as any);
+    } catch (e) {
+      console.warn('[email] welcome email failed (non-blocking)', e);
+    }
 
     // Get redirect route
     // If provider, redirect to onboarding instead of dashboard

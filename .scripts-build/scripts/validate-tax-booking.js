@@ -10,24 +10,19 @@
  * - provider_payout_cents stays fixed (50.00) for counseling sessions
  * - tax_amount_cents is present and total_charge_cents = base + tax
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
 const getProviderPayout_1 = require("../lib/payouts/getProviderPayout");
+const admin_server_1 = require("../lib/supabase/admin.server");
 function toFiniteInt(v) {
     const n = typeof v === 'number' ? v : Number(v);
     return Number.isFinite(n) ? Math.floor(n) : null;
 }
-function main() {
-    const sessionsPath = path_1.default.join(process.cwd(), 'data', 'sessions.json');
-    const raw = fs_1.default.readFileSync(sessionsPath, 'utf8');
-    const all = JSON.parse(raw);
-    if (!Array.isArray(all)) {
-        throw new Error('data/sessions.json is not an array');
-    }
+async function main() {
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const { data, error } = await supabase.from('sessions').select('data');
+    if (error)
+        throw error;
+    const all = (data ?? []).map((r) => r?.data).filter(Boolean);
     const counselingPaid = all
         .filter((s) => {
         const st = String(s?.service_type ?? s?.serviceType ?? '').toLowerCase().replace(/-/g, '_');
@@ -42,7 +37,7 @@ function main() {
     });
     const latest = counselingPaid[0];
     if (!latest) {
-        console.error('No paid counseling (60 min) sessions found in data/sessions.json');
+        console.error('No paid counseling (60 min) sessions found in Supabase sessions');
         process.exit(1);
     }
     const base = toFiniteInt(latest?.session_price_cents ?? latest?.priceCents);
@@ -88,4 +83,7 @@ function main() {
     }
     console.log('\nVALIDATION OK');
 }
-main();
+main().catch((e) => {
+    console.error('[validate-tax-booking] failed', e);
+    process.exit(1);
+});

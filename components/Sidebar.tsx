@@ -177,7 +177,7 @@ export default function Sidebar({ role, session }: SidebarProps) {
           );
         })}
       </nav>
-      <div className="border-t border-gray-200 p-4">
+      <div className="flex h-16 items-center border-t border-gray-200 px-4">
         <button
           onClick={async () => {
             await logout();

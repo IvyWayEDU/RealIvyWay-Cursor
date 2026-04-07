@@ -109,7 +109,7 @@ export default async function AdminUsersPage() {
 
   const tutorCount = providerUsers.filter((u) => {
     const services = getServices(u);
-    return services.includes('tutoring') || services.includes('test_prep');
+    return services.includes('tutoring') || services.includes('testprep') || services.includes('test_prep');
   }).length;
 
   const counselorCount = providerUsers.filter((u) => {

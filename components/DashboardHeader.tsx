@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import { Session } from '@/lib/auth/types';
+import ClearDevSessionsButton from '@/components/admin/ClearDevSessionsButton';
 
 interface DashboardHeaderProps {
   session: Session;
@@ -53,6 +54,7 @@ export default function DashboardHeader({ session }: DashboardHeaderProps) {
       </div>
       
       <div className="flex items-center gap-4">
+        <ClearDevSessionsButton />
         <div className="flex items-center gap-3">
           <div className="text-right">
             <p className="text-sm font-medium text-gray-900">{session.name}</p>

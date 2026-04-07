@@ -10,6 +10,21 @@ interface ProviderProfileClientProps {
 
 const COMMON_SUBJECTS = ['Math', 'English', 'Science', 'History', 'Languages', 'Test Prep'];
 
+const normalizeProviderServiceTypeForSave = (input: unknown): string => {
+  const raw = typeof input === 'string' ? input : String(input ?? '');
+  const v = raw.trim().toLowerCase();
+  if (!v) return '';
+  const underscored = v.replace(/[\s-]+/g, '_');
+
+  if (underscored === 'test_prep' || underscored === 'testprep') return 'testprep';
+  if (underscored === 'virtual_tour' || underscored === 'virtual_tours' || underscored === 'virtualtour' || underscored === 'virtualtours')
+    return 'virtual_tour';
+  if (underscored === 'counseling' || underscored === 'college_counseling') return 'college_counseling';
+  if (underscored === 'tutor' || underscored === 'tutoring') return 'tutoring';
+
+  return underscored;
+};
+
 export default function ProviderProfileClient({ initialUser }: ProviderProfileClientProps) {
   const [name, setName] = useState(initialUser.name || '');
   const [email, setEmail] = useState(initialUser.email || '');
@@ -268,7 +283,11 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
       const services: string[] = [];
       if (updateData.isTutor) services.push('tutoring');
       if (updateData.isCounselor) services.push('college_counseling');
-      updateData.services = services;
+      if (updateData.offersVirtualTours) services.push('virtual_tour');
+
+      updateData.services = Array.from(
+        new Set(services.map(normalizeProviderServiceTypeForSave).filter(Boolean))
+      );
 
       console.log('Saving provider profile:', updateData);
 

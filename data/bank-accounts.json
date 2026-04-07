@@ -14,5 +14,13 @@
     "accountType": "checking",
     "connectedAt": "2026-03-08T04:52:54.161Z",
     "status": "active"
+  },
+  {
+    "providerId": "73c16ff1-3c56-41f4-8c24-7d4dbb2189c4",
+    "bankName": "test",
+    "last4": "2345",
+    "accountType": "checking",
+    "connectedAt": "2026-04-07T19:04:50.185Z",
+    "status": "active"
   }
 ]

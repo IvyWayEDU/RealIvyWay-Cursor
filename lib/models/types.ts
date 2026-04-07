@@ -481,7 +481,7 @@ export interface Session {
   availabilityId: string; // The availability slot this session was booked from
   
   // Zoom Meeting Information
-  zoomJoinUrl?: string; // Zoom meeting join URL for participants
+  zoom_join_url?: string; // Zoom meeting join URL for participants (DB-aligned snake_case)
   zoomMeetingId?: string; // Zoom meeting ID
   zoomStartUrl?: string; // Zoom meeting host/start URL (providers)
   zoomStatus?: 'created' | 'failed' | string; // Zoom meeting creation status for this session

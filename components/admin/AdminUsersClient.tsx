@@ -86,7 +86,7 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
               ? users.filter((u) => {
                   if (!hasRole(u, 'provider')) return false;
                   const services = getServices(u);
-                  return services.includes('tutoring') || services.includes('test_prep');
+                  return services.includes('tutoring') || services.includes('testprep') || services.includes('test_prep');
                 })
               : selectedFilter === 'counselors'
                 ? users.filter((u) => {

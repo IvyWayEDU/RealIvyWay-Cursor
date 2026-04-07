@@ -6,10 +6,10 @@ import path from 'path';
 import { getUserById } from '@/lib/auth/storage';
 import type { DayAvailability } from '@/lib/availability/types';
 import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const AVAILABILITY_FILE = path.join(DATA_DIR, 'availability.json');
-const RESERVED_SLOTS_FILE = path.join(DATA_DIR, 'reserved-slots.json');
 
 export type SlotStatus = 'available' | 'reserved';
 
@@ -199,41 +199,44 @@ function slotKey(providerId: string, startTimeISO: string, endTimeISO: string): 
 }
 
 export async function readReservedSlotsFile(): Promise<AvailabilitySlot[]> {
-  if (isFilePersistenceDisabled()) {
-    warnFilePersistenceDisabled('reserved-slots.read', { file: RESERVED_SLOTS_FILE });
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('reserved_slots')
+    .select('provider_id, datetime, end_datetime')
+    .order('datetime', { ascending: true });
+  if (error) {
+    console.error('[store.server] Error reading reserved slots from Supabase:', error);
     return [];
   }
-  await ensureDataDir();
-  if (!existsSync(RESERVED_SLOTS_FILE)) return [];
-  try {
-    const raw = await readFile(RESERVED_SLOTS_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((s: any) => {
-        const providerId = typeof s?.providerId === 'string' ? s.providerId : '';
-        const startTime = toIsoOrEmpty(s?.startTime);
-        const endTime = toIsoOrEmpty(s?.endTime);
-        const status: SlotStatus = (s?.status ?? 'available') === 'reserved' ? 'reserved' : 'available';
-        if (!providerId || !startTime || !endTime) return null;
-        return { providerId, startTime, endTime, status } satisfies AvailabilitySlot;
-      })
-      .filter(Boolean) as AvailabilitySlot[];
-  } catch (error) {
-    console.error('[store.server] Error reading reserved slots file:', error);
-    return [];
-  }
+  return (data ?? [])
+    .map((row: any) => {
+      const providerId = typeof row?.provider_id === 'string' ? row.provider_id : '';
+      const startTime = toIsoOrEmpty(row?.datetime);
+      const endTime = toIsoOrEmpty(row?.end_datetime);
+      if (!providerId || !startTime || !endTime) return null;
+      return { providerId, startTime, endTime, status: 'reserved' as const } satisfies AvailabilitySlot;
+    })
+    .filter(Boolean) as AvailabilitySlot[];
 }
 
 export async function writeReservedSlotsFile(slots: AvailabilitySlot[]): Promise<void> {
-  if (isFilePersistenceDisabled()) {
-    warnFilePersistenceDisabled('reserved-slots.write', { file: RESERVED_SLOTS_FILE, attemptedCount: slots.length });
-    return;
-  }
-  await ensureDataDir();
-  const tempFile = `${RESERVED_SLOTS_FILE}.tmp`;
-  await writeFile(tempFile, JSON.stringify(slots, null, 2), 'utf-8');
-  await rename(tempFile, RESERVED_SLOTS_FILE);
+  const supabase = getSupabaseAdmin();
+  const normalized = (slots || [])
+    .map((s) => ({
+      provider_id: String((s as any)?.providerId || '').trim(),
+      datetime: toIsoOrEmpty((s as any)?.startTime),
+      end_datetime: toIsoOrEmpty((s as any)?.endTime),
+    }))
+    .filter((s) => s.provider_id && s.datetime && s.end_datetime);
+
+  // Compatibility with older dev reset flows: treat as "replace all".
+  // The runtime booking flow does NOT call this; it uses `reserveSlotsAtomically`.
+  const { error: delErr } = await supabase.from('reserved_slots').delete().neq('provider_id', '');
+  if (delErr) throw delErr;
+
+  if (normalized.length === 0) return;
+  const { error: insErr } = await supabase.from('reserved_slots').insert(normalized);
+  if (insErr) throw insErr;
 }
 
 export async function isSlotReserved(
@@ -244,74 +247,78 @@ export async function isSlotReserved(
   const startIso = toIsoOrEmpty(startTime);
   const endIso = toIsoOrEmpty(endTime);
   if (!providerId || !startIso || !endIso) return false;
-  const reserved = await readReservedSlotsFile();
-  const key = slotKey(providerId, startIso, endIso);
-  return reserved.some(
-    (s) => (s.status ?? 'available') === 'reserved' && slotKey(s.providerId, s.startTime, s.endTime) === key
-  );
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('reserved_slots')
+    .select('id')
+    .eq('provider_id', String(providerId))
+    .eq('datetime', startIso)
+    .eq('end_datetime', endIso)
+    .limit(1);
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
 }
 
 export async function reserveSlotsAtomically(
   slots: Array<{ providerId: string; startTime: string; endTime: string }>
 ): Promise<{ ok: true } | { ok: false; conflict: { providerId: string; startTime: string; endTime: string } }> {
-  return withAvailabilityWriteLock(async () => {
-    const existing = await readReservedSlotsFile();
-    const existingReserved = new Set(
-      existing
-        .filter((s) => (s.status ?? 'available') === 'reserved')
-        .map((s) => slotKey(s.providerId, s.startTime, s.endTime))
-    );
+  const normalized = (slots || [])
+    .map((s) => ({
+      provider_id: String(s?.providerId || '').trim(),
+      datetime: toIsoOrEmpty(s?.startTime),
+      end_datetime: toIsoOrEmpty(s?.endTime),
+    }))
+    .filter((s) => s.provider_id && s.datetime && s.end_datetime);
 
-    const normalized = slots
-      .map((s) => ({
-        providerId: String(s.providerId || '').trim(),
-        startTime: toIsoOrEmpty(s.startTime),
-        endTime: toIsoOrEmpty(s.endTime),
-        status: 'reserved' as const,
-      }))
-      .filter((s) => s.providerId && s.startTime && s.endTime);
+  if (normalized.length === 0) return { ok: true };
 
-    for (const s of normalized) {
-      const key = slotKey(s.providerId, s.startTime, s.endTime);
-      if (existingReserved.has(key)) {
-        return { ok: false, conflict: { providerId: s.providerId, startTime: s.startTime, endTime: s.endTime } };
-      }
-    }
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.rpc('reserve_slots_atomically', { slots: normalized as any });
+  if (error) throw error;
 
-    // Append reservations (idempotent against duplicates)
-    const next = [...existing];
-    for (const s of normalized) {
-      const key = slotKey(s.providerId, s.startTime, s.endTime);
-      if (!existingReserved.has(key)) {
-        next.push(s);
-        existingReserved.add(key);
-      }
-    }
+  const out: any = data as any;
+  if (out?.ok === true) return { ok: true };
 
-    await writeReservedSlotsFile(next);
-    return { ok: true };
-  });
+  const c = out?.conflict || null;
+  if (c && typeof c === 'object') {
+    return {
+      ok: false,
+      conflict: {
+        providerId: String((c as any).provider_id || ''),
+        startTime: toIsoOrEmpty((c as any).datetime) || '',
+        endTime: toIsoOrEmpty((c as any).end_datetime) || '',
+      },
+    };
+  }
+
+  // Defensive fallback
+  return {
+    ok: false,
+    conflict: {
+      providerId: normalized[0].provider_id,
+      startTime: normalized[0].datetime,
+      endTime: normalized[0].end_datetime,
+    },
+  };
 }
 
 export async function unreserveSlotsAtomically(
   slots: Array<{ providerId: string; startTime: string; endTime: string }>
 ): Promise<void> {
-  await withAvailabilityWriteLock(async () => {
-    const existing = await readReservedSlotsFile();
-    const removeKeys = new Set(
-      slots
-        .map((s) => {
-          const pid = String(s.providerId || '').trim();
-          const startIso = toIsoOrEmpty(s.startTime);
-          const endIso = toIsoOrEmpty(s.endTime);
-          return pid && startIso && endIso ? slotKey(pid, startIso, endIso) : '';
-        })
-        .filter(Boolean)
-    );
-    if (removeKeys.size === 0) return;
-    const next = existing.filter((s) => !removeKeys.has(slotKey(s.providerId, s.startTime, s.endTime)));
-    await writeReservedSlotsFile(next);
-  });
+  const supabase = getSupabaseAdmin();
+  for (const s of slots || []) {
+    const pid = String(s?.providerId || '').trim();
+    const startIso = toIsoOrEmpty(s?.startTime);
+    const endIso = toIsoOrEmpty(s?.endTime);
+    if (!pid || !startIso || !endIso) continue;
+    const { error } = await supabase
+      .from('reserved_slots')
+      .delete()
+      .eq('provider_id', pid)
+      .eq('datetime', startIso)
+      .eq('end_datetime', endIso);
+    if (error) throw error;
+  }
 }
 
 /**

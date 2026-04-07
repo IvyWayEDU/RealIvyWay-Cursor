@@ -1,13 +1,7 @@
-import fs from 'fs';
-import path from 'path';
 import { SCHOOLS, findSchoolByName } from '../data/schools';
+import { getUsers, saveUsers } from '../lib/auth/storage';
 
 type AnyUser = Record<string, any>;
-
-function readJson(filePath: string): any {
-  const raw = fs.readFileSync(filePath, 'utf-8');
-  return JSON.parse(raw);
-}
 
 function isProvider(u: AnyUser): boolean {
   const roles = Array.isArray(u?.roles) ? u.roles : [];
@@ -39,13 +33,11 @@ function bestSchoolIdFromLegacy(name: string): string | null {
   return normalized || null;
 }
 
-function main() {
+async function main() {
   const args = new Set(process.argv.slice(2));
   const shouldFix = args.has('--fix');
 
-  const usersFile = path.join(process.cwd(), 'data', 'users.json');
-  const parsed = readJson(usersFile);
-  const users: AnyUser[] = Array.isArray(parsed) ? parsed : Object.values(parsed);
+  const users: AnyUser[] = (await getUsers()) as any[];
 
   const providers = users.filter(isProvider);
 
@@ -126,10 +118,10 @@ function main() {
   }
 
   if (shouldFix) {
-    fs.writeFileSync(usersFile, JSON.stringify(Array.isArray(parsed) ? users : Object.fromEntries(users.map((u) => [u.id, u])), null, 2));
-    console.log(`[audit-provider-schools] wrote fixes to ${usersFile}`);
+    await saveUsers(users as any);
+    console.log('[audit-provider-schools] wrote fixes to Supabase users');
   } else {
-    console.log('[audit-provider-schools] run with --fix to write suggested school_id/school_name into data/users.json');
+    console.log('[audit-provider-schools] run with --fix to write suggested school_id/school_name into Supabase users');
   }
 
   // Targeted Yale check (requested)
@@ -153,6 +145,9 @@ function main() {
   }
 }
 
-main();
+main().catch((e) => {
+  console.error('[audit-provider-schools] failed', e);
+  process.exit(1);
+});
 
 

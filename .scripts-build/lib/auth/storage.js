@@ -1,8 +1,5 @@
 "use strict";
 'use server';
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getUsers = getUsers;
 exports.saveUsers = saveUsers;
@@ -11,74 +8,102 @@ exports.getUserById = getUserById;
 exports.createUser = createUser;
 exports.updateUser = updateUser;
 exports.deleteUser = deleteUser;
-const promises_1 = require("fs/promises");
-const fs_1 = require("fs");
-const path_1 = __importDefault(require("path"));
-const DATA_DIR = path_1.default.join(process.cwd(), 'data');
-const USERS_FILE = path_1.default.join(DATA_DIR, 'users.json');
+const admin_server_1 = require("@/lib/supabase/admin.server");
 const DEV_ADMIN_EMAIL = 'provider@gmail.com';
-// Ensure data directory exists
-async function ensureDataDir() {
-    if (!(0, fs_1.existsSync)(DATA_DIR)) {
-        await (0, promises_1.mkdir)(DATA_DIR, { recursive: true });
-    }
+function primaryRoleForUserRoles(roles) {
+    const arr = Array.isArray(roles) ? roles.map((r) => String(r || '').trim()).filter(Boolean) : [];
+    const set = new Set(arr);
+    if (set.has('admin'))
+        return 'admin';
+    if (set.has('provider') || set.has('counselor') || set.has('tutor'))
+        return 'provider';
+    if (set.has('student'))
+        return 'student';
+    return arr[0] || 'student';
 }
-// Read users from file
 async function getUsers() {
-    await ensureDataDir();
-    if (!(0, fs_1.existsSync)(USERS_FILE)) {
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const { data, error } = await supabase.from('users').select('data');
+    if (error) {
+        console.error('[auth.storage] Error reading users from Supabase:', error);
         return [];
     }
+    const users = (data ?? [])
+        .map((row) => row?.data)
+        .filter(Boolean);
+    // Dev convenience / safety: ensure the intended bootstrap admin user is actually admin.
+    // NOTE: We only ADD the admin role; we do not remove admin from other users.
+    const normalized = users.map((user) => {
+        if (!user)
+            return user;
+        const isSuspended = Boolean(user.isSuspended) || user.status === 'suspended';
+        const status = isSuspended ? 'suspended' : 'active';
+        if (user?.email?.toLowerCase?.() !== DEV_ADMIN_EMAIL) {
+            return { ...user, isSuspended, status };
+        }
+        const roles = Array.isArray(user.roles) ? user.roles : [];
+        const nextRoles = Array.from(new Set([...roles, 'provider', 'admin']));
+        return { ...user, roles: nextRoles, isSuspended, status };
+    });
+    // Best-effort: persist the bootstrap admin normalization so the DB doesn't drift.
     try {
-        const data = await (0, promises_1.readFile)(USERS_FILE, 'utf-8');
-        const parsed = JSON.parse(data);
-        // Handle both array and object formats
-        const users = Array.isArray(parsed) ? parsed : Object.values(parsed);
-        // Dev convenience / safety: ensure the intended bootstrap admin user is actually admin.
-        // This mirrors the seeded `data/users.json` and prevents accidental drift.
-        // NOTE: We only ADD the admin role; we do not remove admin from other users.
-        const normalized = users.map((user) => {
-            if (!user)
-                return user;
-            // Normalize suspension state (canonical boolean + legacy string status)
-            const isSuspended = Boolean(user.isSuspended) || user.status === 'suspended';
-            const status = isSuspended ? 'suspended' : 'active';
-            // Ensure bootstrap admin roles
-            if (user?.email?.toLowerCase?.() !== DEV_ADMIN_EMAIL) {
-                return { ...user, isSuspended, status };
-            }
-            const roles = Array.isArray(user.roles) ? user.roles : [];
-            const nextRoles = Array.from(new Set([...roles, 'provider', 'admin']));
-            return { ...user, roles: nextRoles, isSuspended, status };
-        });
-        return normalized;
+        const admin = normalized.find((u) => u?.email?.toLowerCase?.() === DEV_ADMIN_EMAIL);
+        if (admin?.id) {
+            await updateUser(admin.id, { roles: admin.roles });
+        }
     }
-    catch (error) {
-        console.error('Error reading users file:', error);
-        return [];
+    catch {
+        // ignore
     }
+    return normalized;
 }
-// Write users to file
 async function saveUsers(users) {
-    await ensureDataDir();
-    await (0, promises_1.writeFile)(USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const now = new Date().toISOString();
+    const rows = (users || [])
+        .filter(Boolean)
+        .map((u) => ({
+        id: String(u.id || '').trim(),
+        email: String(u.email || '').trim().toLowerCase(),
+        role: primaryRoleForUserRoles(u.roles),
+        data: u,
+        created_at: u.createdAt || now,
+        updated_at: u.updatedAt || now,
+    }))
+        .filter((r) => r.id && r.email);
+    if (rows.length === 0)
+        return;
+    const { error } = await supabase.from('users').upsert(rows, { onConflict: 'id' });
+    if (error)
+        throw error;
 }
 // Find user by email
 async function getUserByEmail(email) {
-    const users = await getUsers();
-    return users.find(user => user.email.toLowerCase() === email.toLowerCase()) || null;
+    const e = String(email || '').trim().toLowerCase();
+    if (!e)
+        return null;
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const { data, error } = await supabase.from('users').select('data').eq('email', e).maybeSingle();
+    if (error)
+        throw error;
+    return data?.data || null;
 }
 // Find user by ID
 async function getUserById(id) {
-    const users = await getUsers();
-    return users.find(user => user.id === id) || null;
+    const uid = String(id || '').trim();
+    if (!uid)
+        return null;
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const { data, error } = await supabase.from('users').select('data').eq('id', uid).maybeSingle();
+    if (error)
+        throw error;
+    return data?.data || null;
 }
 // Create new user
 // NOTE: We intentionally do NOT type this as `Omit<User, ...>` because `User` includes an
 // index signature (`[key: string]: any`) which makes `Omit<User, ...>` lose required fields
 // under `strict` TypeScript, breaking the scripts build.
 async function createUser(user) {
-    const users = await getUsers();
     const now = new Date().toISOString();
     const newUser = {
         ...user,
@@ -87,33 +112,56 @@ async function createUser(user) {
         createdAt: now,
         updatedAt: now,
     };
-    users.push(newUser);
-    await saveUsers(users);
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const { error } = await supabase.from('users').insert({
+        id: String(newUser.id || '').trim(),
+        email: String(newUser.email || '').trim().toLowerCase(),
+        role: primaryRoleForUserRoles(newUser.roles),
+        data: newUser,
+        created_at: now,
+        updated_at: now,
+    });
+    if (error)
+        throw error;
     return newUser;
 }
 // Update user
 async function updateUser(id, updates) {
-    const users = await getUsers();
-    const index = users.findIndex(user => user.id === id);
-    if (index === -1) {
+    const uid = String(id || '').trim();
+    if (!uid)
         return null;
-    }
-    users[index] = {
-        ...users[index],
+    const existing = await getUserById(uid);
+    if (!existing)
+        return null;
+    const merged = {
+        ...existing,
         ...updates,
         updatedAt: new Date().toISOString(),
     };
-    await saveUsers(users);
-    return users[index];
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const email = String((merged.email || existing.email || ''))
+        .trim()
+        .toLowerCase();
+    const { error } = await supabase
+        .from('users')
+        .update({
+        email,
+        role: primaryRoleForUserRoles(merged.roles),
+        data: merged,
+    })
+        .eq('id', uid);
+    if (error)
+        throw error;
+    return merged;
 }
 // Delete user
 async function deleteUser(id) {
-    const users = await getUsers();
-    const initialLength = users.length;
-    const filtered = users.filter(user => user.id !== id);
-    if (filtered.length === initialLength) {
-        return false; // User not found
-    }
-    await saveUsers(filtered);
-    return true;
+    const uid = String(id || '').trim();
+    if (!uid)
+        return false;
+    const supabase = (0, admin_server_1.getSupabaseAdmin)();
+    const { error, count } = await supabase.from('users').delete({ count: 'exact' }).eq('id', uid);
+    if (error)
+        throw error;
+    return (count ?? 0) > 0;
 }

@@ -38,7 +38,9 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 Example:
 
-`STRIPE_PRICE_IDS_JSON='{"counseling_single":"price_123","counseling_monthly":"price_456","tutoring_single":"price_789"}'`
+`STRIPE_PRICE_IDS_JSON='{"tutoring_single":"price_...","tutoring_monthly":"price_...","counseling_single":"price_...","counseling_monthly":"price_...","testprep_single":"price_...","testprep_monthly":"price_...","virtual_tour_single":"price_...","ai_basic_monthly":"price_...","ai_pro_monthly":"price_...","ai_pro_yearly":"price_..."}'`
+
+For local dev only (non-production), you can alternatively create `data/stripe-price-ids.local.json` with the same key/value shape.
 
 ### Rebuild Stripe Products/Prices (one-time)
 

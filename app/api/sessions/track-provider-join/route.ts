@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { trackProviderJoinUnified } from '@/lib/sessions/unified-resolver';
+import { resolveUnifiedSessions } from '@/lib/sessions/unified-resolver';
 import { handleApiError } from '@/lib/errorHandler';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
@@ -42,6 +43,10 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Ensure status transitions (completed/no-show) are persisted promptly after join evidence.
+    // This is idempotent and safe to run on every join click.
+    await resolveUnifiedSessions('provider_join');
 
     console.log('[PROVIDER_ZOOM_JOIN]', {
       sessionId,

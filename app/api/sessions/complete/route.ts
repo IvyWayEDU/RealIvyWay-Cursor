@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const body = await request.json();
-    const { sessionId, actualStartTime, actualEndTime } = body;
+    const { sessionId } = body;
     
     // Validate input
     if (!sessionId) {
@@ -51,15 +51,9 @@ export async function POST(request: NextRequest) {
     }
     
     // CANONICAL RULES: completed ONLY when:
-    // a) now >= scheduledStartTime + 10 minutes
-    // b) providerJoinedAt exists
-    const startMs = new Date(sessionData.scheduledStartTime).getTime();
-    if (!Number.isFinite(startMs)) {
-      return NextResponse.json({ error: 'Invalid session start time' }, { status: 400 });
-    }
     const nowMs = Date.now();
-    const tenMinutesAfterStartMs = startMs + 10 * 60 * 1000;
     const providerJoinedAt = (sessionData as any)?.providerJoinedAt;
+    const studentJoinedAt = (sessionData as any)?.studentJoinedAt;
 
     if (!(typeof providerJoinedAt === 'string' && providerJoinedAt.trim().length > 0)) {
       return NextResponse.json(
@@ -67,9 +61,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (nowMs < tenMinutesAfterStartMs) {
+    if (!(typeof studentJoinedAt === 'string' && studentJoinedAt.trim().length > 0)) {
       return NextResponse.json(
-        { error: 'Session cannot be completed: must be at least 10 minutes after start time' },
+        { error: 'Session cannot be completed: student has not joined Zoom' },
         { status: 400 }
       );
     }
@@ -85,7 +79,7 @@ export async function POST(request: NextRequest) {
       completedAt: new Date(nowMs).toISOString(),
       actualStartTime: providerJoinedAt,
       actualEndTime: new Date(nowMs).toISOString(),
-      completionReason: 'PROVIDER_JOINED',
+      completionReason: 'BOTH_JOINED_COMPLETED_AT_END',
       creditEarnings: true,
     });
 

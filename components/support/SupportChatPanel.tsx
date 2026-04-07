@@ -11,7 +11,7 @@ export default function SupportChatPanel(props: {
   messages: SupportChatMessage[];
   draft: string;
   onDraftChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (message: string) => void;
   quickActions: SupportQuickAction[];
   onPickQuickAction: (message: string) => void;
   isBusy?: boolean;
@@ -92,6 +92,16 @@ export default function SupportChatPanel(props: {
             <textarea
               value={draft}
               onChange={(e) => onDraftChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                if (e.shiftKey) return;
+                if ((e.nativeEvent as unknown as { isComposing?: boolean } | null)?.isComposing) return;
+                e.preventDefault();
+                if (isBusy) return;
+                const trimmed = draft.trim();
+                if (!trimmed) return;
+                onSend(trimmed);
+              }}
               placeholder="Type your question…"
               rows={1}
               className={[
@@ -101,16 +111,10 @@ export default function SupportChatPanel(props: {
                 'focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent',
               ].join(' ')}
               disabled={Boolean(isBusy)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  onSend();
-                }
-              }}
             />
             <button
               type="button"
-              onClick={onSend}
+              onClick={() => onSend(draft)}
               disabled={Boolean(isBusy) || !draft.trim()}
               className={[
                 'h-10 w-10 rounded-full grid place-items-center',
@@ -125,7 +129,7 @@ export default function SupportChatPanel(props: {
             </button>
           </div>
           <p className="mt-2 text-[11px] text-gray-500">
-            Tip: Press Enter to send, Shift+Enter for a new line.
+            Tip: Press Enter to send. Shift+Enter for a new line.
           </p>
         </div>
       </div>

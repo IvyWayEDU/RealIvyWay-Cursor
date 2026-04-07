@@ -1,4 +1,4 @@
-import { PricingKey } from './catalog';
+import { PRICING_CATALOG, PricingKey } from './catalog';
 import path from 'path';
 
 /**
@@ -10,44 +10,31 @@ import path from 'path';
  * Provide as a JSON map in env:
  *   STRIPE_PRICE_IDS_JSON='{"tutoring_single":"price_...","tutoring_monthly":"price_...","counseling_single":"price_...","counseling_monthly":"price_...","testprep_single":"price_...","testprep_monthly":"price_...","virtual_tour_single":"price_...","ai_basic_monthly":"price_...","ai_pro_monthly":"price_...","ai_pro_yearly":"price_..."}'
  */
-const REQUIRED_ENV_KEYS = [
-  'tutoring_single',
-  'tutoring_monthly',
-  'counseling_single',
-  'counseling_monthly',
-  'testprep_single',
-  'testprep_monthly',
-  'virtual_tour_single',
-  'ai_basic_monthly',
-  'ai_pro_monthly',
-  'ai_pro_yearly',
-] as const;
+const STRIPE_ENV_KEY_BY_PRICING_KEY = {
+  tutoring_single: 'tutoring_single',
+  tutoring_monthly: 'tutoring_monthly',
+  counseling_single: 'counseling_single',
+  counseling_monthly: 'counseling_monthly',
+  test_prep_single: 'testprep_single',
+  test_prep_monthly: 'testprep_monthly',
+  virtual_tour_single: 'virtual_tour_single',
+  ivyway_ai_basic_monthly: 'ai_basic_monthly',
+  ivyway_ai_pro_monthly: 'ai_pro_monthly',
+  ivyway_ai_pro_yearly: 'ai_pro_yearly',
+} as const satisfies Record<PricingKey, string>;
 
-type StripeEnvPricingKey = (typeof REQUIRED_ENV_KEYS)[number];
+type StripeEnvPricingKey = (typeof STRIPE_ENV_KEY_BY_PRICING_KEY)[PricingKey];
 
 export function toStripePriceEnvKey(pricing_key: PricingKey): StripeEnvPricingKey {
-  switch (pricing_key) {
-    case 'tutoring_single':
-      return 'tutoring_single';
-    case 'tutoring_monthly':
-      return 'tutoring_monthly';
-    case 'counseling_single':
-      return 'counseling_single';
-    case 'counseling_monthly':
-      return 'counseling_monthly';
-    case 'test_prep_single':
-      return 'testprep_single';
-    case 'test_prep_monthly':
-      return 'testprep_monthly';
-    case 'virtual_tour_single':
-      return 'virtual_tour_single';
-    case 'ivyway_ai_basic_monthly':
-      return 'ai_basic_monthly';
-    case 'ivyway_ai_pro_monthly':
-      return 'ai_pro_monthly';
-    case 'ivyway_ai_pro_yearly':
-      return 'ai_pro_yearly';
+  return STRIPE_ENV_KEY_BY_PRICING_KEY[pricing_key];
+}
+
+function getRequiredStripeEnvKeys(): StripeEnvPricingKey[] {
+  const set = new Set<StripeEnvPricingKey>();
+  for (const item of Object.values(PRICING_CATALOG)) {
+    set.add(toStripePriceEnvKey(item.key));
   }
+  return Array.from(set).sort();
 }
 
 let cachedMap: Record<StripeEnvPricingKey, string> | null = null;
@@ -104,6 +91,7 @@ function loadStripePriceIdMapFromEnv(): Record<StripeEnvPricingKey, string> {
   const envRaw = process.env.STRIPE_PRICE_IDS_JSON;
   const fallback = envRaw ? null : tryLoadDevFallbackStripePriceIdMapRaw();
   const raw = envRaw || fallback?.raw;
+  const requiredKeys = getRequiredStripeEnvKeys();
 
   // Log EXACT source decision up front (requested).
   cachedSource = envRaw ? 'env' : 'dev_fallback';
@@ -136,7 +124,7 @@ function loadStripePriceIdMapFromEnv(): Record<StripeEnvPricingKey, string> {
     const missing: string[] = [];
     const out: Partial<Record<StripeEnvPricingKey, string>> = {};
 
-    for (const k of REQUIRED_ENV_KEYS) {
+    for (const k of requiredKeys) {
       const v = obj[k];
       if (typeof v !== 'string' || !v.trim()) {
         missing.push(k);

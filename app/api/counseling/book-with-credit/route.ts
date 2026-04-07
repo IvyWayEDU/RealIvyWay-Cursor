@@ -10,6 +10,8 @@ import { createZoomMeeting, isZoomConfigured } from '@/lib/zoom/api';
 import { getProviderPayout } from '@/lib/payouts/getProviderPayout';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { sendBookingConfirmationEmailsForSession } from '@/lib/email/transactional';
 
 /**
  * POST /api/counseling/book-with-credit
@@ -184,12 +186,27 @@ export async function POST(request: NextRequest) {
         try {
           const topic = `College Counseling${schoolName ? ` - ${schoolName}` : ''}`;
           const zoom = await createZoomMeeting({ topic, startTime: startEnd.start, duration: 60 });
+          const join_url = zoom.joinUrl;
           await updateSession(created.id, {
             zoomMeetingId: zoom.meetingId,
-            zoomJoinUrl: zoom.joinUrl,
+            zoom_join_url: join_url,
             zoomStartUrl: zoom.startUrl,
             zoomStatus: 'created',
           } as any);
+          try {
+            const supabase = getSupabaseAdmin();
+            const { error } = await supabase
+              .from('sessions')
+              .update({ zoom_join_url: join_url })
+              .eq('id', String(created.id));
+            if (error) throw error;
+            console.log("Saved to DB:", join_url);
+          } catch (e) {
+            console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
+              sessionId: String(created.id),
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
         } catch {
           try {
             await updateSession(created.id, { zoomStatus: 'failed' } as any);
@@ -198,6 +215,29 @@ export async function POST(request: NextRequest) {
       }
 
       // Availability is READ-ONLY. Booked slots are excluded via sessions + reserved slots.
+
+      // Transactional email: booking confirmation (idempotent per-session)
+      try {
+        const alreadyStudent = Boolean((created as any)?.bookingEmailStudentSentAt);
+        const alreadyProvider = Boolean((created as any)?.bookingEmailProviderSentAt);
+        if (!alreadyStudent || !alreadyProvider) {
+          const sendResult = await sendBookingConfirmationEmailsForSession(created as any);
+          const nowISO = new Date().toISOString();
+          await updateSession(created.id, {
+            bookingEmailStudentSentAt: sendResult.studentEmailSent ? nowISO : (created as any)?.bookingEmailStudentSentAt,
+            bookingEmailProviderSentAt: sendResult.providerEmailSent ? nowISO : (created as any)?.bookingEmailProviderSentAt,
+            confirmationEmailsSent: sendResult.studentEmailSent && sendResult.providerEmailSent,
+            confirmationEmailsSentAt:
+              sendResult.studentEmailSent && sendResult.providerEmailSent ? nowISO : (created as any)?.confirmationEmailsSentAt,
+            updatedAt: nowISO,
+          } as any);
+        }
+      } catch (e) {
+        console.warn('[email] booking confirmation send failed (non-blocking)', {
+          sessionId: created.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
 
       return NextResponse.json({ sessionId: created.id, usedCreditBucketId: credit.bucketId });
     } catch (e) {

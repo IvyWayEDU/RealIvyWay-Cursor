@@ -205,5 +205,22 @@
     "status": "active",
     "createdAt": "2026-03-15T00:00:54.246Z",
     "updatedAt": "2026-03-15T00:00:57.334Z"
+  },
+  {
+    "id": "443ec160-f0ee-404e-885c-f1898b132f0f",
+    "name": "student test",
+    "email": "testaccount@example.com",
+    "passwordHash": "083b69f49812b9675fc9cefec41a786b:4e7bd785138bb85982ae731ca73c2c0dbb73dfc4b75f1b343e5b569f62a363b19d90857dfe241145171ca1fb9a903bbc8feeae8f356e9950ba1b27c9ae5f267e",
+    "roles": [
+      "student"
+    ],
+    "createdAt": "2026-04-07T03:27:49.313Z",
+    "isSuspended": false,
+    "status": "active",
+    "updatedAt": "2026-04-07T03:27:49.624Z",
+    "stripeCustomerId": "cus_UI0JUblqwuAz6c",
+    "stripeCustomerEmail": "testaccount@example.com",
+    "stripeCustomerName": "student test",
+    "stripeCustomerCreatedAt": "2026-04-07T03:27:49.621Z"
   }
 ]

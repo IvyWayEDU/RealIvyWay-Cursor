@@ -1,33 +1,38 @@
-import { clearUpcomingSessionsForDev } from '@/lib/sessions/devReset';
 import { NextResponse } from 'next/server';
-import { auth } from '@/lib/auth/middleware';
 import { handleApiError } from '@/lib/errorHandler';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 /**
- * DEV-ONLY: Clears ALL sessions (and therefore clears join tracking / completed / upcoming state).
+ * DEV-ONLY: Clear all session-related data for fast iteration.
  *
- * SECURITY: In dev, allow providers/admins to clear test sessions for faster iteration.
+ * Deletes all rows from:
+ * - sessions
+ * - bookings
+ * - reserved_slots
+ *
+ * Does NOT touch users.
  */
 export async function POST() {
   try {
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV !== 'development') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    // SECURITY: Require authentication (dev-only route) and restrict to provider/admin.
-    const authResult = await auth.require();
-    if (authResult.error) return authResult.error;
-    const session = authResult.session!;
+    const supabase = getSupabaseAdmin();
 
-    const isProvider = Array.isArray(session.roles) && session.roles.includes('provider');
-    const isAdmin = Array.isArray(session.roles) && session.roles.includes('admin');
-    if (!isProvider && !isAdmin) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    // Use a "match all rows" filter that is guaranteed true for these tables
+    // (primary key `id` is NOT NULL).
+    const deleteAll = async (table: 'reserved_slots' | 'bookings' | 'sessions') => {
+      const { error } = await supabase.from(table).delete().not('id', 'is', null);
+      if (error) throw error;
+    };
 
-    const deletedCount = await clearUpcomingSessionsForDev();
-    console.log('[DEV CLEAR SESSIONS API] DEV-ONLY: Cleared', deletedCount, 'sessions');
-    return NextResponse.json({ success: true, deletedCount });
+    // FK-safety: clear reserved slots first, then checkout bookings, then sessions.
+    await deleteAll('reserved_slots');
+    await deleteAll('bookings');
+    await deleteAll('sessions');
+
+    return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/dev/clear-sessions]' });
   }

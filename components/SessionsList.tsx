@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Session } from '@/lib/models/types';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { getCurrentUserId } from '@/lib/sessions/actions';
-import { getSessionStartTimeMs, normalizeZoomJoinUrl } from '@/lib/sessions/uiHelpers';
+import { getSessionEndDatetimeMs, normalizeZoomJoinUrl } from '@/lib/sessions/uiHelpers';
 import { useProviderSessionHeartbeat } from '@/lib/sessions/useProviderSessionHeartbeat';
 import { getReviewBySessionId, hasReviewForSession } from '@/lib/reviewStore';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
@@ -129,8 +129,9 @@ export default function SessionsList({ role }: SessionsListProps) {
 
     fetchSessions();
     
-    // No auto-refresh - sessions are fetched once on mount
-    // State updates happen through local state mutations after actions
+    // Refresh periodically to pick up session updates (webhooks / Supabase changes).
+    const interval = setInterval(fetchSessions, 20000);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
@@ -541,53 +542,88 @@ export default function SessionsList({ role }: SessionsListProps) {
                         {/* Start Session button - render for upcoming sessions */}
                         {(() => {
                           // Only show for upcoming sessions (sessions in upcoming section)
-                          const endTime = new Date(session.scheduledEndTime);
-                          if (endTime <= now) return null; // Don't show in completed section
+                          const startIso = (session as any)?.datetime ?? session.scheduledStartTime;
+                          const endIso = (session as any)?.end_datetime ?? session.scheduledEndTime;
+                          const sessionStart = new Date(startIso).getTime();
+                          const sessionEndFromIso = new Date(endIso).getTime();
+                          const sessionEnd =
+                            Number.isFinite(sessionEndFromIso) ? sessionEndFromIso : sessionStart + 60 * 60 * 1000;
+
+                          if (!Number.isFinite(sessionEnd)) return null;
+                          if (sessionEnd <= nowMs) return null; // Don't show after session window ends
                           
                           const normalizedZoomUrl = normalizeZoomJoinUrl(session);
-                          const startTimeMs = getSessionStartTimeMs(session as any) ?? NaN;
-                          const isBeforeStart = Number.isFinite(startTimeMs) ? nowMs < startTimeMs : true;
-                          // Per spec: always navigate to session.zoomJoinUrl (participants join link).
+                          // Per spec: always navigate to session.zoom_join_url (participants join link).
                           const joinUrl = normalizedZoomUrl;
+
+                          const sessionDatetime = (session as any)?.datetime;
+
+                          if (process.env.NODE_ENV !== 'production') {
+                            console.log({
+                              sessionDatetime: sessionDatetime,
+                              now: new Date().toISOString(),
+                              startTime: new Date(sessionDatetime).getTime(),
+                              nowTime: Date.now(),
+                              canJoin: Date.now() >= (new Date(sessionDatetime).getTime() - 10 * 60 * 1000),
+                            });
+                          }
+
+                          const now = nowMs;
+                          const canJoin =
+                            Number.isFinite(sessionStart) &&
+                            now >= sessionStart - 10 * 60 * 1000 &&
+                            now <= sessionStart + 60 * 60 * 1000;
                           
                           return (
-                            <button
-                              type="button"
-                              disabled={isBeforeStart}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (!joinUrl) return;
-                                // Show modal ONLY at/after start time (early clicks are blocked by disabled button).
-                                setZoomConfirm({
-                                  session,
-                                  joinUrl,
-                                  message:
-                                    displayRole === 'provider'
-                                      ? 'Please allow up to 10 minutes for the student to join'
-                                      : 'Please allow up to 10 minutes for the provider to join',
-                                });
-                              }}
-                              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                                isBeforeStart
-                                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                  : 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
-                              }`}
-                            >
-                              <svg
-                                className="h-4 w-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
+                            <>
+                              <button
+                                type="button"
+                                disabled={!canJoin}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!joinUrl) return;
+                                  // Time gating is enforced via disabled button only.
+                                  setZoomConfirm({
+                                    session,
+                                    joinUrl,
+                                    message:
+                                      displayRole === 'provider'
+                                        ? 'Please allow up to 10 minutes for the student to join'
+                                        : 'Please allow up to 10 minutes for the provider to join',
+                                  });
+                                }}
+                                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                                  !canJoin
+                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                    : 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
+                                }`}
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                />
-                              </svg>
-                              Join Session
-                            </button>
+                                <svg
+                                  className="h-4 w-4"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                  />
+                                </svg>
+                                Join Session
+                              </button>
+
+                              {process.env.NODE_ENV !== 'production' && (
+                                <div className="mt-1 max-w-[360px] text-[10px] leading-snug text-gray-500 break-words">
+                                  {JSON.stringify({
+                                    datetime: sessionDatetime,
+                                    now: new Date().toISOString(),
+                                    canJoin,
+                                  })}
+                                </div>
+                              )}
+                            </>
                           );
                         })()}
                       </div>

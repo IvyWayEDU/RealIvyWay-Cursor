@@ -143,7 +143,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const { amountCents } = validationResult.data;
+    const requestedAmount = validationResult.data.requestedAmount ?? validationResult.data.amount;
+    const amountCents = validationResult.data.amountCents;
 
     const providerId = session.userId;
 
@@ -166,17 +167,29 @@ export async function POST(request: NextRequest) {
     const payoutSummary = await getProviderPayoutSummaryFromLedger(providerId);
     const availableBalanceCents = payoutSummary.availableBalanceCents || 0;
 
-    // Validate amount doesn't exceed available balance
-    if (amountCents > availableBalanceCents) {
+    const availableCents = Math.max(0, Math.floor(availableBalanceCents));
+    const requestedCents =
+      typeof requestedAmount === 'number' && Number.isFinite(requestedAmount)
+        ? Math.round(requestedAmount * 100)
+        : Math.round(Number(amountCents || 0));
+
+    if (requestedCents <= 0) {
+      return NextResponse.json(
+        { success: false, message: 'Invalid amount', error: 'Invalid amount' },
+        { status: 400 }
+      );
+    }
+
+    if (requestedCents > availableCents) {
       console.error('[withdrawal-request] 400: insufficient balance', {
-        requestedAmountCents: amountCents,
-        availableBalanceCents,
+        requestedCents,
+        availableCents,
       });
       return NextResponse.json(
         {
           success: false,
           message: 'Insufficient balance',
-          error: `Invalid amount. Amount cannot exceed available balance of $${(availableBalanceCents / 100).toFixed(2)}.`,
+          error: 'Insufficient balance',
         },
         { status: 400 }
       );
@@ -244,24 +257,19 @@ export async function POST(request: NextRequest) {
     const alloc = allocateFromSessions({
       sessions: completed,
       alreadyAllocatedBySession,
-      amountToAllocateCents: amountCents,
+      amountToAllocateCents: requestedCents,
     });
+    const finalAllocations =
+      alloc.remainingCents > 0
+        ? [...alloc.allocations, { sessionId: '__unattributed__', amountCents: alloc.remainingCents }]
+        : alloc.allocations;
+
     if (alloc.remainingCents > 0) {
-      console.error('[withdrawal-request] 400: unable to allocate withdrawal amount', {
-        requestedAmountCents: amountCents,
+      console.warn('[withdrawal-request] allocations include unattributed remainder', {
+        requestedCents,
         remainingCents: alloc.remainingCents,
         completedSessionsCount: completed.length,
       });
-      return NextResponse.json(
-        {
-          success: false,
-          message: 'Invalid withdrawal amount',
-          error:
-            'Unable to allocate this withdrawal amount to completed-session earnings. ' +
-            'Try withdrawing a smaller amount, or contact support to reconcile legacy payout data.',
-        },
-        { status: 400 }
-      );
     }
 
     const snapshot = buildPayoutRequestSnapshot({ provider, bankMeta: null });
@@ -269,8 +277,8 @@ export async function POST(request: NextRequest) {
     // Create payout request (admin-facing approval flow)
     const payoutRequest = await createPayoutRequest({
       providerId,
-      amountCents,
-      allocations: alloc.allocations,
+      amountCents: requestedCents,
+      allocations: finalAllocations,
       payoutMethod: snapshot.payoutMethod,
       payoutDestinationMasked: snapshot.payoutDestinationMasked,
       // legacy (keep populated for older UI codepaths that still look here)

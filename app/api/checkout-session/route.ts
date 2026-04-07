@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { auth } from '@/lib/auth/middleware';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
-import { createSession, getSessions } from '@/lib/sessions/storage';
+import { createSession, getSessionById, getSessions, updateSession } from '@/lib/sessions/storage';
 import { readCheckoutBookingRecord, deleteCheckoutBookingRecord } from '@/lib/stripe/checkoutBookingStore.server';
 import crypto from 'crypto';
 import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as PricingPlan } from '@/lib/pricing/catalog';
 import { getProviderPayout } from '@/lib/payouts/getProviderPayout';
 import { getUserById } from '@/lib/auth/storage';
 import { handleApiError } from '@/lib/errorHandler';
+import { createZoomMeeting, isZoomConfigured } from '@/lib/zoom/api';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { sendBookingConfirmationEmailsForSession } from '@/lib/email/transactional';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -87,8 +90,8 @@ export async function GET(request: NextRequest) {
     // Check if Stripe is configured
     if (!stripe) {
       return NextResponse.json(
-        { error: 'Stripe is not configured' },
-        { status: 500 }
+        { error: 'Payments are temporarily unavailable. Please try again later.' },
+        { status: 503 }
       );
     }
 
@@ -235,11 +238,69 @@ export async function GET(request: NextRequest) {
     const created: any[] = [];
     const stripePaymentIntentId = typeof (checkoutSession as any)?.payment_intent === 'string' ? String((checkoutSession as any).payment_intent).trim() : '';
 
+    const hasZoomJoinUrl = (s: any): boolean => {
+      const b = typeof s?.zoom_join_url === 'string' ? s.zoom_join_url.trim() : '';
+      return Boolean(b);
+    };
+    const hasZoomMeetingId = (s: any): boolean => {
+      const a = typeof s?.zoomMeetingId === 'string' ? s.zoomMeetingId.trim() : '';
+      const b = typeof s?.zoom_meeting_id === 'string' ? s.zoom_meeting_id.trim() : '';
+      return Boolean(a || b);
+    };
+    const ensureZoomForSession = async (s: any, startIso: string) => {
+      if (!isZoomConfigured()) return;
+      if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) return; // idempotency: never create duplicates
+      try {
+        console.log("Creating Zoom meeting for session:", String(s?.id || ''), (s as any)?.datetime ?? startIso);
+        const zoom = await createZoomMeeting({
+          topic: 'IvyWay Session',
+          startTime: startIso,
+          duration: 60,
+        });
+        const join_url = zoom.joinUrl;
+        await updateSession(String(s?.id || ''), {
+          zoomMeetingId: zoom.meetingId,
+          zoom_meeting_id: zoom.meetingId,
+          zoom_join_url: join_url,
+          zoomStartUrl: zoom.startUrl,
+          zoom_start_url: zoom.startUrl,
+          zoomStatus: 'created',
+        } as any);
+        // Persist to dedicated DB column (source-of-truth for `sessions.zoom_join_url`)
+        try {
+          const supabase = getSupabaseAdmin();
+          const { error } = await supabase
+            .from('sessions')
+            .update({ zoom_join_url: join_url })
+            .eq('id', String(s?.id || ''));
+          if (error) throw error;
+          console.log("Saved to DB:", join_url);
+        } catch (e) {
+          console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
+            sessionId: String(s?.id || ''),
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      } catch (error) {
+        console.error("Zoom meeting creation failed");
+        console.error('[ZOOM_MEETING_CREATE_FAILED]', {
+          stripeSessionId: checkoutSession.id,
+          paymentIntentId: stripePaymentIntentId || null,
+          sessionId: String(s?.id || ''),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Best-effort: persist failure state, but never block booking.
+        try {
+          await updateSession(String(s?.id || ''), { zoomStatus: 'failed' } as any);
+        } catch {}
+      }
+    };
+
     if (existingForStripe.length === 0 || sessionTimes.some((t) => !existingByTime.has(`${t.startIso}|${t.endIso}`))) {
       if (!serviceType || !providerId || sessionTimes.length === 0) {
         return NextResponse.json(
-          { error: 'Unable to finalize booking: missing booking metadata (serviceType/providerId/sessionTimes)' },
-          { status: 500 }
+          { error: 'Unable to finalize booking (missing booking metadata). Please retry from the booking page.' },
+          { status: 409 }
         );
       }
 
@@ -326,9 +387,6 @@ export async function GET(request: NextRequest) {
         try {
           const taxForThisSession = taxBasePerSession + (i < taxRemainder ? 1 : 0);
           const totalChargeForThisSession = pricing.session_price_cents + taxForThisSession;
-          const startMs = new Date(startIso).getTime();
-          const endMs = new Date(endIso).getTime();
-          const durationMinutes = Math.round((endMs - startMs) / (1000 * 60));
 
           const sessionTypeLabel =
             serviceType === 'tutoring'
@@ -389,7 +447,10 @@ export async function GET(request: NextRequest) {
           } as any);
           created.push(s);
           existingByTime.add(key);
-        } catch (e) {
+
+          // Best-effort Zoom meeting creation (must NOT block booking).
+          await ensureZoomForSession(s, startIso);
+        } catch {
           // If the slot is already booked (e.g., webhook already created sessions but without stripeCheckoutSessionId),
           // treat as idempotent and continue. We'll return whatever exists.
           continue;
@@ -416,6 +477,48 @@ export async function GET(request: NextRequest) {
             return sessionTimes.some((t) => `${t.startIso}|${t.endIso}` === key);
           });
     const sessionsToReturn = sessionsForStripe.length > 0 ? sessionsForStripe : sessionsForSlots;
+
+    // If the webhook created sessions but Zoom is missing (or sessions were created here),
+    // ensure each session gets a join URL (best-effort, idempotent).
+    if (isZoomConfigured()) {
+      for (const s of sessionsToReturn as any[]) {
+        if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) continue;
+        const startIso =
+          toIsoOrNull((s as any)?.datetime) ||
+          toIsoOrNull((s as any)?.startTime) ||
+          toIsoOrNull((s as any)?.scheduledStartTime) ||
+          toIsoOrNull((s as any)?.scheduledStart) ||
+          null;
+        if (!startIso) continue;
+        await ensureZoomForSession(s, startIso);
+      }
+    }
+
+    // Transactional email: booking confirmation (idempotent per-session)
+    for (const s of sessionsToReturn as any[]) {
+      try {
+        const id = String((s as any)?.id || '').trim();
+        const latest = id ? await getSessionById(id) : null;
+        const sess: any = latest || s;
+        const alreadyStudent = Boolean(sess?.bookingEmailStudentSentAt);
+        const alreadyProvider = Boolean(sess?.bookingEmailProviderSentAt);
+        if (alreadyStudent && alreadyProvider) continue;
+        const sendResult = await sendBookingConfirmationEmailsForSession(sess as any);
+        const nowISO = new Date().toISOString();
+        await updateSession(id, {
+          bookingEmailStudentSentAt: sendResult.studentEmailSent ? nowISO : sess?.bookingEmailStudentSentAt,
+          bookingEmailProviderSentAt: sendResult.providerEmailSent ? nowISO : sess?.bookingEmailProviderSentAt,
+          confirmationEmailsSent: sendResult.studentEmailSent && sendResult.providerEmailSent,
+          confirmationEmailsSentAt: sendResult.studentEmailSent && sendResult.providerEmailSent ? nowISO : sess?.confirmationEmailsSentAt,
+          updatedAt: nowISO,
+        } as any);
+      } catch (e) {
+        console.warn('[email] booking confirmation send failed (non-blocking)', {
+          sessionId: String((s as any)?.id || ''),
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
 
     // Best-effort cleanup of server-side booking record to prevent unbounded growth.
     if (checkoutBookingId) {
@@ -453,7 +556,21 @@ export async function GET(request: NextRequest) {
       console.error('[api/checkout-session] Stripe error message:', (error as any).message);
     }
     
-    return handleApiError(error, { logPrefix: '[api/checkout-session]' });
+    // Common Stripe failure: invalid/missing session id.
+    const stripeErr = error as any;
+    if (stripeErr && typeof stripeErr === 'object') {
+      const type = String(stripeErr.type || '');
+      const code = String(stripeErr.code || '');
+      if (type === 'StripeInvalidRequestError' && code === 'resource_missing') {
+        return NextResponse.json({ error: 'Checkout session not found' }, { status: 404 });
+      }
+    }
+
+    return handleApiError(error, {
+      logPrefix: '[api/checkout-session]',
+      status: 503,
+      publicMessage: 'Unable to confirm checkout. Please try again.',
+    });
   }
 }
 

@@ -32,15 +32,34 @@ export function isSessionCompleted(session: AnySession, nowMs: number = Date.now
 
 /**
  * Canonical "upcoming" rule (per CURRENT spec):
- * - session.status === "confirmed"
+ * - session.status === "scheduled" OR "confirmed"
  * AND
  * - now < session.endTimeUTC (or equivalent)
  */
 export function isSessionUpcoming(session: AnySession, nowMs: number = Date.now()): boolean {
   const status = typeof session?.status === 'string' ? session.status : '';
-  if (status !== 'confirmed') return false;
+  if (status !== 'confirmed' && status !== 'scheduled') return false;
   const endMs = getSessionEndTimeMs(session);
   return endMs !== null && nowMs < endMs;
+}
+
+/**
+ * Canonical "no show" rule (per CURRENT spec):
+ * - session.status === "provider_no_show" OR "student_no_show"
+ */
+export function isSessionNoShow(session: AnySession): boolean {
+  const status = typeof session?.status === 'string' ? session.status : '';
+  return [
+    'provider_no_show',
+    'student_no_show',
+    // Legacy variants still present in some records / UI flows
+    'no_show_provider',
+    'no_show_student',
+    'no_show_both',
+    'no-show',
+    'no_show',
+    'expired_provider_no_show',
+  ].includes(status);
 }
 
 

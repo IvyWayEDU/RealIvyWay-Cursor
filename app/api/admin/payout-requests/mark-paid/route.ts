@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getPayoutRequestById, updatePayoutRequestIfStatus } from '@/lib/payouts/payout-requests.server';
 import { handleApiError } from '@/lib/errorHandler';
+import { sendPayoutPaidEmail } from '@/lib/email/transactional';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +35,25 @@ export async function POST(request: NextRequest) {
     });
     if (!cas.payoutRequest) return NextResponse.json({ error: 'Failed to update payout request' }, { status: 500 });
     const updated = cas.payoutRequest;
+
+    // Transactional email: payout confirmation (send only on successful transition)
+    if (cas.updated) {
+      try {
+        await sendPayoutPaidEmail({
+          providerId: updated.providerId,
+          amountCents: updated.amountCents,
+          payoutMethod: updated.payoutMethod,
+          payoutDestinationMasked: updated.payoutDestinationMasked || updated.payoutDestination,
+          paidAt: updated.paidAt,
+        });
+      } catch (e) {
+        console.warn('[email] payout paid email failed (non-blocking)', {
+          payoutRequestId: updated.id,
+          providerId: updated.providerId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
 
     return NextResponse.json({ success: true, payoutRequest: updated }, { status: 200 });
   } catch (error) {

@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth/middleware';
 import { getSessionById, updateSession } from '@/lib/sessions/storage';
 import { appendAdminAuditEntry } from '@/lib/audit/adminAudit.server';
 import { handleApiError } from '@/lib/errorHandler';
+import { sendCancellationEmailsForSession } from '@/lib/email/transactional';
 
 export async function POST(request: NextRequest) {
   const authResult = await auth.requireAdmin();
@@ -36,6 +37,31 @@ export async function POST(request: NextRequest) {
     });
 
     const updated = await getSessionById(sessionId);
+
+    // Transactional email: cancellation (idempotent per-session)
+    if (updated) {
+      try {
+        const alreadyStudent = Boolean((updated as any)?.cancellationEmailStudentSentAt);
+        const alreadyProvider = Boolean((updated as any)?.cancellationEmailProviderSentAt);
+        if (!alreadyStudent || !alreadyProvider) {
+          const sendResult = await sendCancellationEmailsForSession(updated as any);
+          const now2 = new Date().toISOString();
+          await updateSession(sessionId, {
+            cancellationEmailStudentSentAt: sendResult.studentEmailSent ? now2 : (updated as any)?.cancellationEmailStudentSentAt,
+            cancellationEmailProviderSentAt: sendResult.providerEmailSent ? now2 : (updated as any)?.cancellationEmailProviderSentAt,
+            cancellationEmailsSentAt:
+              sendResult.studentEmailSent && sendResult.providerEmailSent ? now2 : (updated as any)?.cancellationEmailsSentAt,
+            updatedAt: now2,
+          } as any);
+        }
+      } catch (e) {
+        console.warn('[email] cancellation send failed (non-blocking)', {
+          sessionId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+
     return NextResponse.json({ success: true, session: updated });
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/admin/sessions/cancel]' });

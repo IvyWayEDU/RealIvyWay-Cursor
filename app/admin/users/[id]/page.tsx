@@ -56,6 +56,7 @@ export default async function AdminUserDetailPage({
       r.includes('tutor') ||
       u?.isTutor === true ||
       services.includes('tutoring') ||
+      services.includes('testprep') ||
       services.includes('test_prep') ||
       services.includes('test-prep');
     const isCounselor =

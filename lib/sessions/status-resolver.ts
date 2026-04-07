@@ -5,17 +5,23 @@ import { Session } from '@/lib/models/types';
 /**
  * Centralized session status resolver (canonical lifecycle).
  *
- * REQUIRED BEHAVIOR:
- * - A session becomes `completed` ONLY when:
- *   currentTimeUTC >= session.scheduledEnd
+ * REQUIRED BEHAVIOR (per business rules):
+ * - Provider attendance takes priority for outcome + payout.
+ * - After the 10-minute grace window from scheduled start:
+ *   - If providerJoinedAt IS NOT NULL → status = 'completed' (provider is paid), regardless of student join
+ *   - If providerJoinedAt IS NULL → status = 'provider_no_show' (no payout)
+ * - Student absence MUST NOT block provider payout.
+ * - Optional analytics: if providerJoinedAt IS NOT NULL and studentJoinedAt IS NULL, mark internal no-show
+ *   fields (e.g. flagNoShowStudent/noShowParty) but keep status as 'completed'.
  *
  * Notes:
- * - Caller is responsible for persisting returned patch.
+ * - Caller is responsible for persisting the returned patch.
  */
 
 export function getSessionEndTimeIso(session: Session): string | null {
   const s: any = session;
   const iso =
+    (typeof s?.end_datetime === 'string' && s.end_datetime) ||
     (typeof s?.endTime === 'string' && s.endTime) ||
     (typeof s?.scheduledEndTime === 'string' && s.scheduledEndTime) ||
     (typeof s?.scheduledEnd === 'string' && s.scheduledEnd) ||
@@ -29,6 +35,26 @@ export function getSessionEndTimeMs(session: Session): number | null {
   const t = new Date(iso).getTime();
   return Number.isFinite(t) ? t : null;
 }
+
+export function getSessionStartTimeIso(session: Session): string | null {
+  const s: any = session;
+  const iso =
+    (typeof s?.datetime === 'string' && s.datetime) ||
+    (typeof s?.startTime === 'string' && s.startTime) ||
+    (typeof s?.scheduledStartTime === 'string' && s.scheduledStartTime) ||
+    (typeof s?.scheduledStart === 'string' && s.scheduledStart) ||
+    null;
+  return iso;
+}
+
+export function getSessionStartTimeMs(session: Session): number | null {
+  const iso = getSessionStartTimeIso(session);
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+const GRACE_WINDOW_MS = 10 * 60 * 1000;
 
 type AttendanceFlag = 'none' | 'provider_no_show' | 'full_no_show';
 
@@ -44,7 +70,7 @@ function resolveAttendanceAndPayout(session: Session): {
   providerJoinedAt: string | null;
   studentJoinedAt: string | null;
   attendanceFlag: AttendanceFlag;
-  providerEligibleForPayout: boolean;
+  providerEligibleForPayout: boolean; // provider join evidence (student does not block)
   providerJoinCount: number;
   studentJoinCount: number;
 } {
@@ -57,12 +83,18 @@ function resolveAttendanceAndPayout(session: Session): {
   const providerJoinCount = providerJoinCountFromLogs > 0 ? providerJoinCountFromLogs : providerJoinedAt ? 1 : 0;
   const studentJoinCount = studentJoinCountFromLogs > 0 ? studentJoinCountFromLogs : studentJoinedAt ? 1 : 0;
 
+  // Provider payout eligibility:
+  // - Provider must have join evidence
+  // - Student join does NOT affect payout
+  // Note: grace window is used for status resolution timing, not payout blocking.
+  const providerEligibleForPayout = providerJoinCount > 0;
+
   if (providerJoinCount > 0) {
     return {
       providerJoinedAt,
       studentJoinedAt,
       attendanceFlag: 'none',
-      providerEligibleForPayout: true,
+      providerEligibleForPayout,
       providerJoinCount,
       studentJoinCount,
     };
@@ -79,14 +111,13 @@ function resolveAttendanceAndPayout(session: Session): {
     };
   }
 
-  // If we have no evidence either party joined (common in dev/test flows or missing Zoom logs),
-  // do NOT automatically withhold payout. We only withhold when we have positive evidence
-  // the student joined but the provider did not.
+  // If we have no evidence either party joined:
+  // - providerJoinedAt is null → provider is NOT eligible for payout.
   return {
     providerJoinedAt: providerJoinedAt ?? null,
     studentJoinedAt: studentJoinedAt ?? null,
     attendanceFlag: 'none',
-    providerEligibleForPayout: true,
+    providerEligibleForPayout: false,
     providerJoinCount,
     studentJoinCount,
   };
@@ -100,64 +131,77 @@ export function resolveSessionStatusByTime(
   const status = typeof (session as any)?.status === 'string' ? String((session as any).status) : '';
   if (status === 'cancelled' || status === 'cancelled-late' || status === 'refunded') return null;
 
-  const endIso = (session as any)?.scheduledEnd || (session as any)?.scheduledEndTime || (session as any)?.endTime;
-  if (typeof endIso !== 'string' || !endIso.trim()) return null;
-  const endMs = new Date(endIso).getTime();
-  if (!Number.isFinite(endMs)) return null;
-
-  if (nowMs < endMs) return null;
-
-  // If already completed, no status transition patch is needed.
+  // Terminal statuses (do not auto-transition further).
+  // Note: no-show statuses may later transition to `completed` if both parties eventually join.
   if (status === 'completed') return null;
 
   const nowISO = new Date(nowMs).toISOString();
   const zoomMeetingId = (session as any)?.zoomMeetingId ? String((session as any).zoomMeetingId).trim() : '';
   const hasZoomMeetingId = Boolean(zoomMeetingId);
 
-  const { providerJoinedAt, studentJoinedAt, attendanceFlag, providerEligibleForPayout, providerJoinCount, studentJoinCount } =
-    resolveAttendanceAndPayout(session);
+  const { providerJoinedAt, studentJoinedAt, providerJoinCount, studentJoinCount } = resolveAttendanceAndPayout(session);
 
-  // Treat provider payout eligibility as the source of truth for whether the provider earned.
-  // Missing Zoom meeting IDs / join logs are not, by themselves, evidence of a no-show.
-  const providerEarned = Boolean(providerEligibleForPayout);
-  const flagNoShowProvider = !providerEarned;
+  const startMs = getSessionStartTimeMs(session);
+  const endMs = getSessionEndTimeMs(session);
+  const graceElapsed = Number.isFinite(startMs ?? NaN) && nowMs >= (startMs as number) + GRACE_WINDOW_MS;
 
-  console.log('[SESSION_RESOLVED]', {
-    sessionId: String((session as any)?.id || ''),
-    zoomMeetingId: hasZoomMeetingId ? zoomMeetingId : null,
-    providerJoinCount,
-    studentJoinCount,
-    attendanceFlag,
-    payoutEligible: providerEligibleForPayout,
-    providerEarned,
-    flagNoShowProvider,
-  });
-
-  const patch: any = {
-    status: 'completed',
-    completedAt: nowISO,
-    updatedAt: nowISO,
-    providerJoinedAt,
-    studentJoinedAt,
-    attendanceFlag,
-    providerEligibleForPayout,
-    providerEarned,
-    flagNoShowProvider,
-    providerJoinCount,
-    studentJoinCount,
-    attendanceCheckedAt: nowISO,
-    attendanceSource: hasZoomMeetingId ? 'zoom' : 'missing_zoom_meeting_id',
-  };
-
-  // Add an entry to admin flagged sessions when provider did not attend.
-  if (flagNoShowProvider) {
-    patch.flaggedAt = nowISO;
-    patch.flaggedReason = hasZoomMeetingId ? 'NO_SHOW_PROVIDER' : 'NO_SHOW_PROVIDER_MISSING_ZOOM_MEETING_ID';
-    patch.noShowParty = 'provider';
-    patch.providerEligibleForPayout = false;
+  // Provider attendance takes priority:
+  // After grace window, if provider joined at any point, resolve as completed (and pay provider),
+  // even when the student never joined.
+  if (providerJoinedAt && graceElapsed) {
+    const studentNoShow = !studentJoinedAt;
+    const providerEarned = true;
+    const patch: any = {
+      status: 'completed',
+      completedAt: (session as any)?.completedAt || nowISO,
+      updatedAt: nowISO,
+      providerJoinedAt,
+      studentJoinedAt,
+      attendanceFlag: 'none',
+      providerEligibleForPayout: true,
+      providerEarned,
+      flagNoShowProvider: false,
+      flagNoShowStudent: studentNoShow,
+      noShowParty: studentNoShow ? 'student' : null,
+      markedNoShowAt: studentNoShow ? (session as any)?.markedNoShowAt || nowISO : (session as any)?.markedNoShowAt,
+      providerJoinCount,
+      studentJoinCount,
+      attendanceCheckedAt: nowISO,
+      attendanceSource: hasZoomMeetingId ? 'zoom' : 'missing_zoom_meeting_id',
+    };
+    return patch as Partial<Session>;
   }
 
-  return patch as Partial<Session>;
+  // No-show resolution is based on scheduled start + grace window.
+  if (graceElapsed) {
+    // Provider no-show (only terminal outcome that blocks payout).
+    if (!providerJoinedAt) {
+      if (status === 'provider_no_show') return null;
+      const noShowParty: 'provider' | 'both' = studentJoinedAt ? 'provider' : 'both';
+      const patch: any = {
+        status: 'provider_no_show',
+        updatedAt: nowISO,
+        markedNoShowAt: nowISO,
+        noShowParty,
+        providerJoinedAt,
+        studentJoinedAt,
+        attendanceFlag: 'provider_no_show',
+        providerEligibleForPayout: false,
+        providerEarned: false,
+        flagNoShowProvider: true,
+        flagNoShowStudent: noShowParty === 'both',
+        providerJoinCount,
+        studentJoinCount,
+        attendanceCheckedAt: nowISO,
+        attendanceSource: hasZoomMeetingId ? 'zoom' : 'missing_zoom_meeting_id',
+      };
+      return patch as Partial<Session>;
+    }
+  }
+
+  // Nothing to auto-resolve.
+  void endMs;
+  return null;
 }
 
 

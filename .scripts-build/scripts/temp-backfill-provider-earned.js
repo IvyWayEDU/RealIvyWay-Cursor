@@ -12,7 +12,7 @@
  *
  * Safety:
  * - Default mode is DRY RUN (prints what it would change)
- * - Pass `--apply` to actually write to `data/sessions.json`
+ * - Pass `--apply` to actually write to Supabase
  *
  * Run:
  *   npm -C ivyway-web run -s pricing:validate   # (optional sanity check that scripts build)
@@ -20,12 +20,8 @@
  *   npx -y tsc -p tsconfig.scripts.json
  *   node .scripts-build/scripts/temp-backfill-provider-earned.js --apply
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-const fs_1 = require("fs");
-const path_1 = __importDefault(require("path"));
+const storage_1 = require("../lib/sessions/storage");
 function isNoShowMarked(s) {
     const status = String(s?.status || '').trim();
     if (status === 'completed_no_show_provider')
@@ -42,13 +38,11 @@ function isNoShowMarked(s) {
 }
 async function main() {
     const apply = process.argv.includes('--apply');
-    const file = path_1.default.join(process.cwd(), 'data', 'sessions.json');
-    const raw = await fs_1.promises.readFile(file, 'utf-8');
-    const parsed = JSON.parse(raw);
-    const sessions = Array.isArray(parsed) ? parsed : [];
+    const sessions = (await (0, storage_1.getSessions)());
     const nowISO = new Date().toISOString();
     let candidates = 0;
     let changed = 0;
+    const changedSessions = [];
     for (const s of sessions) {
         if (String(s?.status || '') !== 'completed')
             continue;
@@ -70,16 +64,16 @@ async function main() {
         s.noShowParty = s.noShowParty === 'provider' || s.noShowParty === 'both' ? null : s.noShowParty;
         s.updatedAt = nowISO;
         changed += 1;
+        changedSessions.push(s);
     }
     console.log('[temp-backfill-provider-earned]', {
-        file,
         mode: apply ? 'APPLY' : 'DRY_RUN',
         candidates,
         changed,
     });
     if (apply) {
-        await fs_1.promises.writeFile(file, JSON.stringify(sessions, null, 2), 'utf-8');
-        console.log('[temp-backfill-provider-earned] wrote sessions.json');
+        await (0, storage_1.saveSessions)(changedSessions);
+        console.log('[temp-backfill-provider-earned] wrote updates to Supabase');
     }
     else {
         console.log('[temp-backfill-provider-earned] no changes written (pass --apply)');

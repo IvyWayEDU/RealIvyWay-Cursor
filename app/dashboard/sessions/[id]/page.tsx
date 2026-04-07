@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { getCurrentUserId } from '@/lib/sessions/actions';
 import { normalizeZoomJoinUrl } from '@/lib/sessions/uiHelpers';
@@ -54,6 +54,7 @@ function ProviderAvatar({ name, imageUrl }: { name: string; imageUrl?: string })
 export default function SessionDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const sessionId = params.id as string;
   
   const [session, setSession] = useState<SessionWithDetails | null>(null);
@@ -154,10 +155,54 @@ export default function SessionDetailsPage() {
     }
   }, [sessionId, router]);
 
+  // Refresh periodically so the UI reflects session updates.
+  useEffect(() => {
+    if (!sessionId) return;
+    const id = setInterval(async () => {
+      try {
+        // Trigger a refresh by re-fetching session state using the existing logic.
+        // We intentionally keep this lightweight and best-effort.
+        const { userId } = await getCurrentUserId();
+        if (!userId) return;
+
+        for (const role of ['student', 'provider'] as const) {
+          const response = await fetch(`/api/sessions/all?role=${role}`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          if (!data.sessions || !Array.isArray(data.sessions)) continue;
+
+          const foundSession = data.sessions.find((s: Session) => s.id === sessionId);
+          if (!foundSession) continue;
+
+          // Preserve role inference
+          if (foundSession.studentId === userId) setUserRole('student');
+          else if (foundSession.providerId === userId) setUserRole('provider');
+
+          setSession(foundSession as any);
+          break;
+        }
+      } catch {
+        // Best-effort polling only.
+      }
+    }, 20000);
+    return () => clearInterval(id);
+  }, [sessionId]);
+
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // Allow deep-linking from emails to the review flow.
+  useEffect(() => {
+    const reviewParam = searchParams?.get('review');
+    if (reviewParam !== '1') return;
+    if (!session) return;
+    if (userRole !== 'student') return;
+    if (session.status !== 'completed') return;
+    if (hasReviewForSession(session.id)) return;
+    setShowReviewModal(true);
+  }, [searchParams, session, userRole]);
 
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
@@ -349,19 +394,23 @@ export default function SessionDetailsPage() {
               <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
                 (() => {
                   const effectiveStatus = getEffectiveStatus(session);
-                  if (effectiveStatus === 'completed') return 'bg-blue-100 text-blue-800';
+                  if (effectiveStatus === 'completed') return 'bg-green-100 text-green-800';
                   if (effectiveStatus === 'flagged') return 'bg-yellow-100 text-yellow-800';
-                  if (effectiveStatus === 'confirmed') return 'bg-green-100 text-green-800';
+                  if (effectiveStatus === 'confirmed' || effectiveStatus === 'scheduled') return 'bg-blue-100 text-blue-800';
                   if (effectiveStatus === 'cancelled') return 'bg-red-100 text-red-800';
+                  if (effectiveStatus === 'provider_no_show' || effectiveStatus === 'student_no_show') return 'bg-red-100 text-red-800';
                   return 'bg-gray-100 text-gray-800';
                 })()
               }`}>
                 {(() => {
                   const effectiveStatus = getEffectiveStatus(session);
+                  if (effectiveStatus === 'scheduled') return 'Scheduled';
                   if (effectiveStatus === 'confirmed') return 'Confirmed';
                   if (effectiveStatus === 'completed') return 'Completed';
                   if (effectiveStatus === 'flagged') return 'Flagged';
                   if (effectiveStatus === 'cancelled') return 'Cancelled';
+                  if (effectiveStatus === 'provider_no_show') return 'Provider No Show';
+                  if (effectiveStatus === 'student_no_show') return 'Student No Show';
                   return effectiveStatus;
                 })()}
               </span>
@@ -438,7 +487,7 @@ export default function SessionDetailsPage() {
 
               {/* Cancel Button - Only for students, not for completed sessions */}
               {userRole === 'student' && 
-               session.status === 'confirmed' && (
+               (session.status === 'confirmed' || session.status === 'scheduled') && (
                 <button
                   onClick={() => setShowCancelModal(true)}
                   className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white border border-red-300 text-red-600 hover:bg-red-50"
@@ -448,7 +497,7 @@ export default function SessionDetailsPage() {
               )}
 
               {/* Message button - show for active/upcoming sessions, or completed within 24 hours */}
-              {(session.status === 'confirmed' ||
+              {(session.status === 'confirmed' || session.status === 'scheduled' ||
                 (session.status === 'completed' && isWithin24HoursAfterEnd(session))) && (
                 <button
                   onClick={() => {
@@ -460,15 +509,34 @@ export default function SessionDetailsPage() {
                 </button>
               )}
 
-              {/* Start Session button - always visible for upcoming sessions */}
-              {session.status === 'confirmed' && (
-                (() => {
-                  const normalizedZoomUrl = normalizeZoomJoinUrl(session);
-                  // Per spec: always navigate to session.zoomJoinUrl (participants join link).
-                  const joinUrl = normalizedZoomUrl;
-                  const startTimeMs = new Date(session.scheduledStartTime).getTime();
-                  const canJoinSession = Number.isFinite(startTimeMs) ? nowMs >= startTimeMs : false;
-                  return (
+              {/* Join Session button - enable depends ONLY on time window */}
+              {(() => {
+                const normalizedZoomUrl = normalizeZoomJoinUrl(session);
+                // Per spec: always navigate to session.zoom_join_url (participants join link).
+                const joinUrl = normalizedZoomUrl;
+
+                const sessionDatetime = (session as any)?.datetime;
+
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log({
+                    sessionDatetime: sessionDatetime,
+                    now: new Date().toISOString(),
+                    startTime: new Date(sessionDatetime).getTime(),
+                    nowTime: Date.now(),
+                    canJoin: Date.now() >= (new Date(sessionDatetime).getTime() - 10 * 60 * 1000),
+                  });
+                }
+
+                const sessionStart = new Date(sessionDatetime).getTime();
+                const now = nowMs;
+
+                const canJoinSession =
+                  Number.isFinite(sessionStart) &&
+                  now >= sessionStart - 10 * 60 * 1000 &&
+                  now <= sessionStart + 60 * 60 * 1000;
+
+                return (
+                  <>
                     <button
                       type="button"
                       disabled={!canJoinSession}
@@ -484,13 +552,28 @@ export default function SessionDetailsPage() {
                       }`}
                     >
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                        />
                       </svg>
                       Join Session
                     </button>
-                  );
-                })()
-              )}
+
+                    {process.env.NODE_ENV !== 'production' && (
+                      <div className="mt-1 max-w-[360px] text-[10px] leading-snug text-gray-500 break-words">
+                        {JSON.stringify({
+                          datetime: sessionDatetime,
+                          now: new Date().toISOString(),
+                          canJoin: canJoinSession,
+                        })}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

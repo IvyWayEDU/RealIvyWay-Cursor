@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getSessionById, updateSession } from '@/lib/sessions/storage';
+import { resolveUnifiedSessions } from '@/lib/sessions/unified-resolver';
 import { handleApiError } from '@/lib/errorHandler';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
@@ -76,6 +77,9 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Ensure status transitions (completed/no-show) are persisted promptly after join evidence.
+    await resolveUnifiedSessions('api_fetch');
 
     console.log('Student joined tracked:', {
       sessionId,

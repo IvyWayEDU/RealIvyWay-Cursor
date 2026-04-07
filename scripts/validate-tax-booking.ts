@@ -10,9 +10,8 @@
  * - tax_amount_cents is present and total_charge_cents = base + tax
  */
 
-import fs from 'fs';
-import path from 'path';
 import { getProviderPayout } from '../lib/payouts/getProviderPayout';
+import { getSupabaseAdmin } from '../lib/supabase/admin.server';
 
 type AnySession = Record<string, any>;
 
@@ -21,13 +20,11 @@ function toFiniteInt(v: unknown): number | null {
   return Number.isFinite(n) ? Math.floor(n) : null;
 }
 
-function main() {
-  const sessionsPath = path.join(process.cwd(), 'data', 'sessions.json');
-  const raw = fs.readFileSync(sessionsPath, 'utf8');
-  const all = JSON.parse(raw);
-  if (!Array.isArray(all)) {
-    throw new Error('data/sessions.json is not an array');
-  }
+async function main() {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.from('sessions').select('data');
+  if (error) throw error;
+  const all = (data ?? []).map((r: any) => r?.data).filter(Boolean) as AnySession[];
 
   const counselingPaid = (all as AnySession[])
     .filter((s) => {
@@ -44,7 +41,7 @@ function main() {
 
   const latest = counselingPaid[0];
   if (!latest) {
-    console.error('No paid counseling (60 min) sessions found in data/sessions.json');
+    console.error('No paid counseling (60 min) sessions found in Supabase sessions');
     process.exit(1);
   }
 
@@ -92,6 +89,9 @@ function main() {
   console.log('\nVALIDATION OK');
 }
 
-main();
+main().catch((e) => {
+  console.error('[validate-tax-booking] failed', e);
+  process.exit(1);
+});
 
 

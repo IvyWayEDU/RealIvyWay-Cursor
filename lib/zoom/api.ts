@@ -43,6 +43,13 @@ interface CreateZoomMeetingParams {
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
+function base64Encode(input: string): string {
+  // Route handlers normally run in the Node.js runtime, but we guard to be safe.
+  if (typeof Buffer !== 'undefined') return Buffer.from(input).toString('base64');
+  if (typeof btoa !== 'undefined') return btoa(input);
+  throw new Error('No base64 encoder available in this runtime');
+}
+
 /**
  * Get Zoom access token using Server-to-Server OAuth
  * Implements token caching to avoid unnecessary API calls
@@ -64,16 +71,19 @@ async function getZoomAccessToken(): Promise<string> {
   }
 
   try {
-    const response = await fetch(
-      `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
+    const body = new URLSearchParams({
+      grant_type: 'account_credentials',
+      account_id: accountId,
+    });
+
+    const response = await fetch(`https://zoom.us/oauth/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${base64Encode(`${clientId}:${clientSecret}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -81,6 +91,7 @@ async function getZoomAccessToken(): Promise<string> {
     }
 
     const data: ZoomAccessToken = await response.json();
+    console.log('Zoom token:', data.access_token);
 
     // Cache the token (expire 5 minutes before actual expiry for safety)
     cachedToken = {
@@ -105,6 +116,7 @@ export async function createZoomMeeting(
   params: CreateZoomMeetingParams
 ): Promise<{ joinUrl: string; startUrl: string; meetingId: string }> {
   const accessToken = await getZoomAccessToken();
+  console.log('Zoom token:', accessToken);
 
   const meetingData = {
     topic: params.topic,
@@ -126,6 +138,9 @@ export async function createZoomMeeting(
   };
 
   try {
+    const payload = meetingData;
+    console.log("Zoom payload:", payload);
+
     // Always create meetings under the authenticated Zoom account owner.
     // We explicitly do NOT map IvyWay providers to Zoom users.
     const response = await fetch(`https://api.zoom.us/v2/users/me/meetings`, {
@@ -134,7 +149,7 @@ export async function createZoomMeeting(
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(meetingData),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
@@ -142,16 +157,17 @@ export async function createZoomMeeting(
       throw new Error(`Failed to create Zoom meeting: ${response.status} ${errorText}`);
     }
 
-    const meeting: ZoomMeeting = await response.json();
+    const responseData: ZoomMeeting = await response.json();
+    console.log('Zoom meeting created:', responseData);
 
     return {
-      joinUrl: meeting.join_url,
-      startUrl: meeting.start_url,
-      meetingId: meeting.id.toString(),
+      joinUrl: responseData.join_url,
+      startUrl: responseData.start_url,
+      meetingId: responseData.id.toString(),
     };
-  } catch (error) {
-    console.error('Error creating Zoom meeting:', error);
-    throw error;
+  } catch (err: any) {
+    console.error("Zoom API error:", err?.response?.data || err?.message);
+    throw err;
   }
 }
 

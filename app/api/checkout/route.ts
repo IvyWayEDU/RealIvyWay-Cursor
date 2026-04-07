@@ -5,7 +5,6 @@ import { getAuthContext } from '@/lib/auth/session';
 import { getUserById, getUsers } from '@/lib/auth/storage';
 import { reserveSlotsAtomically, unreserveSlotsAtomically } from '@/lib/availability/store.server';
 import { getSessions } from '@/lib/sessions/storage';
-import { SCHOOLS } from '@/data/schools';
 import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as PricingPlan } from '@/lib/pricing/catalog';
 import {
   debugLogStripePriceIdMapKeysOnce,
@@ -13,7 +12,11 @@ import {
   getStripePriceIdForPricingKey,
   getStripePriceIdMapDebugInfo,
 } from '@/lib/pricing/stripePriceIds';
-import { deleteCheckoutBookingRecord, writeCheckoutBookingRecord } from '@/lib/stripe/checkoutBookingStore.server';
+import {
+  deleteCheckoutBookingRecord,
+  setCheckoutBookingCheckoutSessionId,
+  writeCheckoutBookingRecord,
+} from '@/lib/stripe/checkoutBookingStore.server';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 
@@ -26,12 +29,15 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('CHECKOUT process.cwd():', process.cwd());
-    console.log('CHECKOUT env presence:', {
-      hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
-      hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
-      nodeEnv: process.env.NODE_ENV,
-    });
+    const stripeDebug = process.env.STRIPE_DEBUG === '1';
+    if (stripeDebug) {
+      console.log('CHECKOUT process.cwd():', process.cwd());
+      console.log('CHECKOUT env presence:', {
+        hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
+        hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
+        nodeEnv: process.env.NODE_ENV,
+      });
+    }
 
     // Verify user session
     const auth = await getAuthContext();
@@ -44,7 +50,7 @@ export async function POST(request: NextRequest) {
     const session = auth.session;
     const user = session.user;
     if (!user?.email || typeof user.email !== 'string' || !user.email.trim()) {
-      return NextResponse.json({ error: 'Missing user email for checkout' }, { status: 500 });
+      return NextResponse.json({ error: 'Missing user email for checkout' }, { status: 422 });
     }
 
     const rl = enforceRateLimit(request, {
@@ -55,11 +61,18 @@ export async function POST(request: NextRequest) {
     if (rl) return rl;
 
     // Parse request body
-    const body = await request.json();
+    let body: any = null;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     const bookingState = body?.bookingState;
 
-    // Debug: log raw incoming payload before any Stripe call.
-    console.log('CHECKOUT REQUEST BODY:', body);
+    // Production safety: avoid logging full request payload (can contain PII).
+    if (stripeDebug) {
+      console.log('CHECKOUT REQUEST BODY keys:', body && typeof body === 'object' ? Object.keys(body) : typeof body);
+    }
 
     // Validate required inputs exist (sent by frontend summary page).
     const providerIdInput = typeof body?.providerId === 'string' ? String(body.providerId).trim() : '';
@@ -74,7 +87,15 @@ export async function POST(request: NextRequest) {
     // Get base URL for redirect URLs
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
       (request.headers.get('origin') || 'http://localhost:3000');
-    console.log('CHECKOUT baseUrl:', baseUrl);
+    if (stripeDebug) console.log('CHECKOUT baseUrl:', baseUrl);
+
+    // Stripe must be configured for production checkout (no mock fallbacks).
+    if (!stripe) {
+      return NextResponse.json(
+        { success: false, message: 'Payments are temporarily unavailable. Please try again later.' },
+        { status: 503 }
+      );
+    }
 
     // Build booking metadata for webhook session creation
     // NOTE: Stripe metadata values must be strings and have size limits.
@@ -170,11 +191,13 @@ export async function POST(request: NextRequest) {
       plan: pricingPlan,
       duration_minutes,
     });
-    console.log('CHECKOUT resolved pricing object:', pricing);
-    console.log('CHECKOUT pricingKeyInput vs server pricing_key:', {
-      pricingKeyInput,
-      serverPricingKey: pricing.pricing_key,
-    });
+    if (stripeDebug) {
+      console.log('CHECKOUT resolved pricing object:', pricing);
+      console.log('CHECKOUT pricingKeyInput vs server pricing_key:', {
+        pricingKeyInput,
+        serverPricingKey: pricing.pricing_key,
+      });
+    }
 
     // Client provides pricingKey for validation/debugging only; server pricing is authoritative.
     if (pricingKeyInput !== pricing.pricing_key) {
@@ -189,8 +212,10 @@ export async function POST(request: NextRequest) {
     const sessionTime = sessionTimeInput;
 
     // Debug: print active Stripe price map keys + source once per runtime.
-    debugLogStripePriceIdMapKeysOnce('CHECKOUT STRIPE_PRICE_IDS');
-    debugLogStripePriceIdMapDetailsOnce('CHECKOUT STRIPE_PRICE_IDS');
+    if (stripeDebug) {
+      debugLogStripePriceIdMapKeysOnce('CHECKOUT STRIPE_PRICE_IDS');
+      debugLogStripePriceIdMapDetailsOnce('CHECKOUT STRIPE_PRICE_IDS');
+    }
 
     let stripePriceId: string;
     try {
@@ -198,37 +223,37 @@ export async function POST(request: NextRequest) {
     } catch (e) {
       console.error('CHECKOUT failed to resolve Stripe price id:', e);
       return NextResponse.json(
-        { success: false, message: 'Live Stripe price IDs are not configured correctly.' },
-        { status: 500 }
+        { success: false, message: 'Payments are temporarily unavailable. Please try again later.' },
+        { status: 503 }
       );
     }
 
     // Production-safe debug logs (requested). Do NOT log secrets.
-    console.log('[CHECKOUT DEBUG]', {
-      pricingKey,
-      stripePriceId,
-      providerId,
-      sessionDate,
-      sessionTime,
-      baseUrl,
-      successUrl: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
-      hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
-      hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
-    });
-
-    // Required debug logs (requested)
-    console.log('CHECKOUT pricing key:', pricingKey);
-    console.log('CHECKOUT stripe price id:', stripePriceId);
-    try {
-      const info = getStripePriceIdMapDebugInfo();
-      console.log('CHECKOUT stripe price map source:', info.source);
-      console.log('CHECKOUT stripe price map keys:', info.keys);
-      console.log('CHECKOUT stripe price map cwd:', info.cwd);
-      console.log('CHECKOUT stripe price map fallback file path:', info.fallbackFilePath);
-      console.log('CHECKOUT stripe price map tutoring_single:', info.tutoringSingle);
-    } catch (e) {
-      console.warn('CHECKOUT failed to read Stripe price map debug info:', e);
+    if (stripeDebug) {
+      console.log('[CHECKOUT DEBUG]', {
+        pricingKey,
+        stripePriceId,
+        providerId,
+        sessionDate,
+        sessionTime,
+        baseUrl,
+        successUrl: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
+        hasStripeSecretKey: !!process.env.STRIPE_SECRET_KEY,
+        hasStripePriceIdsJson: !!process.env.STRIPE_PRICE_IDS_JSON,
+      });
+      console.log('CHECKOUT pricing key:', pricingKey);
+      console.log('CHECKOUT stripe price id:', stripePriceId);
+      try {
+        const info = getStripePriceIdMapDebugInfo();
+        console.log('CHECKOUT stripe price map source:', info.source);
+        console.log('CHECKOUT stripe price map keys:', info.keys);
+        console.log('CHECKOUT stripe price map cwd:', info.cwd);
+        console.log('CHECKOUT stripe price map fallback file path:', info.fallbackFilePath);
+        console.log('CHECKOUT stripe price map tutoring_single:', info.tutoringSingle);
+      } catch (e) {
+        console.warn('CHECKOUT failed to read Stripe price map debug info:', e);
+      }
     }
 
     // Monthly plans (including counseling_monthly) are bundle purchases:
@@ -384,18 +409,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if Stripe is configured
-    if (!stripe) {
-      // Roll back reservation (cannot proceed to payment)
-      await unreserveSlotsAtomically(slotsToReserve);
-      console.warn('Stripe API key not configured. Returning mock checkout URL.');
-      return NextResponse.json({
-        sessionId: 'mock_session_' + Date.now(),
-        url: null,
-        mock: true,
-      });
-    }
-
     const single = sessionPayloads[0] as any;
 
     // Store bundle session times server-side (Stripe metadata is too small for JSON blobs).
@@ -437,8 +450,10 @@ export async function POST(request: NextRequest) {
       // isn't accidentally using stale/test price IDs.
       try {
         const price = await stripe.prices.retrieve(stripePriceId);
-        console.log('CHECKOUT stripe price livemode:', price.livemode);
-        console.log('CHECKOUT stripe price active:', price.active);
+        if (stripeDebug) {
+          console.log('CHECKOUT stripe price livemode:', price.livemode);
+          console.log('CHECKOUT stripe price active:', price.active);
+        }
         if (price.active === false) {
           throw new Error(`Stripe price is inactive: ${stripePriceId}`);
         }
@@ -453,21 +468,23 @@ export async function POST(request: NextRequest) {
           await deleteCheckoutBookingRecord(checkoutBookingId);
         } catch {}
         return NextResponse.json(
-          { success: false, message: 'Live Stripe price IDs are not configured correctly.' },
-          { status: 500 }
+          { success: false, message: 'Payments are temporarily unavailable. Please try again later.' },
+          { status: 503 }
         );
       }
 
       try {
-        console.log('CHECKOUT about to create Stripe session:', {
-          stripePriceId,
-          providerId,
-          sessionDate,
-          sessionTime,
-          baseUrl,
-          successUrl: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
-        });
+        if (stripeDebug) {
+          console.log('CHECKOUT about to create Stripe session:', {
+            stripePriceId,
+            providerId,
+            sessionDate,
+            sessionTime,
+            baseUrl,
+            successUrl: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
+            cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
+          });
+        }
         checkoutSession = await stripe.checkout.sessions.create({
           payment_method_types: ['card'], // Cards are always enabled
           // Apple Pay, Google Pay, Cash App, Affirm, Klarna, Link, etc. are automatically
@@ -479,7 +496,7 @@ export async function POST(request: NextRequest) {
           
           // Optional: allow customers with tax IDs (e.g. VAT/GST) to provide them.
           tax_id_collection: { enabled: true },
-          allow_promotion_codes: false,
+          allow_promotion_codes: true,
           line_items: [{ price: stripePriceId, quantity: 1 }],
           mode: 'payment',
           // IMPORTANT: Do NOT pass both `customer` and `customer_email`.
@@ -510,6 +527,13 @@ export async function POST(request: NextRequest) {
             },
           },
         });
+
+        // Link the server-side booking record to the Stripe session id (for diagnostics + support tooling).
+        try {
+          await setCheckoutBookingCheckoutSessionId(checkoutBookingId, checkoutSession.id);
+        } catch (e) {
+          console.warn('[CHECKOUT] Failed to attach checkout_session_id to booking record (non-blocking)', e);
+        }
       } catch (error) {
         console.error('[CHECKOUT ERROR]', {
           message: error instanceof Error ? error.message : String(error),
@@ -539,18 +563,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             success: false,
-            message: error instanceof Error ? error.message : String(error),
-            debug:
-              error && typeof error === 'object'
-                ? {
-                    name: 'name' in error ? (error as any).name : undefined,
-                    code: 'code' in error ? (error as any).code : undefined,
-                    type: 'type' in error ? (error as any).type : undefined,
-                    raw: 'raw' in error ? (error as any).raw : undefined,
-                  }
-                : undefined,
+            message:
+              process.env.NODE_ENV === 'production'
+                ? 'Unable to start checkout. Please try again.'
+                : (error instanceof Error ? error.message : String(error)),
           },
-          { status: 500 }
+          { status: 502 }
         );
       }
     } catch (error) {
@@ -568,22 +586,10 @@ export async function POST(request: NextRequest) {
       url: checkoutSession.url,
     });
   } catch (error) {
-    console.error("[CHECKOUT ERROR FULL]", error);
-    return NextResponse.json(
-      {
-        success: false,
-        message: error instanceof Error ? error.message : String(error),
-        debug:
-          error && typeof error === 'object'
-            ? {
-                name: 'name' in error ? (error as any).name : undefined,
-                code: 'code' in error ? (error as any).code : undefined,
-                type: 'type' in error ? (error as any).type : undefined,
-                raw: 'raw' in error ? (error as any).raw : undefined,
-              }
-            : undefined,
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, {
+      logPrefix: '[api/checkout]',
+      status: 503,
+      publicMessage: 'Unable to start checkout. Please try again.',
+    });
   }
 }

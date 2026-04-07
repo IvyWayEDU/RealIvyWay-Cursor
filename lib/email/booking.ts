@@ -33,7 +33,7 @@ export async function sendBookingConfirmationEmails(
   const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
 
   // Validate required booking data
-  if (!booking.zoomJoinUrl) {
+  if (!booking.zoom_join_url) {
     errors.push('Zoom join URL is missing from booking');
     return { studentEmailSent, providerEmailSent, errors };
   }
@@ -70,7 +70,7 @@ export async function sendBookingConfirmationEmails(
         subject: booking.subject,
         topic: booking.topic ?? undefined,
         dateTime: formattedDateTime,
-        zoomJoinUrl: booking.zoomJoinUrl,
+        zoom_join_url: booking.zoom_join_url,
         dashboardUrl: `${baseUrl}/dashboard/student`,
       });
 

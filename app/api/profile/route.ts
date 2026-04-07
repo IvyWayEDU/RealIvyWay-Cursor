@@ -5,6 +5,7 @@ import { normalizeSchoolId } from '@/lib/models/schools';
 import { handleApiError } from '@/lib/errorHandler';
 import { validateRequestBody } from '@/lib/validation/utils';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
+import { SCHOOLS, findSchoolByName } from '@/data/schools';
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,6 +17,8 @@ export async function POST(request: NextRequest) {
     const validationResult = await validateRequestBody(request, profileUpdateSchema);
     if (!validationResult.success) return validationResult.response;
     const body = validationResult.data;
+
+    console.log('PROFILE UPDATE PAYLOAD:', body);
     
     const user = await getUserById(session.userId);
     if (!user) {
@@ -38,22 +41,98 @@ export async function POST(request: NextRequest) {
       updateData.profilePhotoUrl = body.profilePhotoUrl;
     }
 
-    // Update roles/services
-    if (body.isTutor !== undefined || body.isCounselor !== undefined) {
+    // Update primary school (single-field partial update).
+    // Supports clients that send `schoolId` / `schoolName` instead of `schoolIds` / `schoolNames`.
+    if (body.schoolId !== undefined || body.schoolName !== undefined) {
       if (!isProviderOrAdmin) {
-        return NextResponse.json(
-          { error: 'Forbidden: Provider role required' },
-          { status: 403 }
-        );
+        return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
       }
-      updateData.isTutor = body.isTutor ?? false;
-      updateData.isCounselor = body.isCounselor ?? false;
-      
-      // Update services array
-      const services: string[] = [];
-      if (updateData.isTutor) services.push('tutoring');
-      if (updateData.isCounselor) services.push('college_counseling');
-      updateData.services = services;
+
+      const existingPrimarySchoolId: string | undefined =
+        (user as any)?.school_id ?? (Array.isArray((user as any)?.schoolIds) ? (user as any).schoolIds[0] : undefined);
+      const existingPrimarySchoolName: string | undefined =
+        (user as any)?.school_name ??
+        (Array.isArray((user as any)?.schoolNames) ? (user as any).schoolNames[0] : undefined);
+
+      let nextPrimarySchoolId =
+        typeof body.schoolId === 'string' && body.schoolId.trim() ? body.schoolId.trim() : existingPrimarySchoolId;
+      let nextPrimarySchoolName =
+        typeof body.schoolName === 'string' && body.schoolName.trim() ? body.schoolName.trim() : existingPrimarySchoolName;
+
+      if (typeof nextPrimarySchoolId === 'string' && nextPrimarySchoolId) {
+        // Prefer canonical snake_case IDs from `data/schools.ts`.
+        const direct = SCHOOLS.find((s) => s.id === nextPrimarySchoolId);
+        const hyphenAsSnake = nextPrimarySchoolId.replace(/-/g, '_');
+        const byHyphen = SCHOOLS.find((s) => s.id === hyphenAsSnake);
+        const byName = !direct && !byHyphen ? findSchoolByName(nextPrimarySchoolId) : undefined;
+
+        if (direct) {
+          if (!nextPrimarySchoolName) nextPrimarySchoolName = direct.name;
+        } else if (byHyphen) {
+          nextPrimarySchoolId = byHyphen.id;
+          if (!nextPrimarySchoolName) nextPrimarySchoolName = byHyphen.name;
+        } else if (byName) {
+          nextPrimarySchoolId = byName.id;
+          if (!nextPrimarySchoolName) nextPrimarySchoolName = byName.name;
+        } else {
+          // Best-effort normalization (snake_case)
+          nextPrimarySchoolId = nextPrimarySchoolId
+            .toLowerCase()
+            .replace(/&/g, 'and')
+            .replace(/[^\w\s]/g, '')
+            .replace(/\s+/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        }
+      }
+
+      if (typeof body.schoolId !== 'undefined') updateData.school_id = nextPrimarySchoolId || undefined;
+      if (typeof body.schoolName !== 'undefined') updateData.school_name = nextPrimarySchoolName || undefined;
+    }
+
+    // Update roles/services (provider-only)
+    if (body.isTutor !== undefined || body.isCounselor !== undefined || body.services !== undefined || body.offersVirtualTours !== undefined) {
+      if (!isProviderOrAdmin) {
+        return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
+      }
+
+      const existingServicesRaw: unknown = (user as any)?.services ?? (user as any)?.profile?.services ?? [];
+      const existingServices = Array.isArray(existingServicesRaw)
+        ? existingServicesRaw.map((s) => String(s ?? '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      const existingServiceSet = new Set(existingServices);
+      const existingIsTutor = Boolean((user as any)?.isTutor ?? existingServiceSet.has('tutoring'));
+      const existingIsCounselor = Boolean((user as any)?.isCounselor ?? existingServiceSet.has('college_counseling'));
+      const existingOffersVirtualTours = Boolean((user as any)?.offersVirtualTours ?? false);
+
+      const nextOffersVirtualTours =
+        typeof body.offersVirtualTours === 'boolean' ? body.offersVirtualTours : existingOffersVirtualTours;
+
+      // If `services` is explicitly provided, treat it as source of truth (already normalized by schema).
+      let nextServices: string[] | null = Array.isArray(body.services) ? [...body.services] : null;
+
+      if (!nextServices) {
+        // Otherwise, derive services from role flags while preserving unspecified flags.
+        const nextIsTutor = typeof body.isTutor === 'boolean' ? body.isTutor : existingIsTutor;
+        const nextIsCounselor = typeof body.isCounselor === 'boolean' ? body.isCounselor : existingIsCounselor;
+
+        nextServices = [];
+        if (nextIsTutor) nextServices.push('tutoring');
+        if (nextIsCounselor) nextServices.push('college_counseling');
+        if (nextOffersVirtualTours) nextServices.push('virtual_tour');
+      } else {
+        // Keep offersVirtualTours in sync with services when it's explicitly enabled.
+        if (nextOffersVirtualTours && !nextServices.includes('virtual_tour')) nextServices.push('virtual_tour');
+      }
+
+      // De-dupe while preserving order.
+      nextServices = Array.from(new Set(nextServices));
+
+      updateData.services = nextServices;
+
+      // Keep legacy flags consistent (used by UI as a fallback).
+      updateData.isTutor = nextServices.includes('tutoring');
+      updateData.isCounselor = nextServices.includes('college_counseling');
     }
 
     // Update schools
