@@ -1,8 +1,5 @@
 'use server';
 
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
 import { isTimeWithinAvailability } from './utils';
 import {
   readReservedSlotsFile as _readReservedSlotsFile,
@@ -10,10 +7,8 @@ import {
   isSlotReserved as _isSlotReserved,
   reserveSlotsAtomically as _reserveSlotsAtomically,
   unreserveSlotsAtomically as _unreserveSlotsAtomically,
+  readAvailabilityFile,
 } from './store.server';
-
-const DATA_DIR = path.join(process.cwd(), 'data');
-const AVAILABILITY_FILE = path.join(DATA_DIR, 'availability.json');
 
 /**
  * Time range stored as minutes since midnight (LOCAL time, no timezone conversion)
@@ -99,42 +94,67 @@ export interface ProviderAvailability {
   updatedAt: string; // ISO 8601 datetime string
 }
 
-// Ensure data directory exists
-async function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
-  }
+function safeDaysTemplate(): DayAvailability[] {
+  return Array.from({ length: 7 }, (_, dayOfWeek) => ({
+    dayOfWeek,
+    enabled: false,
+    timeRanges: [],
+  }));
 }
 
-// Read all availability from file
+function daysFromBlocks(blocks: any[] | undefined | null): DayAvailability[] {
+  const days = safeDaysTemplate();
+  if (!Array.isArray(blocks)) return days;
+  for (const b of blocks) {
+    const dayOfWeek = Number((b as any)?.dayOfWeek);
+    const startMinutes = Number((b as any)?.startMinutes);
+    const endMinutes = Number((b as any)?.endMinutes);
+    if (!Number.isFinite(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) continue;
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) continue;
+    days[dayOfWeek].enabled = true;
+    days[dayOfWeek].timeRanges.push({ startMinutes, endMinutes });
+  }
+  return days;
+}
+
+// Read all availability from Supabase-backed store (no filesystem).
 export async function getAllAvailability(): Promise<ProviderAvailability[]> {
-  await ensureDataDir();
-  
-  if (!existsSync(AVAILABILITY_FILE)) {
-    return [];
-  }
-  
-  try {
-    const data = await readFile(AVAILABILITY_FILE, 'utf-8');
-    const raw = JSON.parse(data);
-    
-    if (Array.isArray(raw)) {
-      return raw;
+  const storage = await readAvailabilityFile();
+  const byProvider = new Map<string, ProviderAvailability>();
+
+  for (const entry of Object.values(storage || {})) {
+    const providerId = typeof (entry as any)?.providerId === 'string' ? String((entry as any).providerId).trim() : '';
+    if (!providerId) continue;
+    const updatedAt = typeof (entry as any)?.updatedAt === 'string' ? String((entry as any).updatedAt) : new Date().toISOString();
+    const timezone = typeof (entry as any)?.timezone === 'string' ? String((entry as any).timezone) : 'America/New_York';
+
+    const next: ProviderAvailability = {
+      providerId,
+      timezone,
+      updatedAt,
+      days: daysFromBlocks((entry as any)?.blocks),
+    };
+
+    const prev = byProvider.get(providerId);
+    if (!prev) {
+      byProvider.set(providerId, next);
+      continue;
     }
-    
-    return Object.values(raw || {});
-  } catch (error) {
-    console.error('Error reading availability file:', error);
-    return [];
+
+    // Prefer the newest record for a provider (best-effort).
+    const prevMs = new Date(prev.updatedAt).getTime();
+    const nextMs = new Date(next.updatedAt).getTime();
+    if (Number.isFinite(nextMs) && (!Number.isFinite(prevMs) || nextMs >= prevMs)) {
+      byProvider.set(providerId, next);
+    }
   }
+
+  return Array.from(byProvider.values());
 }
 
-// Write availability to file atomically
 export async function saveAllAvailability(availability: ProviderAvailability[]): Promise<void> {
-  await ensureDataDir();
-  // Write atomically by writing to a temp file first, then renaming (if supported)
-  // For now, just write directly - the file system should handle this
-  await writeFile(AVAILABILITY_FILE, JSON.stringify(availability, null, 2), 'utf-8');
+  void availability;
+  throw new Error('[availability.storage] saveAllAvailability is deprecated. Use Supabase-backed availability endpoints.');
 }
 
 // Get availability for a specific provider
@@ -179,37 +199,15 @@ export async function saveProviderAvailability(
   providerId: string,
   availabilityBlocks: ProviderAvailability
 ): Promise<void> {
-  await ensureDataDir(); // Ensure data directory exists before writing
-  
-  const allAvailability = await getAllAvailability();
-  
-  // Find existing entry for this provider
-  const existingIndex = allAvailability.findIndex(av => 
-    av.providerId === providerId
-  );
-  
-  const updatedAvailability = {
-    ...availabilityBlocks,
-    providerId,
-    updatedAt: new Date().toISOString(),
-  };
-  
-  if (existingIndex !== -1) {
-    // Update existing
-    allAvailability[existingIndex] = updatedAvailability;
-  } else {
-    // Add new
-    allAvailability.push(updatedAvailability);
-  }
-  
-  await saveAllAvailability(allAvailability);
+  void providerId;
+  void availabilityBlocks;
+  throw new Error('[availability.storage] saveProviderAvailability is deprecated. Use Supabase-backed availability endpoints.');
 }
 
 // Delete provider availability
 export async function deleteProviderAvailability(providerId: string): Promise<void> {
-  const allAvailability = await getAllAvailability();
-  const filtered = allAvailability.filter(av => av.providerId !== providerId);
-  await saveAllAvailability(filtered);
+  void providerId;
+  throw new Error('[availability.storage] deleteProviderAvailability is deprecated. Use Supabase-backed availability endpoints.');
 }
 
 

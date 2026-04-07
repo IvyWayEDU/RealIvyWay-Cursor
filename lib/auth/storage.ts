@@ -19,7 +19,7 @@ export async function getUsers(): Promise<User[]> {
   const { data, error } = await supabase.from('users').select('data');
   if (error) {
     console.error('[auth.storage] Error reading users from Supabase:', error);
-    return [];
+    throw error;
   }
 
   const users: User[] = (data ?? [])

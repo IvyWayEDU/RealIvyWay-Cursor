@@ -1,15 +1,10 @@
 'use server';
 
-import { readFile, writeFile, mkdir, rename } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
 import { getUserById } from '@/lib/auth/storage';
 import type { DayAvailability } from '@/lib/availability/types';
-import { isFilePersistenceDisabled, warnFilePersistenceDisabled } from '@/lib/server/filePersistence.server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const AVAILABILITY_FILE = path.join(DATA_DIR, 'availability.json');
+const AVAILABILITY_TABLE = 'availability';
 
 export type SlotStatus = 'available' | 'reserved';
 
@@ -66,37 +61,13 @@ export interface AvailabilityEntry {
  */
 type AvailabilityStorage = Record<string, AvailabilityEntry>;
 
-declare global {
-  // eslint-disable-next-line no-var
-  var __ivywayAvailabilityWriteLock: Promise<void> | undefined;
-}
-
-async function withAvailabilityWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = globalThis.__ivywayAvailabilityWriteLock || Promise.resolve();
-  let release!: () => void;
-  const next = new Promise<void>((r) => {
-    release = r;
-  });
-  globalThis.__ivywayAvailabilityWriteLock = prev.then(() => next);
-  await prev;
-  try {
-    return await fn();
-  } finally {
-    release();
-  }
-}
-
-/**
- * Ensure data directory exists
- */
-async function ensureDataDir(): Promise<void> {
-  if (isFilePersistenceDisabled()) {
-    return;
-  }
-  if (!existsSync(DATA_DIR)) {
-    await mkdir(DATA_DIR, { recursive: true });
-  }
-}
+type AvailabilityDbRow = {
+  provider_id: string | null;
+  service_type: string | null;
+  timezone: string | null;
+  updated_at: string | null;
+  data: any;
+};
 
 /**
  * Canonical serviceType values persisted in availability rows.
@@ -206,7 +177,7 @@ export async function readReservedSlotsFile(): Promise<AvailabilitySlot[]> {
     .order('datetime', { ascending: true });
   if (error) {
     console.error('[store.server] Error reading reserved slots from Supabase:', error);
-    return [];
+    throw error;
   }
   return (data ?? [])
     .map((row: any) => {
@@ -321,124 +292,82 @@ export async function unreserveSlotsAtomically(
   }
 }
 
-/**
- * Read availability file, return empty object if missing
- * Handles migration from old array format to new object format
- * Also handles migration from serviceType-scoped to provider-only format
- */
-export async function readAvailabilityFile(): Promise<AvailabilityStorage> {
-  await ensureDataDir();
-  
-  if (!existsSync(AVAILABILITY_FILE)) {
-    return {};
-  }
-  
-  try {
-    const data = await readFile(AVAILABILITY_FILE, 'utf-8');
-    const parsed = JSON.parse(data);
+function normalizeAvailabilityEntryFromDbRow(row: AvailabilityDbRow): AvailabilityEntry | null {
+  const providerId = typeof row?.provider_id === 'string' ? row.provider_id.trim() : '';
+  const serviceType = normalizeProviderServiceToAvailabilityServiceType(row?.service_type);
+  if (!providerId || !serviceType) return null;
 
-    // IMPORTANT INTEGRITY RULE:
-    // This function MUST be read-only. No migrations, no rewrites, no "default" row creation.
-    // If stored data is in an older/odd shape, we adapt IN MEMORY only.
+  const base = row?.data && typeof row.data === 'object' ? row.data : {};
+  const updatedAt =
+    (typeof base?.updatedAt === 'string' && base.updatedAt.trim() ? base.updatedAt.trim() : '') ||
+    (typeof row?.updated_at === 'string' && row.updated_at.trim() ? row.updated_at.trim() : '') ||
+    new Date().toISOString();
 
-    // Legacy array format: treat as provider-level. We DO NOT persist any conversions here.
-    if (Array.isArray(parsed)) {
-      const storage: AvailabilityStorage = {};
-      for (const item of parsed as any[]) {
-        const providerId = typeof item?.providerId === 'string' ? item.providerId : String(item?.providerId || '').trim();
-        if (!providerId) continue;
-        const tz = typeof item?.timezone === 'string' && item.timezone.trim() ? item.timezone.trim() : 'America/New_York';
-        const updatedAt = typeof item?.updatedAt === 'string' && item.updatedAt.trim() ? item.updatedAt.trim() : new Date().toISOString();
-        const days = Array.isArray(item?.days) ? (item.days as DayAvailability[]) : undefined;
-        const blocks = Array.isArray(item?.blocks) ? (item.blocks as AvailabilityBlock[]) : undefined;
+  const timezone =
+    (typeof base?.timezone === 'string' && base.timezone.trim() ? base.timezone.trim() : '') ||
+    (typeof row?.timezone === 'string' && row.timezone.trim() ? row.timezone.trim() : '') ||
+    'America/New_York';
 
-        // In-memory compatibility: expose legacy provider-level availability under tutoring + college_counseling
-        // so booking can still read it. We still DO NOT write anything back.
-        for (const serviceType of ['tutoring', 'college_counseling'] as const) {
-          storage[availabilityKey(providerId, serviceType)] = {
-            providerId,
-            serviceType,
-            timezone: tz,
-            updatedAt,
-            days,
-            blocks,
-          };
-        }
-      }
-      return storage;
-    }
+  const days = Array.isArray(base?.days) ? (base.days as DayAvailability[]) : undefined;
+  const blocks = Array.isArray(base?.blocks) ? (base.blocks as AvailabilityBlock[]) : undefined;
 
-    // Object format: expect providerId:serviceType keys or entries with providerId + serviceType.
-    const rawObj = (parsed && typeof parsed === 'object') ? (parsed as Record<string, any>) : {};
-    const storage: AvailabilityStorage = {};
-    for (const [rawKey, entry] of Object.entries(rawObj)) {
-      if (!entry || typeof entry !== 'object') continue;
-
-      const providerId =
-        typeof (entry as any).providerId === 'string'
-          ? (entry as any).providerId.trim()
-          : String((entry as any).providerId || '').trim();
-      if (!providerId) continue;
-
-      const keyParts = String(rawKey).split(':');
-      const inferredServiceType = keyParts.length >= 2 ? normalizeProviderServiceToAvailabilityServiceType(keyParts.slice(1).join(':')) : null;
-      const serviceType = normalizeProviderServiceToAvailabilityServiceType((entry as any).serviceType) ?? inferredServiceType;
-      if (!serviceType) {
-        // Corrupt/unknown row; do not try to "fix" by expanding/duplicating.
-        continue;
-      }
-
-      storage[availabilityKey(providerId, serviceType)] = {
-        providerId,
-        serviceType,
-        timezone: (typeof (entry as any).timezone === 'string' && (entry as any).timezone.trim())
-          ? (entry as any).timezone.trim()
-          : 'America/New_York',
-        updatedAt: (typeof (entry as any).updatedAt === 'string' && (entry as any).updatedAt.trim())
-          ? (entry as any).updatedAt.trim()
-          : new Date().toISOString(),
-        // Stored exactly as-is (no sorting/normalization)
-        days: Array.isArray((entry as any).days) ? ((entry as any).days as DayAvailability[]) : undefined,
-        blocks: Array.isArray((entry as any).blocks) ? ((entry as any).blocks as AvailabilityBlock[]) : undefined,
-      };
-    }
-
-    return storage;
-  } catch (error) {
-    console.error('[store.server] Error reading availability file:', error);
-    return {};
-  }
+  return {
+    providerId,
+    serviceType,
+    timezone,
+    updatedAt,
+    days,
+    blocks,
+  };
 }
 
 /**
- * Write availability file atomically
+ * Read availability from Supabase (no filesystem fallbacks).
  */
-export async function writeAvailabilityFile(data: AvailabilityStorage): Promise<void> {
-  await ensureDataDir();
-  
-  // Transform-layer safety: never persist rows with missing/invalid serviceType.
-  for (const [key, entry] of Object.entries(data || {})) {
-    if (!entry || typeof entry !== 'object') {
-      throw new Error(`[store.server] Refusing to write invalid availability entry at key=${key}`);
-    }
-    const providerId = String((entry as any).providerId || '').trim();
-    const serviceType = (entry as any).serviceType;
-    if (!providerId) {
-      throw new Error(`[store.server] Refusing to write availability entry with missing providerId at key=${key}`);
-    }
-    if (!isCanonicalAvailabilityServiceType(serviceType)) {
-      throw new Error(
-        `[store.server] Refusing to write availability entry with invalid serviceType at key=${key} providerId=${providerId} serviceType=${String(serviceType)}`
-      );
-    }
+export async function readAvailabilityFile(): Promise<AvailabilityStorage> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from(AVAILABILITY_TABLE)
+    .select('provider_id, service_type, timezone, updated_at, data')
+    .order('provider_id', { ascending: true });
+  if (error) {
+    console.error('[store.server] Error reading availability from Supabase:', error);
+    throw error;
   }
-  
-  // Write atomically by writing to a temp file first, then renaming
-  const tempFile = `${AVAILABILITY_FILE}.tmp`;
-  await writeFile(tempFile, JSON.stringify(data, null, 2), 'utf-8');
-  
-  // Rename is atomic on most filesystems
-  await rename(tempFile, AVAILABILITY_FILE);
+
+  const storage: AvailabilityStorage = {};
+  for (const row of (data ?? []) as any[]) {
+    const entry = normalizeAvailabilityEntryFromDbRow(row as AvailabilityDbRow);
+    if (!entry) continue;
+    storage[availabilityKey(entry.providerId, entry.serviceType)] = entry;
+  }
+
+  return storage;
+}
+
+/**
+ * Upsert one availability entry (Supabase-only).
+ */
+async function upsertAvailabilityEntry(entry: AvailabilityEntry): Promise<void> {
+  const providerId = String((entry as any).providerId || '').trim();
+  const serviceType = (entry as any).serviceType;
+  if (!providerId) throw new Error('[store.server] Refusing to write availability entry with missing providerId');
+  if (!isCanonicalAvailabilityServiceType(serviceType)) {
+    throw new Error(`[store.server] Refusing to write availability entry with invalid serviceType=${String(serviceType)}`);
+  }
+
+  const supabase = getSupabaseAdmin();
+  const payload = {
+    provider_id: providerId,
+    service_type: serviceType,
+    timezone: entry.timezone || 'America/New_York',
+    updated_at: entry.updatedAt || new Date().toISOString(),
+    data: { ...(entry as any), providerId, serviceType },
+  };
+  const { error } = await supabase.from(AVAILABILITY_TABLE).upsert(payload as any, {
+    onConflict: 'provider_id,service_type',
+  });
+  if (error) throw error;
 }
 
 /**
@@ -449,8 +378,19 @@ export async function getAvailability(
   providerId: string,
   serviceType: CanonicalAvailabilityServiceType
 ): Promise<AvailabilityEntry | null> {
-  const storage = await readAvailabilityFile();
-  return storage[availabilityKey(providerId, serviceType)] || null;
+  const pid = String(providerId || '').trim();
+  if (!pid) return null;
+  const st = serviceType;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from(AVAILABILITY_TABLE)
+    .select('provider_id, service_type, timezone, updated_at, data')
+    .eq('provider_id', pid)
+    .eq('service_type', st)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return normalizeAvailabilityEntryFromDbRow(data as any);
 }
 
 /**
@@ -466,9 +406,7 @@ export async function setAvailability(
   serviceType: CanonicalAvailabilityServiceType = 'college_counseling',
   days?: DayAvailability[]
 ): Promise<void> {
-  const storage = await readAvailabilityFile();
-  
-  storage[availabilityKey(providerId, serviceType)] = {
+  const entry: AvailabilityEntry = {
     providerId,
     serviceType,
     timezone,
@@ -476,8 +414,7 @@ export async function setAvailability(
     blocks,
     days,
   };
-  
-  await writeAvailabilityFile(storage);
+  await upsertAvailabilityEntry(entry);
 }
 
 /**
@@ -499,20 +436,18 @@ export async function setAvailabilityForProviderServices(
     throw new Error('enabledServices is required to persist availability for multiple services');
   }
 
-  const storage = await readAvailabilityFile();
   const nowIso = new Date().toISOString();
 
   for (const serviceType of serviceTypes) {
-    storage[availabilityKey(providerId, serviceType)] = {
+    const entry: AvailabilityEntry = {
       providerId,
       serviceType,
       timezone,
       updatedAt: nowIso,
       blocks,
     };
+    await upsertAvailabilityEntry(entry);
   }
-
-  await writeAvailabilityFile(storage);
   return { serviceTypes };
 }
 
@@ -546,16 +481,11 @@ export async function syncAvailabilityServiceTypesForProvider(
 export async function deleteAvailability(
   providerId: string
 ): Promise<void> {
-  const storage = await readAvailabilityFile();
-  
-  let changed = false;
-  for (const key of Object.keys(storage)) {
-    if (key === providerId || key.startsWith(`${providerId}:`)) {
-      delete storage[key];
-      changed = true;
-    }
-  }
-  if (changed) await writeAvailabilityFile(storage);
+  const pid = String(providerId || '').trim();
+  if (!pid) return;
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase.from(AVAILABILITY_TABLE).delete().eq('provider_id', pid);
+  if (error) throw error;
 }
 
 function getZonedDateParts(date: Date, timeZone: string): {

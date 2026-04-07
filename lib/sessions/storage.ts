@@ -105,7 +105,7 @@ async function readSessionsRaw(): Promise<Session[]> {
     .order('datetime', { ascending: true });
   if (error) {
     console.error('[sessions.storage] Error reading sessions from Supabase:', error);
-    return [];
+    throw error;
   }
   return (data ?? [])
     .map((row: any) => mergeDbRowIntoSession(row as SessionDbRow))
