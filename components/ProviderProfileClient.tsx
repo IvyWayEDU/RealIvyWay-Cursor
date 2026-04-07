@@ -81,9 +81,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
 
   const hasService = (key: string) => services.includes(key);
   const isTutor = hasService('tutoring') || hasService('test_prep');
-  const isCounselor = hasService('college_counseling') || hasService('virtual_tour');
-  const offersVirtualTours = hasService('virtual_tour');
-  const needsSchool = isCounselor;
+  const needsSchool = hasService('college_counseling') || hasService('virtual_tour');
 
   // Keep dependent fields consistent with enabled services.
   useEffect(() => {
@@ -291,15 +289,11 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
 
       // Validate service rules (client-side fast feedback; server also enforces).
       const normalizedServices = Array.from(new Set((services || []).map(normalizeProviderServiceTypeForSave).filter(Boolean)));
-      const nextIsCounselor = normalizedServices.includes('college_counseling') || normalizedServices.includes('virtual_tour');
-      const nextOffersVirtualTours = normalizedServices.includes('virtual_tour');
+      const nextNeedsSchool = normalizedServices.includes('college_counseling') || normalizedServices.includes('virtual_tour');
       const schoolSelected = !!(schoolId && schoolId.trim()) && !!(schoolName && schoolName.trim());
 
-      if (nextIsCounselor && !schoolSelected) {
-        throw new Error('School is required for college counseling and virtual tours.');
-      }
-      if (nextOffersVirtualTours && !schoolSelected) {
-        throw new Error('School is required to offer virtual tours.');
+      if (nextNeedsSchool && !schoolSelected) {
+        throw new Error('School is required for college counseling or virtual tours.');
       }
 
       const updateData: any = {
@@ -312,11 +306,15 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         isTutor: normalizedServices.includes('tutoring') || normalizedServices.includes('test_prep'),
         isCounselor: normalizedServices.includes('college_counseling'),
         offersVirtualTours: normalizedServices.includes('virtual_tour'),
-        // Single-school model (required for counseling + virtual tours)
+        // Single-school model (required for counseling OR virtual tours)
+        // Send both canonical + legacy field names; server will persist to providers.data.school + providers.data.schoolId.
+        school: schoolSelected ? schoolName : undefined,
         schoolId: schoolSelected ? schoolId : undefined,
         schoolName: schoolSelected ? schoolName : undefined,
-        schoolIds: schoolSelected ? [schoolId] : [],
-        schoolNames: schoolSelected ? [schoolName] : [],
+        school_id: schoolSelected ? schoolId : undefined,
+        school_name: schoolSelected ? schoolName : undefined,
+        schoolIds: schoolSelected ? [schoolId] : undefined,
+        schoolNames: schoolSelected ? [schoolName] : undefined,
         subjects,
       };
 

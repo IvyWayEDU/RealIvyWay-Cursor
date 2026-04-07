@@ -200,22 +200,25 @@ export async function POST(request: NextRequest) {
       const hasCounseling = services.includes('college_counseling');
       const hasVirtualTours = services.includes('virtual_tour');
 
-      // School is required for counseling + virtual tours.
+      // School is required for counseling OR virtual tours.
       const nextSchoolId: string | null =
         (typeof updateData.school_id === 'string' && updateData.school_id.trim() ? updateData.school_id.trim() : null) ??
+        (typeof (updateData as any).schoolId === 'string' && (updateData as any).schoolId.trim() ? (updateData as any).schoolId.trim() : null) ??
         (Array.isArray(updateData.schoolIds) && updateData.schoolIds.length > 0 ? String(updateData.schoolIds[0] || '').trim() : null) ??
         (typeof (user as any)?.school_id === 'string' && (user as any).school_id.trim() ? (user as any).school_id.trim() : null) ??
         (Array.isArray((user as any)?.schoolIds) && (user as any).schoolIds.length > 0 ? String((user as any).schoolIds[0] || '').trim() : null);
 
       const nextSchoolName: string | null =
         (typeof updateData.school_name === 'string' && updateData.school_name.trim() ? updateData.school_name.trim() : null) ??
+        (typeof (updateData as any).schoolName === 'string' && (updateData as any).schoolName.trim() ? (updateData as any).schoolName.trim() : null) ??
+        (typeof (updateData as any).school === 'string' && (updateData as any).school.trim() ? (updateData as any).school.trim() : null) ??
         (Array.isArray(updateData.schoolNames) && updateData.schoolNames.length > 0 ? String(updateData.schoolNames[0] || '').trim() : null) ??
         (typeof (user as any)?.school_name === 'string' && (user as any).school_name.trim() ? (user as any).school_name.trim() : null) ??
         (Array.isArray((user as any)?.schoolNames) && (user as any).schoolNames.length > 0 ? String((user as any).schoolNames[0] || '').trim() : null);
 
       if ((hasCounseling || hasVirtualTours) && (!nextSchoolId || !nextSchoolName)) {
         return NextResponse.json(
-          { error: 'School is required for college counseling and virtual tours.' },
+          { error: 'School is required for college counseling or virtual tours.' },
           { status: 400 }
         );
       }
