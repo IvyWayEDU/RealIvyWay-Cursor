@@ -16,6 +16,7 @@ import {
   containsPersonalContactInfo,
   PERSONAL_CONTACT_INFO_BLOCK_MESSAGE,
 } from '@/lib/messages/contentFilter';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 export type ServiceTypeLabel = 'Tutoring' | 'Counseling' | 'Test Prep' | 'College Planning';
 
@@ -40,8 +41,19 @@ export interface MessageDTO {
   message: string;
 }
 
+export interface DashboardMessagePreview {
+  id: string;
+  body: string;
+  sender_id: string;
+  created_at: string;
+}
+
 function normalizePair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0;
 }
 
 function makeConversationId(userAId: string, userBId: string): string {
@@ -74,37 +86,6 @@ function makeFriendlyError(message: string): Error {
   const err = new Error(message);
   err.name = 'MessagingRestrictedError';
   return err;
-}
-
-function safeDateMs(iso?: string | null): number {
-  if (!iso) return NaN;
-  const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? t : NaN;
-}
-
-function getSessionStartEndMs(s: Session): { startMs: number; endMs: number } {
-  // Canonical (Supabase) fields: datetime + end_datetime
-  const startIso =
-    (s as any).datetime ||
-    (s as any).scheduledStartTime ||
-    (s as any).scheduledStart ||
-    (s as any).startTime;
-  const endIso =
-    (s as any).end_datetime ||
-    (s as any).scheduledEndTime ||
-    (s as any).scheduledEnd ||
-    (s as any).endTime;
-
-  const startMs = safeDateMs(startIso);
-  const parsedEndMs = safeDateMs(endIso);
-  // If end is missing/invalid, fall back to a 1-hour session duration.
-  const endMs = Number.isFinite(parsedEndMs)
-    ? parsedEndMs
-    : Number.isFinite(startMs)
-      ? startMs + 60 * 60 * 1000
-      : NaN;
-
-  return { startMs, endMs };
 }
 
 function sanitizeMessageText(raw: string): { text: string; changed: boolean } {
@@ -169,24 +150,27 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
     'expired_provider_no_show',
   ]);
 
-  const windowError = 'Messaging is only available 24 hours before and after a booked session';
+  const windowError = 'Messaging only allowed 24 hours before and after session';
   const eligible = pair.filter((s) => eligibleStatuses.has(s.status));
   if (eligible.length === 0) {
-    throw makeFriendlyError(windowError);
+    throw new Error(windowError);
   }
 
-  const nowMs = Date.now();
+  const now = new Date();
   const windowMs = 24 * 60 * 60 * 1000;
 
-  const inWindow = eligible.some((s) => {
-    const { startMs, endMs } = getSessionStartEndMs(s);
-    if (!Number.isFinite(startMs)) return false;
-    if (!Number.isFinite(endMs)) return false;
-    return nowMs >= startMs - windowMs && nowMs <= endMs + windowMs;
+  const inWindow = eligible.some((session) => {
+    const sessionStart = new Date((session as any).datetime);
+    const sessionEnd = new Date((session as any).end_datetime || (session as any).datetime);
+
+    const allowedStart = new Date(sessionStart.getTime() - windowMs);
+    const allowedEnd = new Date(sessionEnd.getTime() + windowMs);
+
+    return now >= allowedStart && now <= allowedEnd;
   });
 
   if (!inWindow) {
-    throw makeFriendlyError(windowError);
+    throw new Error(windowError);
   }
 }
 
@@ -215,6 +199,69 @@ export async function getInboxConversations(currentUserId: string): Promise<Conv
   // Newest first
   summaries.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime());
   return summaries;
+}
+
+/**
+ * Dashboard messages preview (latest 5).
+ *
+ * Fetch order:
+ * - conversations where user is participant
+ * - messages where sender_id = userId OR conversation_id in those conversations
+ *
+ * Returns the snake_case shape the dashboard preview expects:
+ * { id, body, sender_id, created_at }
+ */
+export async function getDashboardLatestMessages(userId: string): Promise<DashboardMessagePreview[]> {
+  const uid = String(userId || '').trim();
+  if (!uid) return [];
+
+  const supabase = getSupabaseAdmin();
+
+  // 1) Fetch conversation ids first (required for message filter)
+  const { data: convRows, error: convErr } = await supabase
+    .from('conversations')
+    .select('id')
+    .or(`participant_a.eq.${uid},participant_b.eq.${uid}`);
+
+  if (convErr) {
+    console.error('[messages.actions] Error loading conversations for dashboard preview:', {
+      userId: uid,
+      error: convErr,
+    });
+    throw convErr;
+  }
+
+  const conversationIds = (convRows ?? [])
+    .map((r: any) => (isNonEmptyString(r?.id) ? String(r.id).trim() : ''))
+    .filter(Boolean);
+
+  // 2) Fetch latest messages
+  const base = supabase
+    .from('messages')
+    .select('id, body, sender_id, created_at, conversation_id')
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  const { data: msgRows, error: msgErr } =
+    conversationIds.length > 0
+      ? await base.or(`sender_id.eq.${uid},conversation_id.in.(${conversationIds.join(',')})`)
+      : await base.eq('sender_id', uid);
+
+  if (msgErr) {
+    console.error('[messages.actions] Error loading messages for dashboard preview:', { userId: uid, error: msgErr });
+    throw msgErr;
+  }
+
+  return ((msgRows ?? []) as any[])
+    .map((r) => {
+      const id = isNonEmptyString(r?.id) ? String(r.id).trim() : '';
+      const body = isNonEmptyString(r?.body) ? String(r.body) : '';
+      const sender_id = isNonEmptyString(r?.sender_id) ? String(r.sender_id).trim() : '';
+      const created_at = isNonEmptyString(r?.created_at) ? String(r.created_at) : '';
+      if (!id || !sender_id || !created_at) return null;
+      return { id, body, sender_id, created_at } satisfies DashboardMessagePreview;
+    })
+    .filter(Boolean) as DashboardMessagePreview[];
 }
 
 export async function getConversationMessages(conversationId: string): Promise<MessageDTO[]> {

@@ -6,13 +6,25 @@
  */
 
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import CompletedSessionsSection from '@/components/CompletedSessionsSection';
 import ConfirmedSessionsSection from '@/components/ConfirmedSessionsSection';
 import AIProblemSolver from '@/components/AIProblemSolver';
 import MessagesSection from '@/components/MessagesSection';
 import IvyWayAICard from '@/components/IvyWayAICard';
+import { getSession } from '@/lib/auth/session';
 
-export default function StudentDashboard() {
+export default async function StudentDashboard() {
+  const session = await getSession();
+  if (!session) {
+    redirect('/auth/login');
+  }
+
+  const isStudent = session.roles.includes('student');
+  if (!isStudent) {
+    redirect('/dashboard/provider');
+  }
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -53,7 +65,11 @@ export default function StudentDashboard() {
         {/* AI Problem Solver and Messages - 50% width, stacked */}
         <div className="lg:col-span-1 space-y-6">
           <AIProblemSolver />
-          <MessagesSection />
+          <MessagesSection
+            userId={session.userId}
+            subtitle="Chat with your tutors and counselors"
+            emptySubtitle="Start a conversation with your tutor or counselor"
+          />
         </div>
       </div>
 
