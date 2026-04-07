@@ -82,8 +82,16 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   const e = String(email || '').trim().toLowerCase();
   if (!e) return null;
   const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase.from('users').select('data').eq('email', e).maybeSingle();
-  if (error) throw error;
+  const { data, error } = await supabase.from('users').select('*').eq('email', e).single();
+
+  // `single()` returns an error when no rows match; treat that as "not found", not a Supabase failure.
+  if (error) {
+    const code = (error as any)?.code;
+    const status = (error as any)?.status;
+    if (code === 'PGRST116' || status === 406) return null;
+    throw error;
+  }
+
   return ((data as any)?.data as User) || null;
 }
 
@@ -116,17 +124,16 @@ export async function createUser(
     updatedAt: now,
   };
   const supabase = getSupabaseAdmin();
-  const payload = {
-    id: String(newUser.id || '').trim(),
-    email: String(newUser.email || '').trim().toLowerCase(),
-    role: primaryRoleForUserRoles((newUser as any).roles),
-    data: newUser,
-    created_at: now,
-    updated_at: now,
-  };
-  console.log('[auth.storage] createUser insert payload:', payload);
-  const { data, error } = await supabase.from('users').insert(payload);
-  console.log('[auth.storage] createUser insert response:', { data, error });
+  const { error } = await supabase
+    .from('users')
+    .insert({
+      id: String(newUser.id || '').trim(),
+      email: String(newUser.email || '').trim().toLowerCase(),
+      role: primaryRoleForUserRoles((newUser as any).roles),
+      data: newUser,
+      created_at: now,
+      updated_at: now,
+    });
   if (error) throw error;
   return newUser;
 }
