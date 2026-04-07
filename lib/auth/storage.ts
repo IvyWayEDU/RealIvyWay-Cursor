@@ -3,7 +3,15 @@
 import { User, UserRole } from './types';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
+const DISABLE_FILE_STORAGE = true;
+
 const DEV_ADMIN_EMAIL = 'provider@gmail.com';
+
+function assertFilesystemAllowed(): void {
+  if (DISABLE_FILE_STORAGE) {
+    throw new Error('Filesystem access blocked in production');
+  }
+}
 
 function primaryRoleForUserRoles(roles: unknown): string {
   const arr = Array.isArray(roles) ? roles.map((r) => String(r || '').trim()).filter(Boolean) : [];
