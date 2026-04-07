@@ -16,7 +16,7 @@ const normalizeProviderServiceTypeForSave = (input: unknown): string => {
   if (!v) return '';
   const underscored = v.replace(/[\s-]+/g, '_');
 
-  if (underscored === 'test_prep' || underscored === 'testprep') return 'testprep';
+  if (underscored === 'test_prep' || underscored === 'testprep') return 'test_prep';
   if (underscored === 'virtual_tour' || underscored === 'virtual_tours' || underscored === 'virtualtour' || underscored === 'virtualtours')
     return 'virtual_tour';
   if (underscored === 'counseling' || underscored === 'college_counseling') return 'college_counseling';
@@ -34,23 +34,32 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const [profilePhotoUrl, setProfilePhotoUrl] = useState(
     (initialUser as any).profilePhotoUrl || (initialUser as any).profileImageUrl || ''
   );
-  const [isTutor, setIsTutor] = useState(
-    (initialUser as any).isTutor ?? (initialUser as any).services?.includes('tutoring') ?? false
+  const initialServicesRaw: unknown = (initialUser as any).services ?? (initialUser as any).serviceTypes ?? [];
+  const [services, setServices] = useState<string[]>(
+    Array.isArray(initialServicesRaw)
+      ? Array.from(
+          new Set(
+            initialServicesRaw.map(normalizeProviderServiceTypeForSave).filter(Boolean)
+          )
+        )
+      : []
   );
-  const [isCounselor, setIsCounselor] = useState(
-    (initialUser as any).isCounselor ?? (initialUser as any).services?.includes('college_counseling') ?? false
+  const [schoolId, setSchoolId] = useState<string>(
+    (typeof (initialUser as any).school_id === 'string' && (initialUser as any).school_id.trim()
+      ? (initialUser as any).school_id.trim()
+      : Array.isArray((initialUser as any).schoolIds) && (initialUser as any).schoolIds.length > 0
+        ? String((initialUser as any).schoolIds[0] || '')
+        : '') || ''
   );
-  const [schoolIds, setSchoolIds] = useState<string[]>(
-    (initialUser as any).schoolIds || []
-  );
-  const [schoolNames, setSchoolNames] = useState<string[]>(
-    (initialUser as any).schoolNames || []
+  const [schoolName, setSchoolName] = useState<string>(
+    (typeof (initialUser as any).school_name === 'string' && (initialUser as any).school_name.trim()
+      ? (initialUser as any).school_name.trim()
+      : Array.isArray((initialUser as any).schoolNames) && (initialUser as any).schoolNames.length > 0
+        ? String((initialUser as any).schoolNames[0] || '')
+        : '') || ''
   );
   const [subjects, setSubjects] = useState<string[]>(
     (initialUser as any).subjects || []
-  );
-  const [offersVirtualTours, setOffersVirtualTours] = useState<boolean>(
-    (initialUser as any).offersVirtualTours ?? false
   );
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -70,15 +79,32 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const canEditEmail = !!phoneNumber;
   const canEditPhone = !!email;
 
-  // Get selected schools from schoolIds
-  const selectedSchools = schoolIds
-    .map(id => SCHOOLS.find(s => s.id === id))
-    .filter((s): s is School => s !== undefined);
+  const hasService = (key: string) => services.includes(key);
+  const isTutor = hasService('tutoring') || hasService('test_prep');
+  const isCounselor = hasService('college_counseling') || hasService('virtual_tour');
+  const offersVirtualTours = hasService('virtual_tour');
+  const needsSchool = isCounselor;
+
+  // Keep dependent fields consistent with enabled services.
+  useEffect(() => {
+    if (!isTutor) {
+      setSubjects([]);
+    }
+  }, [isTutor]);
+
+  useEffect(() => {
+    if (!needsSchool) {
+      setSchoolId('');
+      setSchoolName('');
+      setSchoolSearchTerm('');
+      setShowSchoolSuggestions(false);
+    }
+  }, [needsSchool]);
 
   // Get filtered schools from the shared catalog
   const filteredSchools = schoolSearchTerm.trim()
-    ? searchSchools(schoolSearchTerm).filter(school => !schoolIds.includes(school.id))
-    : SCHOOLS.filter(school => !schoolIds.includes(school.id));
+    ? searchSchools(schoolSearchTerm).filter(school => school.id !== schoolId)
+    : SCHOOLS.filter(school => school.id !== schoolId);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -263,31 +289,39 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
     try {
       const safeOverrides = isProbablyReactEvent(overrides) ? {} : overrides;
 
+      // Validate service rules (client-side fast feedback; server also enforces).
+      const normalizedServices = Array.from(new Set((services || []).map(normalizeProviderServiceTypeForSave).filter(Boolean)));
+      const nextIsCounselor = normalizedServices.includes('college_counseling') || normalizedServices.includes('virtual_tour');
+      const nextOffersVirtualTours = normalizedServices.includes('virtual_tour');
+      const schoolSelected = !!(schoolId && schoolId.trim()) && !!(schoolName && schoolName.trim());
+
+      if (nextIsCounselor && !schoolSelected) {
+        throw new Error('School is required for college counseling and virtual tours.');
+      }
+      if (nextOffersVirtualTours && !schoolSelected) {
+        throw new Error('School is required to offer virtual tours.');
+      }
+
       const updateData: any = {
         name,
         email,
         phoneNumber,
         profilePhotoUrl,
-        isTutor,
-        isCounselor,
-        schoolIds,
-        schoolNames,
+        services: normalizedServices,
+        // Keep legacy flags in sync for backwards compatibility elsewhere in the app.
+        isTutor: normalizedServices.includes('tutoring') || normalizedServices.includes('test_prep'),
+        isCounselor: normalizedServices.includes('college_counseling'),
+        offersVirtualTours: normalizedServices.includes('virtual_tour'),
+        // Single-school model (required for counseling + virtual tours)
+        schoolId: schoolSelected ? schoolId : undefined,
+        schoolName: schoolSelected ? schoolName : undefined,
+        schoolIds: schoolSelected ? [schoolId] : [],
+        schoolNames: schoolSelected ? [schoolName] : [],
         subjects,
-        offersVirtualTours,
       };
 
       // Allow callers (e.g. photo upload) to override specific fields without duplicating save logic.
       Object.assign(updateData, safeOverrides);
-
-      // Update services array based on roles
-      const services: string[] = [];
-      if (updateData.isTutor) services.push('tutoring');
-      if (updateData.isCounselor) services.push('college_counseling');
-      if (updateData.offersVirtualTours) services.push('virtual_tour');
-
-      updateData.services = Array.from(
-        new Set(services.map(normalizeProviderServiceTypeForSave).filter(Boolean))
-      );
 
       console.log('Saving provider profile:', updateData);
 
@@ -325,46 +359,30 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
     }
   };
 
-  const handleRoleChange = (role: 'tutor' | 'counselor', checked: boolean) => {
-    if (role === 'tutor') {
-      setIsTutor(checked);
-      if (!checked) {
-        // Clear subjects if tutor is unchecked
-        setSubjects([]);
-      }
-    } else {
-      setIsCounselor(checked);
-      if (!checked) {
-        // Clear schools and virtual tours if counselor is unchecked
-        setSchoolIds([]);
-        setSchoolNames([]);
-        setOffersVirtualTours(false);
-      }
-    }
+  const toggleService = (serviceKey: string, checked: boolean) => {
+    const key = normalizeProviderServiceTypeForSave(serviceKey);
+    if (!key) return;
+
+    setServices((prev) => {
+      const set = new Set((prev || []).map(normalizeProviderServiceTypeForSave).filter(Boolean));
+      if (checked) set.add(key);
+      else set.delete(key);
+      return Array.from(set);
+    });
   };
 
-  const handleAddSchool = (school: School) => {
-    if (!schoolIds.includes(school.id)) {
-      const newSchoolIds = [...schoolIds, school.id];
-      const newSchoolNames = newSchoolIds.map(id => {
-        const s = SCHOOLS.find(ss => ss.id === id);
-        return s?.name || '';
-      }).filter(Boolean);
-      setSchoolIds(newSchoolIds);
-      setSchoolNames(newSchoolNames);
-      setSchoolSearchTerm('');
-      setShowSchoolSuggestions(false);
-    }
+  const handleSelectSchool = (school: School) => {
+    setSchoolId(school.id);
+    setSchoolName(school.name);
+    setSchoolSearchTerm('');
+    setShowSchoolSuggestions(false);
   };
 
-  const handleRemoveSchool = (schoolId: string) => {
-    const newSchoolIds = schoolIds.filter(id => id !== schoolId);
-    const newSchoolNames = newSchoolIds.map(id => {
-      const s = SCHOOLS.find(ss => ss.id === id);
-      return s?.name || '';
-    }).filter(Boolean);
-    setSchoolIds(newSchoolIds);
-    setSchoolNames(newSchoolNames);
+  const clearSchool = () => {
+    setSchoolId('');
+    setSchoolName('');
+    setSchoolSearchTerm('');
+    setShowSchoolSuggestions(false);
   };
 
   const handleAddSubject = (subject: string) => {
@@ -377,10 +395,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const handleRemoveSubject = (subject: string) => {
     const newSubjects = subjects.filter(s => s !== subject);
     setSubjects(newSubjects);
-  };
-
-  const handleVirtualToursToggle = (checked: boolean) => {
-    setOffersVirtualTours(checked);
   };
 
   return (
@@ -640,33 +654,51 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
           </div>
         </div>
 
-        {/* Role Selection */}
+        {/* Services */}
         <div className="space-y-4">
-          <label className="block text-sm font-medium text-gray-700">Roles</label>
+          <label className="block text-sm font-medium text-gray-700">Services</label>
           <div className="space-y-2">
             <label className="flex items-center">
               <input
                 type="checkbox"
-                checked={isTutor}
-                onChange={(e) => handleRoleChange('tutor', e.target.checked)}
+                checked={hasService('tutoring')}
+                onChange={(e) => toggleService('tutoring', e.target.checked)}
                 className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
               />
-              <span className="ml-2 text-sm text-gray-700">Tutor</span>
+              <span className="ml-2 text-sm text-gray-700">Tutoring</span>
             </label>
             <label className="flex items-center">
               <input
                 type="checkbox"
-                checked={isCounselor}
-                onChange={(e) => handleRoleChange('counselor', e.target.checked)}
+                checked={hasService('college_counseling')}
+                onChange={(e) => toggleService('college_counseling', e.target.checked)}
                 className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
               />
-              <span className="ml-2 text-sm text-gray-700">College Counselor</span>
+              <span className="ml-2 text-sm text-gray-700">College Counseling</span>
+            </label>
+            <label className="flex items-center">
+              <input
+                type="checkbox"
+                checked={hasService('test_prep')}
+                onChange={(e) => toggleService('test_prep', e.target.checked)}
+                className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
+              />
+              <span className="ml-2 text-sm text-gray-700">Test Prep</span>
+            </label>
+            <label className="flex items-center">
+              <input
+                type="checkbox"
+                checked={hasService('virtual_tour')}
+                onChange={(e) => toggleService('virtual_tour', e.target.checked)}
+                className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
+              />
+              <span className="ml-2 text-sm text-gray-700">Virtual Tours</span>
             </label>
           </div>
         </div>
 
-        {/* College / University (if Counselor) */}
-        {isCounselor && (
+        {/* School selector (required for counseling + virtual tours) */}
+        {needsSchool && (
           <div className="space-y-4">
             <label className="block text-sm font-medium text-gray-700">
               College / University
@@ -689,7 +721,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                     <button
                       key={school.id}
                       type="button"
-                      onClick={() => handleAddSchool(school)}
+                      onClick={() => handleSelectSchool(school)}
                       className="w-full text-left px-4 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
                     >
                       {school.name}
@@ -698,35 +730,31 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                 </div>
               )}
             </div>
-            {selectedSchools.length > 0 && (
+            {schoolId && schoolName && (
               <div className="flex flex-wrap gap-2">
-                {selectedSchools.map((school) => (
-                  <span
-                    key={school.id}
-                    className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white"
+                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white">
+                  {schoolName}
+                  <button
+                    type="button"
+                    onClick={clearSchool}
+                    className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[#0077B3] focus:outline-none"
+                    aria-label="Remove selected school"
                   >
-                    {school.name}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSchool(school.id)}
-                      className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[#0077B3] focus:outline-none"
-                    >
-                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </button>
-                  </span>
-                ))}
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path
+                        fillRule="evenodd"
+                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </span>
               </div>
             )}
           </div>
         )}
 
-        {/* Subjects (if Tutor) */}
+        {/* Subjects (if Tutoring or Test Prep) */}
         {isTutor && (
           <div className="space-y-4">
             <label className="block text-sm font-medium text-gray-700">Subjects</label>
@@ -780,21 +808,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Virtual Tours (if Counselor) */}
-        {isCounselor && (
-          <div className="space-y-4">
-            <label className="flex items-center">
-              <input
-                type="checkbox"
-                checked={offersVirtualTours}
-                onChange={(e) => handleVirtualToursToggle(e.target.checked)}
-                className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
-              />
-              <span className="ml-2 text-sm text-gray-700">Available for Virtual Campus Tours</span>
-            </label>
           </div>
         )}
 

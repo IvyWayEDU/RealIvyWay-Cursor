@@ -14,6 +14,7 @@ import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindow
 import { getUsers } from '@/lib/auth/storage';
 import { UserRole } from '@/lib/auth/types';
 import { normalizeSubjectToCanonical, subjectsMatch, normalizeSubjectId } from '@/lib/models/subjects';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 // RATE LIMITING
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 import { auth } from '@/lib/auth/middleware';
@@ -201,6 +202,9 @@ function isProviderEligibleForRequest(
     // If schoolId is provided, provider must have that school (EXACT match by provider.school_id).
     if (schoolId) {
       const pid =
+        (typeof provider?.data?.schoolId === 'string' && provider.data.schoolId.trim()
+          ? provider.data.schoolId.trim()
+          : null) ??
         (typeof provider?.school_id === 'string' && provider.school_id.trim()
           ? provider.school_id.trim()
           : null) ??
@@ -323,8 +327,9 @@ function isProviderEligibleForService(
     }
   };
 
-  // Provider services can live on provider or provider.profile
-  const servicesRaw = provider?.services ?? provider?.profile?.services ?? [];
+  // Provider services must be read from provider.data.services (canonical).
+  // Backward compatibility: fall back to top-level/user services.
+  const servicesRaw = provider?.data?.services ?? provider?.services ?? provider?.profile?.services ?? [];
   const services = Array.isArray(servicesRaw)
     ? (servicesRaw.map(normalizeServiceEntry).filter((s): s is string => !!s) as Array<string>)
     : [];
@@ -334,8 +339,10 @@ function isProviderEligibleForService(
   if (normalized === 'tutoring') return services.includes('tutoring');
   if (normalized === 'test_prep') return services.includes('test_prep');
 
-  // Virtual tours currently also support an explicit boolean flag.
-  if (normalized === 'virtual_tour') return provider?.offersVirtualTours === true || services.includes('virtual_tour');
+  // Virtual tours support an explicit boolean flag (provider.data.offersVirtualTours is canonical).
+  if (normalized === 'virtual_tour') {
+    return provider?.data?.offersVirtualTours === true || provider?.offersVirtualTours === true || services.includes('virtual_tour');
+  }
 
   return false;
 }
@@ -525,6 +532,30 @@ export async function GET(req: NextRequest) {
     // Get all users to check provider roles and filter
     const allUsers = await getUsers();
     const userMap = new Map(allUsers.map(u => [u.id, u]));
+
+    // Load provider.data payloads for eligibility checks (services, flags, school).
+    const providerIdsFromAvailability = Array.from(
+      new Set(
+        Object.values(availabilityStorage || {})
+          .map((e: any) => (typeof e?.providerId === 'string' ? e.providerId.trim() : ''))
+          .filter(Boolean)
+      )
+    );
+    const providerDataById = new Map<string, any>();
+    if (providerIdsFromAvailability.length > 0) {
+      const supabase = getSupabaseAdmin();
+      const chunkSize = 200;
+      for (let i = 0; i < providerIdsFromAvailability.length; i += chunkSize) {
+        const chunk = providerIdsFromAvailability.slice(i, i + chunkSize);
+        const { data: rows, error } = await supabase.from('providers').select('id, data').in('id', chunk as any);
+        if (error) throw error;
+        for (const r of rows ?? []) {
+          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+          const d = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : null;
+          if (id) providerDataById.set(id, d);
+        }
+      }
+    }
     
     // If serviceType is provided, filter providers by their roles
     let providerIdsToInclude: Set<string> | null = null;
@@ -543,15 +574,18 @@ export async function GET(req: NextRequest) {
         }
         const user = providerId ? userMap.get(providerId) : null;
         if (!user) continue;
+        const providerData = providerDataById.get(providerId) || null;
+        const eligibilityProvider = { ...(user as any), data: providerData };
         
         // Check eligibility and prepare debug info
-        const eligible = isProviderEligibleForService(user, normalizedServiceType);
+        const eligible = isProviderEligibleForService(eligibilityProvider, normalizedServiceType);
         
         // [ELIGIBILITY_DEBUG] Log eligibility check for each provider
         console.log('[ELIGIBILITY_DEBUG]', {
           providerId: user.id,
           requestedService: normalizedServiceType,
           services: (user as any).services || (user as any).profile?.services,
+          providerDataServices: Array.isArray((providerData as any)?.services) ? (providerData as any).services : null,
           eligible
         });
         
@@ -568,7 +602,7 @@ export async function GET(req: NextRequest) {
           }
           
           // Use the comprehensive subject matching function
-          if (!doesProviderTeachSubject(user, subjectParam)) {
+          if (!doesProviderTeachSubject(eligibilityProvider, subjectParam)) {
             continue; // Skip providers who don't teach the requested subject
           }
         }
@@ -601,7 +635,13 @@ export async function GET(req: NextRequest) {
           if (!user) continue;
           
           // Check if provider has this schoolId
-          const providerSchoolIds = user.schoolIds || [];
+          const providerData = providerDataById.get(providerId) || null;
+          const providerSchoolIds =
+            (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
+              ? [String((providerData as any).schoolId).trim()]
+              : Array.isArray((providerData as any)?.schoolIds)
+                ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
+                : []) || (user.schoolIds || []);
           if (providerSchoolIds.includes(schoolIdParam)) {
             filteredProviderIds.add(providerId);
             continue;
@@ -648,7 +688,13 @@ export async function GET(req: NextRequest) {
           
           // For counseling: allow general counselors (no school tags) as fallback
           if (normalizedServiceType === 'college_counseling') {
-            const providerSchoolIds = user.schoolIds || [];
+          const providerData = providerDataById.get(providerId) || null;
+          const providerSchoolIds =
+            (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
+              ? [String((providerData as any).schoolId).trim()]
+              : Array.isArray((providerData as any)?.schoolIds)
+                ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
+                : []) || (user.schoolIds || []);
             const providerSchoolNames = user.schoolNames || [];
             const hasLegacySchools = user.schools && user.schools.length > 0;
             // General counselor: no schools specified
@@ -669,7 +715,13 @@ export async function GET(req: NextRequest) {
           if (!user) continue;
           
           // Check if provider has this schoolId
-          const providerSchoolIds = user.schoolIds || [];
+          const providerData = providerDataById.get(providerId) || null;
+          const providerSchoolIds =
+            (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
+              ? [String((providerData as any).schoolId).trim()]
+              : Array.isArray((providerData as any)?.schoolIds)
+                ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
+                : []) || (user.schoolIds || []);
           if (providerSchoolIds.includes(schoolIdParam)) {
             providerIdsToInclude.add(providerId);
             continue;
@@ -723,7 +775,13 @@ export async function GET(req: NextRequest) {
           
           // For counseling: allow general counselors (no school tags) as fallback
           if (normalizedServiceType === 'college_counseling') {
-            const providerSchoolIds = user.schoolIds || [];
+            const providerData = providerDataById.get(providerId) || null;
+            const providerSchoolIds =
+              (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
+                ? [String((providerData as any).schoolId).trim()]
+                : Array.isArray((providerData as any)?.schoolIds)
+                  ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
+                  : []) || (user.schoolIds || []);
             const providerSchoolNames = user.schoolNames || [];
             const hasLegacySchools = user.schools && user.schools.length > 0;
             // General counselor: no schools specified
@@ -800,7 +858,9 @@ export async function GET(req: NextRequest) {
       // Additional defensive check
       if (normalizedServiceType) {
         const user = userMap.get(providerId);
-        if (!user || !isProviderEligibleForService(user, normalizedServiceType)) {
+        const providerData = providerDataById.get(providerId) || null;
+        const eligibilityProvider = user ? ({ ...(user as any), data: providerData } as any) : null;
+        if (!eligibilityProvider || !isProviderEligibleForService(eligibilityProvider, normalizedServiceType)) {
           continue;
         }
       }
@@ -956,7 +1016,9 @@ export async function GET(req: NextRequest) {
         if (providerIdsToInclude && !providerIdsToInclude.has(providerId)) continue;
 
         const user = userMap.get(providerId);
-        if (!user || !isProviderEligibleForService(user, 'college_counseling')) continue;
+        const providerData = providerDataById.get(providerId) || null;
+        const eligibilityProvider = user ? ({ ...(user as any), data: providerData } as any) : null;
+        if (!eligibilityProvider || !isProviderEligibleForService(eligibilityProvider, 'college_counseling')) continue;
 
         const allBlocks = Array.isArray((entry as any).blocks) ? (entry as any).blocks : [];
         const blocksForDay = allBlocks.filter((block: any) =>
@@ -1027,10 +1089,12 @@ export async function GET(req: NextRequest) {
       // - other services keep existing comprehensive request eligibility
       const user = userMap.get(providerId);
       if (!user) continue;
+      const providerData = providerDataById.get(providerId) || null;
+      const eligibilityProvider = { ...(user as any), data: providerData };
       if (isCollegeCounselingRequest) {
-        if (!isProviderEligibleForService(user, 'college_counseling')) continue;
+        if (!isProviderEligibleForService(eligibilityProvider, 'college_counseling')) continue;
       } else {
-        if (!isProviderEligibleForRequest(user, {
+        if (!isProviderEligibleForRequest(eligibilityProvider, {
           serviceType: normalizedServiceType,
           subject: subjectParam || null,
           schoolId: schoolIdParam || null,

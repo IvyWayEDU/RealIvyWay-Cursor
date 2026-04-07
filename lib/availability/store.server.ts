@@ -3,8 +3,9 @@
 import { getUserById } from '@/lib/auth/storage';
 import type { DayAvailability } from '@/lib/availability/types';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { updateProviderAvailability, upsertProviderDataByUserId } from '@/lib/providers/storage';
 
-const AVAILABILITY_TABLE = 'availability';
+const PROVIDERS_TABLE = 'providers';
 
 export type SlotStatus = 'available' | 'reserved';
 
@@ -292,33 +293,24 @@ export async function unreserveSlotsAtomically(
   }
 }
 
-function normalizeAvailabilityEntryFromDbRow(row: AvailabilityDbRow): AvailabilityEntry | null {
-  const providerId = typeof row?.provider_id === 'string' ? row.provider_id.trim() : '';
-  const serviceType = normalizeProviderServiceToAvailabilityServiceType(row?.service_type);
+function normalizeAvailabilityEntryFromProviderRow(params: {
+  providerId: string;
+  serviceType: string;
+  payload: any;
+}): AvailabilityEntry | null {
+  const providerId = String(params.providerId || '').trim();
+  const serviceType = normalizeProviderServiceToAvailabilityServiceType(params.serviceType);
   if (!providerId || !serviceType) return null;
 
-  const base = row?.data && typeof row.data === 'object' ? row.data : {};
+  const base = params.payload && typeof params.payload === 'object' ? params.payload : {};
   const updatedAt =
-    (typeof base?.updatedAt === 'string' && base.updatedAt.trim() ? base.updatedAt.trim() : '') ||
-    (typeof row?.updated_at === 'string' && row.updated_at.trim() ? row.updated_at.trim() : '') ||
-    new Date().toISOString();
-
+    typeof base?.updatedAt === 'string' && base.updatedAt.trim() ? base.updatedAt.trim() : new Date().toISOString();
   const timezone =
-    (typeof base?.timezone === 'string' && base.timezone.trim() ? base.timezone.trim() : '') ||
-    (typeof row?.timezone === 'string' && row.timezone.trim() ? row.timezone.trim() : '') ||
-    'America/New_York';
-
+    typeof base?.timezone === 'string' && base.timezone.trim() ? base.timezone.trim() : 'America/New_York';
   const days = Array.isArray(base?.days) ? (base.days as DayAvailability[]) : undefined;
   const blocks = Array.isArray(base?.blocks) ? (base.blocks as AvailabilityBlock[]) : undefined;
 
-  return {
-    providerId,
-    serviceType,
-    timezone,
-    updatedAt,
-    days,
-    blocks,
-  };
+  return { providerId, serviceType, timezone, updatedAt, days, blocks };
 }
 
 /**
@@ -327,9 +319,9 @@ function normalizeAvailabilityEntryFromDbRow(row: AvailabilityDbRow): Availabili
 export async function readAvailabilityFile(): Promise<AvailabilityStorage> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
-    .from(AVAILABILITY_TABLE)
-    .select('provider_id, service_type, timezone, updated_at, data')
-    .order('provider_id', { ascending: true });
+    .from(PROVIDERS_TABLE)
+    .select('id, data')
+    .order('id', { ascending: true });
   if (error) {
     console.error('[store.server] Error reading availability from Supabase:', error);
     throw error;
@@ -337,9 +329,35 @@ export async function readAvailabilityFile(): Promise<AvailabilityStorage> {
 
   const storage: AvailabilityStorage = {};
   for (const row of (data ?? []) as any[]) {
-    const entry = normalizeAvailabilityEntryFromDbRow(row as AvailabilityDbRow);
-    if (!entry) continue;
-    storage[availabilityKey(entry.providerId, entry.serviceType)] = entry;
+    const providerId = typeof (row as any)?.id === 'string' ? String((row as any).id).trim() : '';
+    if (!providerId) continue;
+    const providerData = (row as any)?.data && typeof (row as any).data === 'object' ? (row as any).data : {};
+
+    const availabilityRaw = (providerData as any)?.availability;
+
+    const candidates: Array<{ serviceType: string; payload: any }> = [];
+    if (Array.isArray(availabilityRaw)) {
+      for (const a of availabilityRaw) {
+        const st = typeof (a as any)?.serviceType === 'string' ? String((a as any).serviceType).trim() : '';
+        if (!st) continue;
+        candidates.push({ serviceType: st, payload: a });
+      }
+    } else if (availabilityRaw && typeof availabilityRaw === 'object') {
+      for (const [st, payload] of Object.entries(availabilityRaw as Record<string, any>)) {
+        if (!st) continue;
+        candidates.push({ serviceType: String(st), payload });
+      }
+    }
+
+    for (const c of candidates) {
+      const entry = normalizeAvailabilityEntryFromProviderRow({
+        providerId,
+        serviceType: c.serviceType,
+        payload: c.payload,
+      });
+      if (!entry) continue;
+      storage[availabilityKey(entry.providerId, entry.serviceType)] = entry;
+    }
   }
 
   return storage;
@@ -356,18 +374,13 @@ async function upsertAvailabilityEntry(entry: AvailabilityEntry): Promise<void> 
     throw new Error(`[store.server] Refusing to write availability entry with invalid serviceType=${String(serviceType)}`);
   }
 
-  const supabase = getSupabaseAdmin();
-  const payload = {
-    provider_id: providerId,
-    service_type: serviceType,
+  await updateProviderAvailability(providerId, {
+    serviceType,
     timezone: entry.timezone || 'America/New_York',
-    updated_at: entry.updatedAt || new Date().toISOString(),
-    data: { ...(entry as any), providerId, serviceType },
-  };
-  const { error } = await supabase.from(AVAILABILITY_TABLE).upsert(payload as any, {
-    onConflict: 'provider_id,service_type',
-  });
-  if (error) throw error;
+    updatedAt: entry.updatedAt || new Date().toISOString(),
+    days: (entry as any).days,
+    blocks: (entry as any).blocks,
+  } as any);
 }
 
 /**
@@ -380,17 +393,10 @@ export async function getAvailability(
 ): Promise<AvailabilityEntry | null> {
   const pid = String(providerId || '').trim();
   if (!pid) return null;
-  const st = serviceType;
-  const supabase = getSupabaseAdmin();
-  const { data, error } = await supabase
-    .from(AVAILABILITY_TABLE)
-    .select('provider_id, service_type, timezone, updated_at, data')
-    .eq('provider_id', pid)
-    .eq('service_type', st)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  return normalizeAvailabilityEntryFromDbRow(data as any);
+  const storage = await readAvailabilityFile();
+  const key = availabilityKey(pid, String(serviceType || '').trim());
+  const entry = (storage as any)?.[key] ?? null;
+  return entry ? (entry as AvailabilityEntry) : null;
 }
 
 /**
@@ -483,9 +489,7 @@ export async function deleteAvailability(
 ): Promise<void> {
   const pid = String(providerId || '').trim();
   if (!pid) return;
-  const supabase = getSupabaseAdmin();
-  const { error } = await supabase.from(AVAILABILITY_TABLE).delete().eq('provider_id', pid);
-  if (error) throw error;
+  await upsertProviderDataByUserId(pid, { availability: [] });
 }
 
 function getZonedDateParts(date: Date, timeZone: string): {

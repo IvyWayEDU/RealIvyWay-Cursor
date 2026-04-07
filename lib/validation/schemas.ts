@@ -230,7 +230,7 @@ export const supportTicketMessageSchema = z
 const CANONICAL_PROVIDER_SERVICE_TYPES = [
   'tutoring',
   'college_counseling',
-  'testprep',
+  'test_prep',
   'virtual_tour',
 ] as const;
 
@@ -261,7 +261,7 @@ function normalizeProviderServiceType(input: unknown): string {
     underscored === 'test_preparation' ||
     underscored === 'test_preparations'
   ) {
-    return 'testprep';
+    return 'test_prep';
   }
 
   if (

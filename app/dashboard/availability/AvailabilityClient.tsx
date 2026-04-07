@@ -185,7 +185,8 @@ export default function AvailabilityClient() {
     const loadAvailability = async () => {
       setLoading(true);
       try {
-        const params = new URLSearchParams({ serviceType: selectedServiceType });
+        const apiServiceType = selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType;
+        const params = new URLSearchParams({ serviceType: apiServiceType });
         const response = await fetch(`/api/availability?${params.toString()}`);
         const data = (await response.json()) as { availability: AvailabilityApiEntry | null; error?: string };
 
@@ -348,7 +349,7 @@ export default function AvailabilityClient() {
     try {
       const requestBody = {
         timezone: 'America/New_York',
-        serviceType: selectedServiceType,
+        serviceType: selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType,
         days: availability,
       };
 
@@ -421,7 +422,7 @@ export default function AvailabilityClient() {
       const requestBody = {
         intent: 'clear',
         timezone: 'America/New_York',
-        serviceType: selectedServiceType,
+        serviceType: selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType,
       };
 
       const response = await fetch('/api/availability', {

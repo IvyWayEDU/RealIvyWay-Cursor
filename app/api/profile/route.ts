@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from '@/lib/auth/getServerSession';
 import { getUserById, updateUser } from '@/lib/auth/storage';
 import { normalizeSchoolId } from '@/lib/models/schools';
+import { upsertProviderDataByUserId } from '@/lib/providers/storage';
 import { handleApiError } from '@/lib/errorHandler';
 import { validateRequestBody } from '@/lib/validation/utils';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
@@ -131,7 +132,7 @@ export async function POST(request: NextRequest) {
       updateData.services = nextServices;
 
       // Keep legacy flags consistent (used by UI as a fallback).
-      updateData.isTutor = nextServices.includes('tutoring');
+      updateData.isTutor = nextServices.includes('tutoring') || nextServices.includes('test_prep');
       updateData.isCounselor = nextServices.includes('college_counseling');
     }
 
@@ -186,6 +187,56 @@ export async function POST(request: NextRequest) {
     // Update phone number (only if provided and different)
     if (body.phoneNumber !== undefined) {
       updateData.phoneNumber = body.phoneNumber;
+    }
+
+    // Enforce provider rules (server-side source-of-truth)
+    if (isProviderOrAdmin) {
+      const services: string[] = Array.isArray(updateData.services)
+        ? updateData.services.map((s: any) => String(s ?? '').trim()).filter(Boolean)
+        : Array.isArray((user as any)?.services)
+          ? (user as any).services.map((s: any) => String(s ?? '').trim()).filter(Boolean)
+          : [];
+
+      const hasCounseling = services.includes('college_counseling');
+      const hasVirtualTours = services.includes('virtual_tour');
+
+      // School is required for counseling + virtual tours.
+      const nextSchoolId: string | null =
+        (typeof updateData.school_id === 'string' && updateData.school_id.trim() ? updateData.school_id.trim() : null) ??
+        (Array.isArray(updateData.schoolIds) && updateData.schoolIds.length > 0 ? String(updateData.schoolIds[0] || '').trim() : null) ??
+        (typeof (user as any)?.school_id === 'string' && (user as any).school_id.trim() ? (user as any).school_id.trim() : null) ??
+        (Array.isArray((user as any)?.schoolIds) && (user as any).schoolIds.length > 0 ? String((user as any).schoolIds[0] || '').trim() : null);
+
+      const nextSchoolName: string | null =
+        (typeof updateData.school_name === 'string' && updateData.school_name.trim() ? updateData.school_name.trim() : null) ??
+        (Array.isArray(updateData.schoolNames) && updateData.schoolNames.length > 0 ? String(updateData.schoolNames[0] || '').trim() : null) ??
+        (typeof (user as any)?.school_name === 'string' && (user as any).school_name.trim() ? (user as any).school_name.trim() : null) ??
+        (Array.isArray((user as any)?.schoolNames) && (user as any).schoolNames.length > 0 ? String((user as any).schoolNames[0] || '').trim() : null);
+
+      if ((hasCounseling || hasVirtualTours) && (!nextSchoolId || !nextSchoolName)) {
+        return NextResponse.json(
+          { error: 'School is required for college counseling and virtual tours.' },
+          { status: 400 }
+        );
+      }
+
+      // Keep offersVirtualTours derived from services when services are present.
+      if (Array.isArray(updateData.services)) {
+        updateData.offersVirtualTours = services.includes('virtual_tour');
+      }
+
+      // Persist canonical provider payload to providers.data as well.
+      const providerData = {
+        services,
+        school: nextSchoolName ?? null,
+        schoolId: nextSchoolId ?? null,
+        isTutor: services.includes('tutoring') || services.includes('test_prep'),
+        isCounselor: services.includes('college_counseling'),
+        offersVirtualTours: services.includes('virtual_tour'),
+      };
+
+      await upsertProviderDataByUserId(session.userId, providerData as any);
+      console.log('Provider saved:', providerData);
     }
 
     // Update user

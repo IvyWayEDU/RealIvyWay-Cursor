@@ -95,7 +95,8 @@ export default function AvailabilitySection() {
 
     const load = async () => {
       try {
-        const params = new URLSearchParams({ serviceType: selectedServiceType });
+        const apiServiceType = selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType;
+        const params = new URLSearchParams({ serviceType: apiServiceType });
         const res = await fetch(`/api/availability?${params.toString()}`);
         const data = await res.json();
         if (!res.ok) return;
@@ -256,7 +257,12 @@ export default function AvailabilitySection() {
       const res = await fetch('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId, serviceType: selectedServiceType, timezone: 'America/New_York', days }),
+        body: JSON.stringify({
+          providerId,
+          serviceType: selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType,
+          timezone: 'America/New_York',
+          days,
+        }),
       });
 
       if (!res.ok) {

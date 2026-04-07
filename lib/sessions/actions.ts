@@ -61,14 +61,25 @@ export async function getCurrentUserEnabledServices(): Promise<{ services: strin
   }
 
   const user = await getUserById(session.userId);
-  if (!user) {
-    return { services: [], error: 'User not found' };
+  if (!user) return { services: [], error: 'User not found' };
+
+  // Prefer providers storage as source-of-truth for offered services when present.
+  let provider: any | null = null;
+  try {
+    const { getProviderByUserId } = await import('@/lib/providers/storage');
+    provider = await getProviderByUserId(session.userId);
+  } catch {
+    provider = null;
   }
 
   const set = new Set<string>();
 
   const servicesRaw: unknown =
-    (user as any)?.services ?? (user as any)?.serviceTypes ?? (user as any)?.profile?.serviceTypes;
+    (provider as any)?.services ??
+    (provider as any)?.data?.services ??
+    (user as any)?.services ??
+    (user as any)?.serviceTypes ??
+    (user as any)?.profile?.serviceTypes;
   if (Array.isArray(servicesRaw)) {
     for (const s of servicesRaw) {
       const v = typeof s === 'string' ? s.trim() : '';
@@ -77,9 +88,17 @@ export async function getCurrentUserEnabledServices(): Promise<{ services: strin
   }
 
   // Normalize common boolean flags into service strings
-  if ((user as any)?.isTutor === true) set.add('tutoring');
-  if ((user as any)?.isCounselor === true) set.add('college_counseling');
-  if ((user as any)?.offersVirtualTours === true) set.add('virtual_tours');
+  const isTutorFlag = (provider as any)?.isTutor ?? (provider as any)?.data?.isTutor ?? (user as any)?.isTutor;
+  const isCounselorFlag =
+    (provider as any)?.isCounselor ?? (provider as any)?.data?.isCounselor ?? (user as any)?.isCounselor;
+  const offersVirtualToursFlag =
+    (provider as any)?.offersVirtualTours ??
+    (provider as any)?.data?.offersVirtualTours ??
+    (user as any)?.offersVirtualTours;
+
+  if (isTutorFlag === true) set.add('tutoring');
+  if (isCounselorFlag === true) set.add('college_counseling');
+  if (offersVirtualToursFlag === true) set.add('virtual_tour');
 
   return { services: Array.from(set) };
 }

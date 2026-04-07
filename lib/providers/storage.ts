@@ -334,37 +334,20 @@ export async function updateProvider(id: string, updates: Partial<Omit<ProviderP
 }
 
 /**
- * Persist provider availability inside providers.data.availability (Supabase only).
- *
- * Shape stored:
- * providers.data.availability = {
- *   [serviceType]: { providerId, serviceType, timezone, updatedAt, days, blocks }
- * }
+ * Upsert arbitrary provider fields into providers.data for a given userId.
+ * This is the canonical persistence layer for provider profile metadata (services, school, flags, availability).
  */
-export async function updateProviderAvailability(
-  providerId: string,
-  availabilityPatch: Record<string, any>
-): Promise<void> {
-  const pid = String(providerId || '').trim();
-  if (!pid) throw new Error('[providers.storage] Refusing to save availability with missing providerId');
-
-  console.log("Saving provider:", pid);
+export async function upsertProviderDataByUserId(userId: string, patch: Record<string, any>): Promise<void> {
+  const pid = String(userId || '').trim();
+  if (!pid) throw new Error('[providers.storage] Refusing to upsert provider data with missing userId');
+  const safePatch = patch && typeof patch === 'object' ? patch : {};
 
   const supabase = getSupabaseAdmin();
-  const { data: row, error } = await supabase
-    .from(PROVIDERS_TABLE)
-    .select('id, user_id, data')
-    .eq('id', pid)
-    .maybeSingle();
+  const { data: row, error } = await supabase.from(PROVIDERS_TABLE).select('id, user_id, data').eq('id', pid).maybeSingle();
   if (error) throw error;
 
   const existingData = row?.data && typeof row.data === 'object' ? row.data : {};
-  const existingAvailability =
-    existingData?.availability && typeof existingData.availability === 'object' ? existingData.availability : {};
-
-  const patch = availabilityPatch && typeof availabilityPatch === 'object' ? availabilityPatch : {};
-  const nextAvailability = { ...(existingAvailability as any), ...(patch as any) };
-  const nextData = { ...(existingData as any), availability: nextAvailability, id: pid, userId: pid };
+  const nextData = { ...(existingData as any), ...(safePatch as any), id: pid, userId: pid };
 
   const { error: upsertErr } = await supabase.from(PROVIDERS_TABLE).upsert(
     {
@@ -375,6 +358,55 @@ export async function updateProviderAvailability(
     { onConflict: 'id' }
   );
   if (upsertErr) throw upsertErr;
+}
+
+/**
+ * Persist provider availability inside providers.data.availability (Supabase only).
+ *
+ * Storage shape:
+ * providers.data.availability = Array<{
+ *   serviceType: 'tutoring' | 'college_counseling' | 'virtual_tour' | 'test_prep' | string
+ *   timezone: string
+ *   updatedAt: string
+ *   days?: any[]
+ *   blocks?: any[]
+ * }>
+ */
+export async function updateProviderAvailability(
+  providerId: string,
+  entry: { serviceType: string; timezone?: string; updatedAt?: string; days?: any[]; blocks?: any[] } | null
+): Promise<void> {
+  const pid = String(providerId || '').trim();
+  if (!pid) throw new Error('[providers.storage] Refusing to save availability with missing providerId');
+  if (!entry || typeof entry !== 'object') throw new Error('[providers.storage] Refusing to save availability with missing entry');
+
+  const serviceType = String((entry as any).serviceType || '').trim();
+  if (!serviceType) throw new Error('[providers.storage] Refusing to save availability with missing serviceType');
+
+  const timezone = typeof (entry as any).timezone === 'string' && (entry as any).timezone.trim() ? (entry as any).timezone.trim() : 'America/New_York';
+  const updatedAt = typeof (entry as any).updatedAt === 'string' && (entry as any).updatedAt.trim() ? (entry as any).updatedAt.trim() : new Date().toISOString();
+  const days = Array.isArray((entry as any).days) ? (entry as any).days : undefined;
+  const blocks = Array.isArray((entry as any).blocks) ? (entry as any).blocks : undefined;
+
+  console.log('Saving provider:', pid);
+
+  const supabase = getSupabaseAdmin();
+  const { data: row, error } = await supabase.from(PROVIDERS_TABLE).select('id, user_id, data').eq('id', pid).maybeSingle();
+  if (error) throw error;
+
+  const existingData = row?.data && typeof row.data === 'object' ? row.data : {};
+  const existingAvailabilityRaw = (existingData as any)?.availability;
+
+  const availabilityArray: any[] = Array.isArray(existingAvailabilityRaw)
+    ? existingAvailabilityRaw.filter((a: any) => a && typeof a === 'object')
+    : [];
+
+  const nextEntry = { ...(entry as any), serviceType, timezone, updatedAt, ...(typeof days !== 'undefined' ? { days } : {}), ...(typeof blocks !== 'undefined' ? { blocks } : {}) };
+
+  const filtered = availabilityArray.filter((a: any) => String(a?.serviceType || '').trim() !== serviceType);
+  const nextAvailability = [...filtered, nextEntry];
+
+  await upsertProviderDataByUserId(pid, { availability: nextAvailability });
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
-import { getAvailability, readAvailabilityFile, setAvailability } from '@/lib/availability/store.server';
 import type { DayAvailability } from '@/lib/availability/types';
 import { handleApiError } from '@/lib/errorHandler';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { updateProviderAvailability } from '@/lib/providers/storage';
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,42 +28,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // If serviceType is specified, return that exact stored entry (or null).
+    const supabase = getSupabaseAdmin();
+    const { data: row, error } = await supabase.from('providers').select('id, data').eq('id', providerId).maybeSingle();
+    if (error) throw error;
+    const data = row?.data && typeof row.data === 'object' ? row.data : {};
+    const availabilityRaw = (data as any)?.availability;
+    const availabilityArray: any[] = Array.isArray(availabilityRaw)
+      ? availabilityRaw
+      : availabilityRaw && typeof availabilityRaw === 'object'
+        ? Object.entries(availabilityRaw as Record<string, any>).map(([serviceType, payload]) => ({
+            serviceType,
+            ...(payload && typeof payload === 'object' ? payload : {}),
+          }))
+        : [];
+
     if (serviceType) {
-      const entry = await getAvailability(providerId, serviceType as any);
-      return NextResponse.json({
-        availability: entry
-          ? {
-              providerId: entry.providerId,
-              serviceType: entry.serviceType,
-              timezone: entry.timezone,
-              updatedAt: entry.updatedAt,
-              // Return stored payload exactly; do NOT normalize/autofill/reorder.
-              days: entry.days ?? null,
-              blocks: entry.blocks ?? null,
-            }
-          : null,
-      });
+      const entry = availabilityArray.find((a: any) => String(a?.serviceType || '').trim() === serviceType) || null;
+      return NextResponse.json({ availability: entry });
     }
 
-    // No serviceType param:
-    // - Admin: return all stored entries exactly
-    // - Non-admin: return all entries for the current provider
-    const storage = await readAvailabilityFile();
-    const entries = session.roles.includes('admin')
-      ? Object.values(storage)
-      : Object.values(storage).filter((e) => e?.providerId === session.userId);
-
-    return NextResponse.json({
-      availability: entries.map((e) => ({
-        providerId: e.providerId,
-        serviceType: (e as any).serviceType,
-        timezone: e.timezone,
-        updatedAt: e.updatedAt,
-        days: (e as any).days ?? null,
-        blocks: (e as any).blocks ?? null,
-      })),
-    });
+    // No serviceType: return provider's entire availability array (admin may request other providerId via query param).
+    return NextResponse.json({ availability: availabilityArray });
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/availability] GET' });
   }
@@ -117,13 +103,10 @@ export async function POST(request: NextRequest) {
 
     // Clear flow (explicit action)
     if (intent === 'clear') {
-      // Persist an empty entry for this provider+serviceType (explicitly clearing), without touching other services.
-      await setAvailability(providerId, [], timezone, serviceType as any, []);
+      const updatedAt = new Date().toISOString();
+      await updateProviderAvailability(providerId, { serviceType, timezone, updatedAt, days: [], blocks: [] });
       console.log('[AVAILABILITY_WRITE]', { providerId, serviceType, daysCount: 0 });
-      return NextResponse.json(
-        { availability: { providerId, serviceType, timezone, updatedAt: new Date().toISOString(), days: [], blocks: [] } },
-        { status: 200 }
-      );
+      return NextResponse.json({ availability: { providerId, serviceType, timezone, updatedAt, days: [], blocks: [] } }, { status: 200 });
     }
     
     // Validate input (save)
@@ -201,23 +184,12 @@ export async function POST(request: NextRequest) {
         }));
       });
 
-    await setAvailability(providerId, blocks, timezone, serviceType as any, days);
+    const updatedAt = new Date().toISOString();
+    await updateProviderAvailability(providerId, { serviceType, timezone, updatedAt, days, blocks });
     console.log('[AVAILABILITY_WRITE]', { providerId, serviceType, daysCount: days.length });
 
-    const entry = await getAvailability(providerId, serviceType as any);
     return NextResponse.json(
-      {
-        availability: entry
-          ? {
-              providerId: entry.providerId,
-              serviceType: entry.serviceType,
-              timezone: entry.timezone,
-              updatedAt: entry.updatedAt,
-              days: entry.days ?? null,
-              blocks: entry.blocks ?? null,
-            }
-          : null,
-      },
+      { availability: { providerId, serviceType, timezone, updatedAt, days, blocks } },
       { status: 201 }
     );
   } catch (error) {

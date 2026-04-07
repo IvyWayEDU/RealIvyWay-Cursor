@@ -47,7 +47,8 @@ export default function AvailabilityManagementClient() {
   }, []);
 
   const loadAvailability = async (serviceTypeOverride?: string) => {
-    const st = serviceTypeOverride || selectedServiceType;
+    const st0 = serviceTypeOverride || selectedServiceType;
+    const st = st0 === 'test_prep' ? 'tutoring' : st0;
     if (!st) return;
     try {
       const params = new URLSearchParams({ serviceType: st });
@@ -225,13 +226,14 @@ export default function AvailabilityManagementClient() {
         };
       });
 
+      const apiServiceType = selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType;
       const response = await fetch('/api/availability', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          serviceType: selectedServiceType,
+          serviceType: apiServiceType,
           days,
           timezone: 'America/New_York',
         }),
