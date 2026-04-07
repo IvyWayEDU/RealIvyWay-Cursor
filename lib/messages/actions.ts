@@ -5,12 +5,12 @@ import { getUserDisplayInfoById } from '@/lib/sessions/actions';
 import { getSessions } from '@/lib/sessions/storage';
 import type { Session } from '@/lib/models/types';
 import {
-  getAllConversations,
-  getAllMessages,
-  saveAllConversations,
-  saveAllMessages,
+  ensureConversationRow,
+  getConversationById,
+  getConversationsForUser,
+  getMessagesForConversation,
+  insertMessageRow,
   type StoredConversation,
-  type StoredMessage,
 } from '@/lib/messages/storage';
 import {
   containsPersonalContactInfo,
@@ -36,6 +36,8 @@ export interface MessageDTO {
   recipientId: string;
   createdAt: string; // ISO
   text: string;
+  // Backwards-compatible alias used by earlier frontend iterations.
+  message: string;
 }
 
 function normalizePair(a: string, b: string): [string, string] {
@@ -49,31 +51,16 @@ function makeConversationId(userAId: string, userBId: string): string {
 }
 
 async function findConversationById(conversationId: string): Promise<StoredConversation | null> {
-  const conversations = await getAllConversations();
-  return conversations.find((c) => c.id === conversationId) ?? null;
+  return getConversationById(conversationId);
 }
 
 async function ensureConversation(userAId: string, userBId: string): Promise<StoredConversation> {
   const conversationId = makeConversationId(userAId, userBId);
-  const conversations = await getAllConversations();
-  const existing = conversations.find((c) => c.id === conversationId);
-  if (existing) return existing;
-
-  const now = new Date().toISOString();
-  const participants = normalizePair(userAId, userBId);
-  const created: StoredConversation = {
+  return ensureConversationRow({
     id: conversationId,
-    participants,
-    createdAt: now,
-    updatedAt: now,
-    lastMessageText: '',
-    lastMessageAt: now,
-    lastMessageSenderId: undefined,
-  };
-
-  conversations.push(created);
-  await saveAllConversations(conversations);
-  return created;
+    participantA: userAId,
+    participantB: userBId,
+  });
 }
 
 function otherParticipant(conversation: StoredConversation, currentUserId: string): string | null {
@@ -204,8 +191,7 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
 }
 
 export async function getInboxConversations(currentUserId: string): Promise<ConversationSummary[]> {
-  const conversations = await getAllConversations();
-  const mine = conversations.filter((c) => c.participants.includes(currentUserId));
+  const mine = await getConversationsForUser(currentUserId);
 
   const summaries: ConversationSummary[] = [];
   for (const c of mine) {
@@ -232,19 +218,23 @@ export async function getInboxConversations(currentUserId: string): Promise<Conv
 }
 
 export async function getConversationMessages(conversationId: string): Promise<MessageDTO[]> {
-  // Fetch by conversationId ONLY
-  const all = await getAllMessages();
-  return all
-    .filter((m) => m.conversationId === conversationId)
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-    .map((m) => ({
+  const convo = await findConversationById(conversationId);
+  if (!convo) return [];
+
+  const stored = await getMessagesForConversation(conversationId);
+  return stored.map((m) => {
+    const recipientId = otherParticipant(convo, m.senderId) || '';
+    const text = m.text;
+    return {
       id: m.id,
       conversationId: m.conversationId,
       senderId: m.senderId,
-      recipientId: m.recipientId,
+      recipientId,
       createdAt: m.createdAt,
-      text: m.text,
-    }));
+      text,
+      message: text,
+    };
+  });
 }
 
 export async function getOrCreateConversationWithUser(
@@ -293,44 +283,29 @@ export async function sendMessage(params: {
   void changed;
 
   const conversation = await ensureConversation(senderId, recipientId);
-  const now = new Date().toISOString();
+  const conversationId = conversation.id;
+  console.log("Conversation loaded:", conversationId);
 
-  const message: StoredMessage = {
+  const body = text;
+  console.log("Sending message:", body);
+
+  const inserted = await insertMessageRow({
     id: crypto.randomUUID(),
-    conversationId: conversation.id,
+    conversationId,
     senderId,
-    recipientId,
-    createdAt: now,
-    text,
-  };
-
-  const messages = await getAllMessages();
-  messages.push(message);
-  await saveAllMessages(messages);
-
-  // Update conversation metadata
-  const conversations = await getAllConversations();
-  const idx = conversations.findIndex((c) => c.id === conversation.id);
-  if (idx >= 0) {
-    conversations[idx] = {
-      ...conversations[idx],
-      updatedAt: now,
-      lastMessageText: text,
-      lastMessageAt: now,
-      lastMessageSenderId: senderId,
-    };
-    await saveAllConversations(conversations);
-  }
+    body,
+  });
 
   return {
-    conversationId: conversation.id,
+    conversationId,
     message: {
-      id: message.id,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      recipientId: message.recipientId,
-      createdAt: message.createdAt,
-      text: message.text,
+      id: inserted.id,
+      conversationId: inserted.conversationId,
+      senderId: inserted.senderId,
+      recipientId,
+      createdAt: inserted.createdAt,
+      text: inserted.text,
+      message: inserted.text,
     },
   };
 }
