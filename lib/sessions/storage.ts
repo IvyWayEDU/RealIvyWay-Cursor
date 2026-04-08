@@ -17,6 +17,8 @@ function toIsoStringOrNull(v: unknown): string | null {
 
 type SessionDbRow = {
   id: string | null;
+  student_id: string | null;
+  provider_id: string | null;
   datetime: string | null;
   end_datetime: string | null;
   status: string | null;
@@ -81,6 +83,15 @@ function mergeDbRowIntoSession(row: SessionDbRow): Session | null {
     s.status = row.status.trim();
   }
 
+  // Ensure providerId/studentId are present even when legacy rows stored them only in DB columns.
+  const providerIdRow = typeof row?.provider_id === 'string' ? row.provider_id.trim() : '';
+  const studentIdRow = typeof row?.student_id === 'string' ? row.student_id.trim() : '';
+  if (!isNonEmptyString(s?.providerId) && providerIdRow) s.providerId = providerIdRow;
+  if (!isNonEmptyString(s?.studentId) && studentIdRow) s.studentId = studentIdRow;
+  // Also expose the DB columns directly (snake_case) for callers that depend on them.
+  s.provider_id = providerIdRow || (isNonEmptyString(s?.providerId) ? String(s.providerId).trim() : null);
+  s.student_id = studentIdRow || (isNonEmptyString(s?.studentId) ? String(s.studentId).trim() : null);
+
   // Mirror join evidence columns into JSON if missing/invalid there.
   const providerJoinedAtData = toIsoStringOrNull(s.providerJoinedAt);
   const studentJoinedAtData = toIsoStringOrNull(s.studentJoinedAt);
@@ -101,7 +112,7 @@ async function readSessionsRaw(): Promise<Session[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('sessions')
-    .select('id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
+    .select('id, student_id, provider_id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
     .order('datetime', { ascending: true });
   if (error) {
     console.error('[sessions.storage] Error reading sessions from Supabase:', error);
@@ -118,7 +129,7 @@ async function readSessionByIdRaw(id: string): Promise<Session | null> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('sessions')
-    .select('id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
+    .select('id, student_id, provider_id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
     .eq('id', sid)
     .maybeSingle();
   if (error) throw error;

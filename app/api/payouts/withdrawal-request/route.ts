@@ -201,7 +201,15 @@ export async function POST(request: NextRequest) {
     // don't overlap already-withdrawn amounts.
     const providerSessions = await getSessionsByProviderId(providerId);
     const completed = (providerSessions || [])
-      .filter((s: any) => String(s?.status || '') === 'completed')
+      .filter((s: any) => {
+        const status = String(s?.status || '').trim().toLowerCase();
+        if (status !== 'completed') return false;
+        const providerEarned = (s as any)?.providerEarned;
+        const provider_earned = (s as any)?.provider_earned;
+        const earned =
+          typeof providerEarned === 'boolean' ? providerEarned : typeof provider_earned === 'boolean' ? provider_earned : false;
+        return earned === true;
+      })
       .map((s: any) => {
         const completedAtIso = sessionCompletedAtIso(s) || new Date().toISOString();
         return {
@@ -212,6 +220,8 @@ export async function POST(request: NextRequest) {
       })
       .filter((s) => s.sessionId && s.payoutCents > 0)
       .sort((a, b) => String(a.completedAtIso).localeCompare(String(b.completedAtIso)));
+
+    console.log("Completed sessions found:", completed.length);
 
     const existingRequests = await listProviderPayoutRequests(providerId);
     const alreadyAllocatedBySession = new Map<string, number>();
