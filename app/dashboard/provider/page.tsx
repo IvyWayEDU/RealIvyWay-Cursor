@@ -14,7 +14,6 @@ import UpcomingSessionsSection from '@/components/UpcomingSessionsSection';
 import ProviderEarningsSnapshotClient from '@/components/ProviderEarningsSnapshotClient';
 import IvyWayAICard from '@/components/IvyWayAICard';
 import MessagesSection from '@/components/MessagesSection';
-import ReferralEarningsSection from '@/components/ReferralEarningsSection';
 
 export default async function ProviderDashboard() {
   // Verify session exists
@@ -85,8 +84,6 @@ export default async function ProviderDashboard() {
           />
         </div>
       </div>
-
-      <ReferralEarningsSection userId={session.userId} />
     </div>
   );
 }

@@ -12,7 +12,6 @@ import ConfirmedSessionsSection from '@/components/ConfirmedSessionsSection';
 import AIProblemSolver from '@/components/AIProblemSolver';
 import MessagesSection from '@/components/MessagesSection';
 import IvyWayAICard from '@/components/IvyWayAICard';
-import ReferralEarningsSection from '@/components/ReferralEarningsSection';
 import { getSession } from '@/lib/auth/session';
 
 export default async function StudentDashboard() {
@@ -73,9 +72,6 @@ export default async function StudentDashboard() {
           />
         </div>
       </div>
-
-      <ReferralEarningsSection userId={session.userId} />
-
     </div>
   );
 }
