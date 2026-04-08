@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getPayoutRequestById, updatePayoutRequestIfStatus } from '@/lib/payouts/payout-requests.server';
+import { getProviderEarningsBalance, updateProviderEarningsBalance } from '@/lib/earnings/balances.server';
 import { handleApiError } from '@/lib/errorHandler';
 import { sendPayoutPaidEmail } from '@/lib/email/transactional';
 
@@ -36,8 +37,34 @@ export async function POST(request: NextRequest) {
     if (!cas.payoutRequest) return NextResponse.json({ error: 'Failed to update payout request' }, { status: 500 });
     const updated = cas.payoutRequest;
 
-    // Transactional email: payout confirmation (send only on successful transition)
+    // Balance mutation + transactional email: only on successful status transition.
     if (cas.updated) {
+      const providerId = String(updated.providerId || '').trim();
+      const amountCents = Math.max(0, Math.floor(Number(updated.amountCents || 0)));
+
+      if (providerId && amountCents > 0) {
+        const balance = await getProviderEarningsBalance(providerId);
+        console.log('Before payout completion:', balance);
+
+        const new_pending = Math.max(0, Math.floor((balance.pendingCents || 0) - amountCents));
+        const new_withdrawn = Math.max(0, Math.floor((balance.withdrawnCents || 0) + amountCents));
+
+        await updateProviderEarningsBalance({
+          providerId,
+          availableCents: balance.availableCents || 0,
+          pendingCents: new_pending,
+          withdrawnCents: new_withdrawn,
+        });
+
+        console.log('After payout completion:', new_pending, new_withdrawn);
+      } else {
+        console.warn('[payout-requests/mark-paid] skipping balance update: missing providerId or amountCents <= 0', {
+          payoutRequestId: updated.id,
+          providerId,
+          amountCents,
+        });
+      }
+
       try {
         await sendPayoutPaidEmail({
           providerId: updated.providerId,

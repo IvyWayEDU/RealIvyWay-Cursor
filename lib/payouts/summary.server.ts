@@ -1,4 +1,5 @@
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
+import { getProviderEarningsBalance } from '@/lib/earnings/balances.server';
 
 export async function getProviderPayoutSummaryFromLedger(providerId: string): Promise<{
   availableBalanceCents: number;
@@ -10,15 +11,18 @@ export async function getProviderPayoutSummaryFromLedger(providerId: string): Pr
   approvedPayoutsCents: number;
   paidPayoutsCents: number;
 }> {
-  const summary = await getProviderEarningsSummary(providerId);
+  const [summary, balance] = await Promise.all([
+    getProviderEarningsSummary(providerId),
+    getProviderEarningsBalance(providerId),
+  ]);
   return {
-    availableBalanceCents: summary.availableBalanceCents,
-    pendingWithdrawalsCents: summary.pendingPayoutsCents, // backward-compatible name
-    totalWithdrawnCents: summary.totalWithdrawnCents,
+    availableBalanceCents: balance.availableCents,
+    pendingWithdrawalsCents: balance.pendingCents, // backward-compatible name
+    totalWithdrawnCents: balance.withdrawnCents,
     // "ledgerBalanceCents" is a legacy concept; we keep the field for compatibility.
     ledgerBalanceCents: summary.totalEarningsCents,
     totalEarningsCents: summary.totalEarningsCents,
-    pendingPayoutsCents: summary.pendingPayoutsCents,
+    pendingPayoutsCents: balance.pendingCents,
     approvedPayoutsCents: summary.approvedPayoutsCents,
     paidPayoutsCents: summary.paidPayoutsCents,
   };

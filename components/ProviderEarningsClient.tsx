@@ -63,6 +63,22 @@ export default function ProviderEarningsClient(props: {
           });
           const sdata = (await sres.json().catch(() => ({}))) as any;
           if (sres.ok && typeof sdata?.availableBalanceCents === 'number') {
+            const balance = (sdata?.balance ?? {
+              available_cents: Number(sdata?.availableBalanceCents || 0),
+              pending_cents: Number(sdata?.pendingPayoutsCents || 0),
+              withdrawn_cents: Number(sdata?.totalWithdrawnCents || 0),
+            }) as {
+              available_cents: number;
+              pending_cents: number;
+              withdrawn_cents: number;
+            };
+
+            console.log("Earnings UI mapping:", {
+              available: balance.available_cents,
+              pending: balance.pending_cents,
+              withdrawn: balance.withdrawn_cents
+            });
+
             // Temporary debug logs (remove after verification).
             console.log('[EARNINGS_CLIENT_DEBUG]', {
               earningsRows: Number(sdata?.earningsRows ?? 0),
