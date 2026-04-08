@@ -113,7 +113,7 @@ export default function MessagesSection({ userId, subtitle, emptySubtitle }: Mes
                 <div className="min-w-0">
                   <p className="text-sm text-gray-900 truncate">{m.bodyPreview}</p>
                   <p className="mt-1 text-xs text-gray-500">
-                    <span className="font-medium text-gray-600">From:</span> {m.sender_id}
+                    <span className="font-medium text-gray-600">From:</span> {m.sender_name?.trim() || 'User'}
                   </p>
                 </div>
                 <div className="flex-shrink-0 text-xs text-gray-400">{m.timeLabel}</div>

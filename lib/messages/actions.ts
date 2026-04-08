@@ -45,6 +45,7 @@ export interface DashboardMessagePreview {
   id: string;
   body: string;
   sender_id: string;
+  sender_name?: string;
   created_at: string;
 }
 
@@ -119,7 +120,9 @@ function sanitizeMessageText(raw: string): { text: string; changed: boolean } {
   return { text, changed };
 }
 
-async function assertMessagingAllowed(senderId: string, recipientId: string): Promise<void> {
+type MessagingAllowedResult = { allowed: true } | { allowed: false; error: string };
+
+async function assertMessagingAllowed(senderId: string, recipientId: string): Promise<MessagingAllowedResult> {
   const all = await getSessions();
   const pair = all.filter(
     (s) =>
@@ -150,10 +153,10 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
     'expired_provider_no_show',
   ]);
 
-  const windowError = 'Messaging only allowed 24 hours before and after session';
+  const windowError = 'Messaging is available 24 hours before your booked session time';
   const eligible = pair.filter((s) => eligibleStatuses.has(s.status));
   if (eligible.length === 0) {
-    throw new Error(windowError);
+    return { allowed: false, error: windowError };
   }
 
   const now = new Date();
@@ -170,8 +173,10 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
   });
 
   if (!inWindow) {
-    throw new Error(windowError);
+    return { allowed: false, error: windowError };
   }
+
+  return { allowed: true };
 }
 
 export async function getInboxConversations(currentUserId: string): Promise<ConversationSummary[]> {
@@ -236,30 +241,100 @@ export async function getDashboardLatestMessages(userId: string): Promise<Dashbo
     .filter(Boolean);
 
   // 2) Fetch latest messages
-  const base = supabase
-    .from('messages')
-    .select('id, body, sender_id, created_at, conversation_id')
-    .order('created_at', { ascending: false })
-    .limit(5);
+  const loadFromJoinedView = async (): Promise<{ rows: any[]; usedView: boolean }> => {
+    const base = supabase
+      .from('messages_with_sender_name')
+      .select('id, body, sender_id, sender_name, created_at, conversation_id')
+      .order('created_at', { ascending: false })
+      .limit(5);
 
-  const { data: msgRows, error: msgErr } =
-    conversationIds.length > 0
-      ? await base.or(`sender_id.eq.${uid},conversation_id.in.(${conversationIds.join(',')})`)
-      : await base.eq('sender_id', uid);
+    const res =
+      conversationIds.length > 0
+        ? await base.or(`sender_id.eq.${uid},conversation_id.in.(${conversationIds.join(',')})`)
+        : await base.eq('sender_id', uid);
 
-  if (msgErr) {
-    console.error('[messages.actions] Error loading messages for dashboard preview:', { userId: uid, error: msgErr });
-    throw msgErr;
+    if (res.error) throw res.error;
+    return { rows: (res.data ?? []) as any[], usedView: true };
+  };
+
+  const loadFromMessagesThenHydrateNames = async (): Promise<{ rows: any[]; usedView: boolean }> => {
+    const base = supabase
+      .from('messages')
+      .select('id, body, sender_id, created_at, conversation_id')
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    const res =
+      conversationIds.length > 0
+        ? await base.or(`sender_id.eq.${uid},conversation_id.in.(${conversationIds.join(',')})`)
+        : await base.eq('sender_id', uid);
+
+    if (res.error) throw res.error;
+
+    const rows = (res.data ?? []) as any[];
+    const senderIds = Array.from(
+      new Set(
+        rows
+          .map((r) => (isNonEmptyString(r?.sender_id) ? String(r.sender_id).trim() : ''))
+          .filter(Boolean)
+      )
+    );
+
+    const nameById = new Map<string, string>();
+    if (senderIds.length > 0) {
+      const { data: users, error: uErr } = await supabase.from('users').select('id, data').in('id', senderIds as any);
+      if (!uErr) {
+        for (const u of (users ?? []) as any[]) {
+          const id = isNonEmptyString(u?.id) ? String(u.id).trim() : '';
+          const nameRaw =
+            typeof (u as any)?.data?.name === 'string'
+              ? String((u as any).data.name).trim()
+              : typeof (u as any)?.data?.displayName === 'string'
+                ? String((u as any).data.displayName).trim()
+                : '';
+          if (id && nameRaw) nameById.set(id, nameRaw);
+        }
+      }
+    }
+
+    return {
+      rows: rows.map((r) => ({
+        ...r,
+        sender_name: isNonEmptyString(r?.sender_id) ? nameById.get(String(r.sender_id).trim()) ?? null : null,
+      })),
+      usedView: false,
+    };
+  };
+
+  let msgRows: any[] = [];
+  try {
+    const res = await loadFromJoinedView();
+    msgRows = res.rows;
+    void res.usedView;
+  } catch (err: any) {
+    // If the view doesn't exist yet (or is temporarily unavailable), fall back to a safe 2-query hydrate.
+    try {
+      const res = await loadFromMessagesThenHydrateNames();
+      msgRows = res.rows;
+      void res.usedView;
+    } catch (inner: any) {
+      console.error('[messages.actions] Error loading messages for dashboard preview:', {
+        userId: uid,
+        error: inner ?? err,
+      });
+      throw inner ?? err;
+    }
   }
 
-  return ((msgRows ?? []) as any[])
+  return (msgRows ?? [])
     .map((r) => {
       const id = isNonEmptyString(r?.id) ? String(r.id).trim() : '';
       const body = isNonEmptyString(r?.body) ? String(r.body) : '';
       const sender_id = isNonEmptyString(r?.sender_id) ? String(r.sender_id).trim() : '';
+      const sender_name = isNonEmptyString(r?.sender_name) ? String(r.sender_name).trim() : undefined;
       const created_at = isNonEmptyString(r?.created_at) ? String(r.created_at) : '';
       if (!id || !sender_id || !created_at) return null;
-      return { id, body, sender_id, created_at } satisfies DashboardMessagePreview;
+      return { id, body, sender_id, sender_name, created_at } satisfies DashboardMessagePreview;
     })
     .filter(Boolean) as DashboardMessagePreview[];
 }
@@ -296,7 +371,10 @@ export async function sendMessage(params: {
   senderId: string;
   recipientId: string;
   text: string;
-}): Promise<{ conversationId: string; message: MessageDTO }> {
+}): Promise<
+  | { success: true; conversationId: string; message: MessageDTO }
+  | { success: false; error: string }
+> {
   const senderId = (params.senderId || '').trim();
   const recipientId = (params.recipientId || '').trim();
   const rawText = (params.text || '').trim();
@@ -309,7 +387,10 @@ export async function sendMessage(params: {
   }
 
   // Enforce session-based messaging restrictions server-side.
-  await assertMessagingAllowed(senderId, recipientId);
+  const allowed = await assertMessagingAllowed(senderId, recipientId);
+  if (!allowed.allowed) {
+    return { success: false, error: allowed.error };
+  }
 
   // Hard-block personal contact info attempts (to prevent off-platform payment bypass).
   if (containsPersonalContactInfo(rawText)) {
@@ -344,6 +425,7 @@ export async function sendMessage(params: {
   });
 
   return {
+    success: true,
     conversationId,
     message: {
       id: inserted.id,

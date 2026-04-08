@@ -309,6 +309,14 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
 
     try {
       const res = await sendMessage({ senderId: session.userId, recipientId, text });
+      if (res.success === false) {
+        // Remove the optimistic message so blocked sends don't linger (draft chats won't auto-reconcile).
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        setInputValue(text);
+        setSendError(res.error);
+        return;
+      }
+
       const actualConversationId = res.conversationId;
 
       if (!selectedConversationId) {
