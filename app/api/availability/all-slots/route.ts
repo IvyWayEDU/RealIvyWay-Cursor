@@ -96,6 +96,26 @@ export async function GET(req: NextRequest) {
           ? 'tutoring'
           : normalizedServiceType;
 
+    // Normalize serviceType(s) for inventory querying (DB service_type values)
+    let normalizedServiceTypes: string[] = [];
+
+    if (Array.isArray(serviceType)) {
+      normalizedServiceTypes = serviceType.map((s) => (s === 'test_prep' ? 'tutoring' : s));
+    } else {
+      normalizedServiceTypes = [serviceType === 'test_prep' ? 'tutoring' : serviceType];
+    }
+
+    normalizedServiceTypes = Array.from(
+      new Set(
+        normalizedServiceTypes.map((st) => {
+          const canonical = normalizeServiceType(st);
+          if (canonical === 'virtual_tour') return 'college_counseling';
+          if (canonical === 'test_prep') return 'tutoring';
+          return canonical;
+        })
+      )
+    );
+
     if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !subject) {
       return NextResponse.json({ error: 'subject is required for tutoring and test prep services' }, { status: 400 });
     }
@@ -270,7 +290,9 @@ export async function GET(req: NextRequest) {
         );
       }
       if (normalizedServiceType === 'tutoring') {
-        return p.services.includes('tutoring');
+        // Inventory for tutoring + test prep is stored under tutoring slots; be permissive here
+        // so providers who only list test prep are not accidentally excluded from tutoring availability.
+        return p.services.includes('tutoring') || p.services.includes('test_prep');
       }
       if (normalizedServiceType === 'test_prep') {
         // Test prep inventory uses tutoring slots, but provider must still offer test prep (or tutoring if you model it that way).
@@ -292,7 +314,11 @@ export async function GET(req: NextRequest) {
       .filter(matchesSchoolStrict)
       .filter(matchesSubjectIfNeeded);
 
-    const providerIds = providerCandidates.map((p) => p.providerId).filter(Boolean);
+    const explicitProviderId = String(providerId || '').trim();
+    const providerIds =
+      explicitProviderId
+        ? [explicitProviderId]
+        : providerCandidates.map((p) => p.providerId).filter(Boolean);
 
     if (providerIds.length === 0) {
       return NextResponse.json({ slots: [], providers: [] }, { status: 200, headers: rateHeaders });
@@ -300,19 +326,36 @@ export async function GET(req: NextRequest) {
 
     const rows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
 
-    for (const batch of chunkArray(providerIds, 200)) {
+    console.log("[AVAILABILITY_FETCH]", { serviceType, providerId: explicitProviderId || null });
+
+    if (explicitProviderId) {
       const { data, error } = await supabase
         .from('availability_slots')
         .select('provider_id, start_time, end_time')
-        .in('provider_id', batch)
+        .eq('provider_id', explicitProviderId)
         .eq('is_booked', false)
-        .eq('service_type', availabilityServiceType)
+        .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
         .gte('start_time', rangeStartISO)
         .lt('start_time', rangeEndISO)
         .gt('start_time', cutoffISO)
         .order('start_time', { ascending: true });
       if (error) throw error;
       for (const r of data ?? []) rows.push(r as any);
+    } else {
+      for (const batch of chunkArray(providerIds, 200)) {
+        const { data, error } = await supabase
+          .from('availability_slots')
+          .select('provider_id, start_time, end_time')
+          .in('provider_id', batch)
+          .eq('is_booked', false)
+          .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
+          .gte('start_time', rangeStartISO)
+          .lt('start_time', rangeEndISO)
+          .gt('start_time', cutoffISO)
+          .order('start_time', { ascending: true });
+        if (error) throw error;
+        for (const r of data ?? []) rows.push(r as any);
+      }
     }
 
     const reserved = await readReservedSlotsFile();

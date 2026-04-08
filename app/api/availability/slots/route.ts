@@ -18,8 +18,14 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
     const timezone = searchParams.get('timezone') || 'America/New_York';
-    const serviceType = searchParams.get('serviceType') || undefined;
+    const serviceTypeAll = searchParams
+      .getAll('serviceType')
+      .map((s) => String(s || '').trim())
+      .filter(Boolean);
+    const serviceType: string | string[] | undefined =
+      serviceTypeAll.length > 1 ? serviceTypeAll : serviceTypeAll[0] || undefined;
     const subject = searchParams.get('subject') || undefined;
+    const providerId = searchParams.get('providerId') || undefined;
     
     // Validate input
     if (!date) {
@@ -45,9 +51,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const serviceTypePrimary = Array.isArray(serviceType) ? serviceType[0] : serviceType;
+    if (!serviceTypePrimary) {
+      return NextResponse.json({ error: 'serviceType parameter is required' }, { status: 400 });
+    }
+
     // Validate/normalize serviceType early to return 400 on bad inputs (not 500)
     try {
-      normalizeServiceType(serviceType);
+      normalizeServiceType(serviceTypePrimary);
+      if (Array.isArray(serviceType)) {
+        for (const st of serviceType) normalizeServiceType(st);
+      }
     } catch {
       return NextResponse.json(
         { error: 'Invalid serviceType parameter' },
@@ -56,7 +70,7 @@ export async function GET(request: NextRequest) {
     }
     
     // Validate subject is required for tutoring and test_prep
-    const normalizedServiceType = serviceType.toLowerCase().replace(/-/g, '_');
+    const normalizedServiceType = serviceTypePrimary.toLowerCase().replace(/-/g, '_');
     if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep' || normalizedServiceType === 'testprep') && !subject) {
       return NextResponse.json(
         { error: 'subject parameter is required for tutoring and test prep services' },
@@ -65,13 +79,33 @@ export async function GET(request: NextRequest) {
     }
     
     // Fetch concrete slots from Supabase (excludes reserved slots + booked sessions defensively)
-    const normalized = normalizeServiceType(serviceType);
+    const normalized = normalizeServiceType(serviceTypePrimary);
     const availabilityServiceType =
       normalized === 'virtual_tour'
         ? 'college_counseling'
         : normalized === 'test_prep'
           ? 'tutoring'
           : normalized;
+
+    // Normalize serviceType(s) for inventory querying (DB service_type values)
+    let normalizedServiceTypes: string[] = [];
+
+    if (Array.isArray(serviceType)) {
+      normalizedServiceTypes = serviceType.map((s) => (s === 'test_prep' ? 'tutoring' : s));
+    } else {
+      normalizedServiceTypes = [serviceType === 'test_prep' ? 'tutoring' : serviceType];
+    }
+
+    normalizedServiceTypes = Array.from(
+      new Set(
+        normalizedServiceTypes.map((st) => {
+          const canonical = normalizeServiceType(st);
+          if (canonical === 'virtual_tour') return 'college_counseling';
+          if (canonical === 'test_prep') return 'tutoring';
+          return canonical;
+        })
+      )
+    );
 
     const dayStartUTC = bindDateKeyAndMinutesToUtcDate(date, 0, timezone);
     const dayEndUTC = bindDateKeyAndMinutesToUtcDate(date, 24 * 60, timezone);
@@ -80,14 +114,21 @@ export async function GET(request: NextRequest) {
     const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
 
     const supabase = getSupabaseAdmin();
-    const { data: rows, error } = await supabase
+    console.log("[AVAILABILITY_FETCH]", { serviceType, providerId });
+
+    let query = supabase
       .from('availability_slots')
       .select('provider_id, start_time, end_time')
       .eq('is_booked', false)
-      .eq('service_type', availabilityServiceType)
+      .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
       .gte('start_time', dayStartUTC.toISOString())
-      .lt('start_time', dayEndUTC.toISOString())
-      .order('start_time', { ascending: true });
+      .lt('start_time', dayEndUTC.toISOString());
+
+    if (providerId) {
+      query = query.eq('provider_id', providerId);
+    }
+
+    const { data: rows, error } = await query.order('start_time', { ascending: true });
     if (error) throw error;
 
     const reserved = await readReservedSlotsFile();
