@@ -154,24 +154,78 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch: false }, { status: 200 });
     }
 
-    const { data: providerRows, error: providersErr } = await supabase
-      .from('providers')
-      .select('id, data')
-      .in('id', providerIdsStillFree)
-      .order('id', { ascending: true });
-    if (providersErr) throw providersErr;
+    // Prefer `user_id` when available so we can also pull user-level subjects.
+    let providerRows: any[] = [];
+    {
+      const attempt = await supabase
+        .from('providers')
+        .select('id, user_id, data')
+        .in('id', providerIdsStillFree)
+        .order('id', { ascending: true });
+      if (!attempt.error) {
+        providerRows = attempt.data ?? [];
+      } else {
+        const fallback = await supabase
+          .from('providers')
+          .select('id, data')
+          .in('id', providerIdsStillFree)
+          .order('id', { ascending: true });
+        if (fallback.error) throw fallback.error;
+        providerRows = fallback.data ?? [];
+      }
+    }
 
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
     const requestedSubjectRaw = String(subject || '').trim();
-    const requestedSubjectKey = requestedSubjectRaw ? normalizeSubjectId(requestedSubjectRaw) : null;
+    const requestedSubjectKey =
+      normalizedServiceType === 'test_prep'
+        ? 'test_prep'
+        : requestedSubjectRaw
+          ? normalizeSubjectId(requestedSubjectRaw)
+          : null;
+
+    // Best-effort: load subjects from users.data.subjects when providers.data.subjects isn't populated.
+    const subjectsByUserId = new Map<string, string[]>();
+    try {
+      const userIds = Array.from(
+        new Set(
+          (providerRows ?? [])
+            .map((r: any) => (typeof r?.user_id === 'string' ? String(r.user_id).trim() : ''))
+            .filter(Boolean)
+        )
+      );
+      if (userIds.length > 0) {
+        const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', userIds);
+        if (userErr) throw userErr;
+        for (const r of userRows ?? []) {
+          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+          const data = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : {};
+          const subj = Array.isArray((data as any)?.subjects) ? (data as any).subjects : [];
+          if (!id) continue;
+          subjectsByUserId.set(
+            id,
+            Array.from(
+              new Set(
+                subj
+                  .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+                  .filter((s: any): s is string => !!s)
+              )
+            )
+          );
+        }
+      }
+    } catch {
+      // ignore
+    }
 
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
         if (!id) return null;
+        const userId = typeof (r as any)?.user_id === 'string' ? String((r as any).user_id).trim() : '';
 
         const servicesRaw: unknown = (data as any)?.services;
         const services = Array.isArray(servicesRaw)
@@ -206,6 +260,7 @@ export async function GET(req: NextRequest) {
         const subjects = Array.from(
           new Set(
             [
+              ...(userId ? subjectsByUserId.get(userId) || [] : []),
               ...normalizeStringArray((data as any)?.subjects),
               ...normalizeStringArray((data as any)?.specialties),
             ]
@@ -242,7 +297,7 @@ export async function GET(req: NextRequest) {
           schoolNames,
           services,
           offersVirtualTours,
-          subjects,
+          subjects: Array.isArray(subjects) ? subjects : [],
         };
       })
       .filter(Boolean) as Array<{

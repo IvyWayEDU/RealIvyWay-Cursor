@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SCHOOLS, School, searchSchools } from '@/data/schools';
 import { PRICING_CATALOG, formatUsdFromCents } from '@/lib/pricing/catalog';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
 type Plan = string | null;
@@ -121,20 +122,20 @@ const SERVICES = [
     ),
   },
   {
-    id: 'virtual-tour' as const,
-    name: 'Virtual College Tour',
-    icon: (
-      <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-      </svg>
-    ),
-  },
-  {
     id: 'test-prep' as const,
     name: 'Test Prep',
     icon: (
       <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
+    id: 'virtual-tour' as const,
+    name: 'Virtual College Tour',
+    icon: (
+      <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
       </svg>
     ),
   },
@@ -1705,7 +1706,10 @@ function Step4ChooseTimeSlot({
     const schoolName = String(bookingState.school?.name || bookingState.schoolName || '').trim();
     const params = new URLSearchParams({ date: dateStr });
     if (serviceType) params.set('serviceType', serviceType);
-    if (bookingState.subject) params.set('subject', bookingState.subject);
+    if (bookingState.subject) {
+      const canonical = normalizeSubjectId(bookingState.subject);
+      params.set('subject', canonical || bookingState.subject);
+    }
     if (schoolId) params.set('schoolId', schoolId);
     if (schoolName) params.set('schoolName', schoolName);
 
@@ -2054,7 +2058,7 @@ function Step5SelectProvider({
 
         const schoolId = bookingState.school?.id || bookingState.schoolId || '';
         const schoolName = bookingState.school?.name || bookingState.schoolName || '';
-        const subject = bookingState.subject || '';
+        const subject = bookingState.subject ? normalizeSubjectId(bookingState.subject) || bookingState.subject : '';
 
         let noSchoolMatch = false;
         let intersection: Map<string, (typeof eligibleProviders)[number]> | null = null;

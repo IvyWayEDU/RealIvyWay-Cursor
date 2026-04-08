@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { User } from '@/lib/auth/types';
 import { SCHOOLS, School, searchSchools } from '@/data/schools';
 import { normalizeSubjectId } from '@/lib/models/subjects';
@@ -9,10 +10,11 @@ interface ProviderProfileClientProps {
   initialUser: User;
 }
 
-const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages', 'test_prep'] as const;
+// Academic subjects only (Test Prep is selected via Services UX, but stored as subject "test_prep").
+const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages'] as const;
 type SubjectKey = (typeof COMMON_SUBJECT_KEYS)[number];
 
-const SUBJECT_LABELS: Record<SubjectKey, string> = {
+const SUBJECT_LABELS: Record<string, string> = {
   math: 'Math',
   english: 'English',
   science: 'Science',
@@ -103,6 +105,8 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const hasService = (key: string) => services.includes(key);
   const isTutor = hasService('tutoring');
   const needsSchool = hasService('college_counseling') || hasService('virtual_tour');
+  const hasTestPrepSubject = Array.isArray(subjects) && subjects.includes('test_prep');
+  const academicSubjects = Array.isArray(subjects) ? subjects.filter((s) => s !== 'test_prep') : [];
 
   // Keep dependent fields consistent with enabled services.
   useEffect(() => {
@@ -381,6 +385,20 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
     });
   };
 
+  const toggleTestPrep = (checked: boolean) => {
+    // Test Prep is a SUBJECT, not a provider service.
+    // UX: expose it under Services, but persist as subject "test_prep" and ensure tutoring is enabled.
+    setSubjects((prev) => {
+      const set = new Set(Array.isArray(prev) ? prev : []);
+      if (checked) set.add('test_prep');
+      else set.delete('test_prep');
+      return Array.from(set);
+    });
+    if (checked && !hasService('tutoring')) {
+      toggleService('tutoring', true);
+    }
+  };
+
   const handleSelectSchool = (school: School) => {
     setSchoolId(school.id);
     setSchoolName(school.name);
@@ -414,6 +432,14 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         <p className="mt-1 text-sm text-gray-500">
           Update your profile details and preferences.
         </p>
+        <div className="mt-4">
+          <Link
+            href="/change-password"
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+          >
+            Change Password
+          </Link>
+        </div>
       </div>
       <div className="p-6 space-y-8">
         {saveMessage && (
@@ -680,6 +706,15 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
             <label className="flex items-center">
               <input
                 type="checkbox"
+                checked={hasTestPrepSubject}
+                onChange={(e) => toggleTestPrep(e.target.checked)}
+                className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
+              />
+              <span className="ml-2 text-sm text-gray-700">Test Prep</span>
+            </label>
+            <label className="flex items-center">
+              <input
+                type="checkbox"
                 checked={hasService('college_counseling')}
                 onChange={(e) => toggleService('college_counseling', e.target.checked)}
                 className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
@@ -777,20 +812,20 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                       : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-[#0088CB] hover:text-[#0088CB]'
                   }`}
                 >
-                  {SUBJECT_LABELS[subjectKey]}
+                  {SUBJECT_LABELS[subjectKey] ?? subjectKey}
                 </button>
               ))}
             </div>
-            {subjects.length > 0 && (
+            {academicSubjects.length > 0 && (
               <div className="mt-2">
                 <p className="text-xs text-gray-500 mb-2">Selected subjects:</p>
                 <div className="flex flex-wrap gap-2">
-                  {subjects.map((subject) => (
+                  {academicSubjects.map((subject) => (
                     <span
                       key={subject}
                       className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white"
                     >
-                      {SUBJECT_LABELS[subject as SubjectKey] ?? subject}
+                      {SUBJECT_LABELS[subject] ?? subject}
                       <button
                         type="button"
                         onClick={() => handleRemoveSubject(subject)}

@@ -148,12 +148,19 @@ const SUBJECT_TO_CANONICAL: Record<string, CanonicalSubjectKey> = {
 export function normalizeSubjectToCanonical(subject: string | null | undefined): CanonicalSubjectKey | null {
   if (!subject) return null;
   
-  // Normalize: trim, lowercase, replace & with 'and', collapse whitespace
+  // Normalize:
+  // - trim + lowercase
+  // - normalize separators (_,-,/) into spaces
+  // - replace "&" with "and"
+  // - strip other punctuation
+  // - collapse whitespace
   const normalized = subject
     .trim()
     .toLowerCase()
-    .replace(/&/g, 'and')  // Replace & with 'and'
-    .replace(/\s+/g, ' ')   // Collapse multiple spaces to single space
+    .replace(/[_/.-]+/g, ' ')
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
   
   // Direct lookup in mapping

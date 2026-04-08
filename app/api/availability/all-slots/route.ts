@@ -6,7 +6,6 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
-import { subjectsMatch } from '@/lib/models/subjects';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 
@@ -112,8 +111,12 @@ export async function GET(req: NextRequest) {
       )
     );
 
-    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !subject) {
-      return NextResponse.json({ error: 'subject is required for tutoring and test prep services' }, { status: 400 });
+    // Tutoring requires subject selection; Test Prep is a service UX that maps to tutoring + subject=test_prep.
+    const rawSubjectParams = url.searchParams.getAll('subject').map((s) => String(s || '').trim()).filter(Boolean);
+    const selectedSubjectsRaw =
+      rawSubjectParams.length > 0 ? rawSubjectParams : subject ? [String(subject || '').trim()].filter(Boolean) : [];
+    if (normalizedServiceType === 'tutoring' && selectedSubjectsRaw.length === 0) {
+      return NextResponse.json({ error: 'subject is required for tutoring services' }, { status: 400 });
     }
 
     // RATE LIMITING: Booking/Payment rate limit (prevent rapid-fire availability queries)
@@ -178,11 +181,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ slots, providers: [] }, { status: 200, headers: rateHeaders });
     }
 
-    const { data: providerRows, error: providersErr } = await supabase
-      .from('providers')
-      .select('id, data')
-      .order('id', { ascending: true });
-    if (providersErr) throw providersErr;
+    // Providers table shape differs across environments. Prefer `user_id` when available for subject fallback.
+    let providerRows: any[] = [];
+    {
+      const attempt = await supabase.from('providers').select('id, user_id, data').order('id', { ascending: true });
+      if (!attempt.error) {
+        providerRows = attempt.data ?? [];
+      } else {
+        const fallback = await supabase.from('providers').select('id, data').order('id', { ascending: true });
+        if (fallback.error) throw fallback.error;
+        providerRows = fallback.data ?? [];
+      }
+    }
 
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
 
@@ -217,11 +227,47 @@ export async function GET(req: NextRequest) {
       // Ignore: column does not exist yet.
     }
 
+    // Fallback: some environments store provider subjects only on the related `users.data.subjects`.
+    // Pull those too (best-effort) so availability matching doesn't depend on providers.data being up to date.
+    const subjectsByUserId = new Map<string, string[]>();
+    try {
+      const userIds = Array.from(
+        new Set(
+          (providerRows ?? [])
+            .map((r: any) => (typeof r?.user_id === 'string' ? String(r.user_id).trim() : ''))
+            .filter(Boolean)
+        )
+      );
+      if (userIds.length > 0) {
+        const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', userIds);
+        if (userErr) throw userErr;
+        for (const r of userRows ?? []) {
+          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+          const data = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : {};
+          const subj = Array.isArray((data as any)?.subjects) ? (data as any).subjects : [];
+          if (!id) continue;
+          subjectsByUserId.set(
+            id,
+            Array.from(
+              new Set(
+                subj
+                  .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+                  .filter((s: any): s is string => !!s)
+              )
+            )
+          );
+        }
+      }
+    } catch {
+      // Ignore: not all environments have `user_id` or `users.data.subjects` populated.
+    }
+
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
         if (!id) return null;
+        const userId = typeof (r as any)?.user_id === 'string' ? String((r as any).user_id).trim() : '';
 
         const servicesRaw: unknown = (data as any)?.services;
         const services = Array.isArray(servicesRaw)
@@ -257,6 +303,7 @@ export async function GET(req: NextRequest) {
           new Set(
             [
               ...(subjectsByProviderId.get(id) || []),
+              ...(userId ? subjectsByUserId.get(userId) || [] : []),
               ...normalizeStringArray((data as any)?.subjects),
               ...normalizeStringArray((data as any)?.specialties),
             ]
@@ -294,7 +341,7 @@ export async function GET(req: NextRequest) {
           schoolNames,
           services,
           offersVirtualTours,
-          subjects: canonicalSubjects,
+          subjects: Array.isArray(canonicalSubjects) ? canonicalSubjects : [],
         };
       })
       .filter(Boolean) as Array<{
@@ -343,65 +390,17 @@ export async function GET(req: NextRequest) {
     };
 
     // Subject filtering must be provider-based (NOT availability_slots.subject).
-    // Resolve providerIds from `providers.subjects` (array) and/or `provider_subjects` table.
-    const requestedSubjectRaw = String(subject || '').trim();
-    const requestedSubjectKey = requestedSubjectRaw ? normalizeSubjectId(requestedSubjectRaw) : null;
-    let subjectProviderIds: string[] | null = null;
-    if (requestedSubjectKey && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
-      const idSet = new Set<string>();
+    // Match providers by intersecting normalized selected subject keys with provider.subjects[].
+    const normalizeSubject = (s: unknown): string => String(s || '').trim().toLowerCase().replace(/\s+/g, '_');
+    const normalizedSelectedSubjects =
+      normalizedServiceType === 'test_prep'
+        ? ['test_prep']
+        : selectedSubjectsRaw
+            .map((s) => normalizeSubjectId(s) || normalizeSubject(s))
+            .map((s) => String(s || '').trim())
+            .filter(Boolean);
 
-      // Source 1: `providers.subjects` (array column). This may not exist in older schemas.
-      try {
-        const { data: subjectRows, error: subjectErr } = await supabase
-          .from('providers')
-          .select('id, subjects')
-          .contains('subjects', [requestedSubjectKey]);
-        if (subjectErr) throw subjectErr;
-        for (const r of subjectRows ?? []) {
-          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-          if (id) idSet.add(id);
-        }
-      } catch {
-        // Ignore (schema may not have providers.subjects yet).
-      }
-
-      // Source 2: `provider_subjects` join table. This may not exist in older schemas.
-      try {
-        const { data: joinRows, error: joinErr } = await supabase
-          .from('provider_subjects')
-          .select('provider_id')
-          .eq('subject', requestedSubjectKey);
-        if (joinErr) throw joinErr;
-        for (const r of joinRows ?? []) {
-          const id = typeof (r as any)?.provider_id === 'string' ? String((r as any).provider_id).trim() : '';
-          if (id) idSet.add(id);
-        }
-      } catch {
-        // Ignore (schema may not have provider_subjects yet).
-      }
-
-      // Fallback: existing JSON subjects/specialties in providers.data (keeps old data working).
-      if (idSet.size === 0) {
-        for (const p of providersAll) {
-          if (!Array.isArray(p.subjects) || p.subjects.length === 0) continue;
-          if (p.subjects.some((ps) => subjectsMatch(ps, requestedSubjectKey))) {
-            idSet.add(p.providerId);
-          }
-        }
-      }
-
-      subjectProviderIds = Array.from(idSet);
-    }
-
-    const subjectProviderIdSet = subjectProviderIds ? new Set(subjectProviderIds) : null;
-    const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
-      if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
-      if (!requestedSubjectKey) return false;
-      if (!subjectProviderIdSet) return true;
-      return subjectProviderIdSet.has(p.providerId);
-    };
-
-    const baseCandidates = providersAll.filter(matchesServiceType).filter(matchesSubjectIfNeeded);
+    const baseCandidates = providersAll.filter(matchesServiceType);
 
     let noSchoolMatch = false;
     let providerCandidates = baseCandidates;
@@ -421,13 +420,19 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const explicitProviderId = String(providerId || '').trim();
-    const providerIds = explicitProviderId
-      ? [explicitProviderId]
-      : uniqStrings(providerCandidates.map((p) => p.providerId));
+    const matchingProviders =
+      normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
+        ? providerCandidates.filter((provider) => {
+            const subjects = Array.isArray((provider as any).subjects) ? (provider as any).subjects : [];
+            return subjects.some((sub: any) => normalizedSelectedSubjects.includes(String(sub || '').toLowerCase()));
+          })
+        : providerCandidates;
 
-    if (requestedSubjectKey && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
-      console.log('[SUBJECT_FILTER]', { subject: requestedSubjectKey, providerIds });
+    const explicitProviderId = String(providerId || '').trim();
+    const providerIds = explicitProviderId ? [explicitProviderId] : uniqStrings(matchingProviders.map((p) => p.providerId));
+
+    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && normalizedSelectedSubjects.length > 0) {
+      console.log('[SUBJECT_FILTER]', { subjects: normalizedSelectedSubjects, providerIds });
     }
 
     if (providerIds.length === 0) {

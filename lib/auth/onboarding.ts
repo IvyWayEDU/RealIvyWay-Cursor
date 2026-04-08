@@ -4,6 +4,7 @@ import { getSession } from './session';
 import { getUserById, updateUser } from './storage';
 import { User } from './types';
 import { SCHOOLS, findSchoolByName } from '@/data/schools';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 
 export interface OnboardingData {
   profilePhotoUrl?: string;
@@ -104,6 +105,17 @@ export async function saveOnboardingProgress(
           .replace(/_+/g, '_')
           .replace(/^_+|_+$/g, '');
       });
+    }
+
+    // Canonicalize subjects so matching is consistent across the app.
+    if (Array.isArray(normalizedData.subjects)) {
+      normalizedData.subjects = Array.from(
+        new Set(
+          normalizedData.subjects
+            .map((s) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+            .filter((s): s is string => !!s)
+        )
+      );
     }
 
     // Derive single-source-of-truth fields (provider.school_id / provider.school_name)

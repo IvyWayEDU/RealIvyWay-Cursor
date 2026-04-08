@@ -14,7 +14,6 @@ const COMMON_SUBJECTS = [
   'English',
   'History',
   'Languages',
-  'Test Prep',
 ];
 
 export default function OnboardingStep3Subjects({

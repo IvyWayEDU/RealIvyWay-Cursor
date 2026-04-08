@@ -11,7 +11,6 @@ const SUBJECT_OPTIONS = [
   'Science',
   'History',
   'Languages',
-  'Test Prep',
 ];
 
 export default function Step2ATutoringSubjects({

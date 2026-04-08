@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import type { User } from '@/lib/auth/types';
 
 interface StudentProfileClientProps {
@@ -85,6 +86,14 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900">Profile Information</h2>
           <p className="mt-1 text-sm text-gray-500">Update your profile details.</p>
+          <div className="mt-4">
+            <Link
+              href="/change-password"
+              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+            >
+              Change Password
+            </Link>
+          </div>
         </div>
 
         <div className="p-6 space-y-8">
