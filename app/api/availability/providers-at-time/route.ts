@@ -7,6 +7,7 @@ import { normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { subjectsMatch } from '@/lib/models/subjects';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 
 const QuerySchema = z.object({
   startTimeUTC: z.string().min(1),
@@ -163,7 +164,8 @@ export async function GET(req: NextRequest) {
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
-    const requestedSubject = String(subject || '').trim();
+    const requestedSubjectRaw = String(subject || '').trim();
+    const requestedSubjectKey = requestedSubjectRaw ? normalizeSubjectId(requestedSubjectRaw) : null;
 
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
@@ -172,7 +174,12 @@ export async function GET(req: NextRequest) {
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
-        const services = Array.isArray(servicesRaw) ? servicesRaw.map(norm).filter(Boolean) : [];
+        const services = Array.isArray(servicesRaw)
+          ? servicesRaw
+              .map(norm)
+              .map((s) => (s === 'test_prep' || s === 'testprep' ? 'tutoring' : s))
+              .filter(Boolean)
+          : [];
 
         const schoolIds = Array.from(
           new Set(
@@ -201,7 +208,9 @@ export async function GET(req: NextRequest) {
             [
               ...normalizeStringArray((data as any)?.subjects),
               ...normalizeStringArray((data as any)?.specialties),
-            ].filter(Boolean)
+            ]
+              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
+              .filter((s): s is string => !!s)
           )
         );
 
@@ -257,19 +266,20 @@ export async function GET(req: NextRequest) {
         return p.services.includes('college_counseling') || p.services.includes('counseling') || p.offersVirtualTours === true;
       }
       if (normalizedServiceType === 'tutoring') {
-        return p.services.includes('tutoring') || p.services.includes('test_prep');
+        return p.services.includes('tutoring');
       }
       if (normalizedServiceType === 'test_prep') {
-        return p.services.includes('test_prep') || p.services.includes('tutoring');
+        // Consistency rule: Test Prep is a SUBJECT under tutoring, not a provider service.
+        return p.services.includes('tutoring');
       }
       return p.services.includes(normalizedServiceType);
     };
 
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
-      if (!requestedSubject) return false;
+      if (!requestedSubjectKey) return false;
       if (!Array.isArray(p.subjects) || p.subjects.length === 0) return false;
-      return p.subjects.some((ps) => subjectsMatch(ps, requestedSubject));
+      return p.subjects.some((ps) => subjectsMatch(ps, requestedSubjectKey));
     };
 
     const matchesSchoolStrict = (p: (typeof providersAll)[number]) => {

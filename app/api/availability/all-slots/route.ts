@@ -7,6 +7,7 @@ import { normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { subjectsMatch } from '@/lib/models/subjects';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 
 const QuerySchema = z.object({
@@ -188,6 +189,34 @@ export async function GET(req: NextRequest) {
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
 
+    // Optional: load provider subjects from a dedicated column when present.
+    // Kept in a separate query so older schemas (without providers.subjects) don't 500.
+    const subjectsByProviderId = new Map<string, string[]>();
+    try {
+      const { data: subjectRows, error: subjectErr } = await supabase
+        .from('providers')
+        .select('id, subjects')
+        .order('id', { ascending: true });
+      if (subjectErr) throw subjectErr;
+      for (const r of subjectRows ?? []) {
+        const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+        const subj = (r as any)?.subjects;
+        if (!id || !Array.isArray(subj)) continue;
+        subjectsByProviderId.set(
+          id,
+          Array.from(
+            new Set(
+              subj
+                .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+                .filter((s: any): s is string => !!s)
+            )
+          )
+        );
+      }
+    } catch {
+      // Ignore: column does not exist yet.
+    }
+
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
@@ -195,7 +224,12 @@ export async function GET(req: NextRequest) {
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
-        const services = Array.isArray(servicesRaw) ? servicesRaw.map(norm).filter(Boolean) : [];
+        const services = Array.isArray(servicesRaw)
+          ? servicesRaw
+              .map(norm)
+              .map((s) => (s === 'test_prep' || s === 'testprep' ? 'tutoring' : s))
+              .filter(Boolean)
+          : [];
 
         const schoolIds = Array.from(
           new Set(
@@ -219,12 +253,15 @@ export async function GET(req: NextRequest) {
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
 
-        const subjects = Array.from(
+        const canonicalSubjects = Array.from(
           new Set(
             [
+              ...(subjectsByProviderId.get(id) || []),
               ...normalizeStringArray((data as any)?.subjects),
               ...normalizeStringArray((data as any)?.specialties),
-            ].filter(Boolean)
+            ]
+              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
+              .filter((s): s is string => !!s)
           )
         );
 
@@ -257,7 +294,7 @@ export async function GET(req: NextRequest) {
           schoolNames,
           services,
           offersVirtualTours,
-          subjects,
+          subjects: canonicalSubjects,
         };
       })
       .filter(Boolean) as Array<{
@@ -296,22 +333,21 @@ export async function GET(req: NextRequest) {
         );
       }
       if (normalizedServiceType === 'tutoring') {
-        // Inventory for tutoring + test prep is stored under tutoring slots; be permissive here
-        // so providers who only list test prep are not accidentally excluded from tutoring availability.
-        return p.services.includes('tutoring') || p.services.includes('test_prep');
+        return p.services.includes('tutoring');
       }
       if (normalizedServiceType === 'test_prep') {
-        // Test prep inventory uses tutoring slots, but provider must still offer test prep (or tutoring if you model it that way).
-        return p.services.includes('test_prep') || p.services.includes('tutoring');
+        // Consistency rule: Test Prep is a SUBJECT under tutoring, not a provider service.
+        return p.services.includes('tutoring');
       }
       return p.services.includes(normalizedServiceType);
     };
 
     // Subject filtering must be provider-based (NOT availability_slots.subject).
     // Resolve providerIds from `providers.subjects` (array) and/or `provider_subjects` table.
-    const requestedSubject = String(subject || '').trim();
+    const requestedSubjectRaw = String(subject || '').trim();
+    const requestedSubjectKey = requestedSubjectRaw ? normalizeSubjectId(requestedSubjectRaw) : null;
     let subjectProviderIds: string[] | null = null;
-    if (requestedSubject && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
+    if (requestedSubjectKey && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
       const idSet = new Set<string>();
 
       // Source 1: `providers.subjects` (array column). This may not exist in older schemas.
@@ -319,7 +355,7 @@ export async function GET(req: NextRequest) {
         const { data: subjectRows, error: subjectErr } = await supabase
           .from('providers')
           .select('id, subjects')
-          .contains('subjects', [requestedSubject]);
+          .contains('subjects', [requestedSubjectKey]);
         if (subjectErr) throw subjectErr;
         for (const r of subjectRows ?? []) {
           const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
@@ -334,7 +370,7 @@ export async function GET(req: NextRequest) {
         const { data: joinRows, error: joinErr } = await supabase
           .from('provider_subjects')
           .select('provider_id')
-          .eq('subject', requestedSubject);
+          .eq('subject', requestedSubjectKey);
         if (joinErr) throw joinErr;
         for (const r of joinRows ?? []) {
           const id = typeof (r as any)?.provider_id === 'string' ? String((r as any).provider_id).trim() : '';
@@ -348,7 +384,7 @@ export async function GET(req: NextRequest) {
       if (idSet.size === 0) {
         for (const p of providersAll) {
           if (!Array.isArray(p.subjects) || p.subjects.length === 0) continue;
-          if (p.subjects.some((ps) => subjectsMatch(ps, requestedSubject))) {
+          if (p.subjects.some((ps) => subjectsMatch(ps, requestedSubjectKey))) {
             idSet.add(p.providerId);
           }
         }
@@ -360,7 +396,7 @@ export async function GET(req: NextRequest) {
     const subjectProviderIdSet = subjectProviderIds ? new Set(subjectProviderIds) : null;
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
-      if (!requestedSubject) return false;
+      if (!requestedSubjectKey) return false;
       if (!subjectProviderIdSet) return true;
       return subjectProviderIdSet.has(p.providerId);
     };
@@ -390,8 +426,8 @@ export async function GET(req: NextRequest) {
       ? [explicitProviderId]
       : uniqStrings(providerCandidates.map((p) => p.providerId));
 
-    if (requestedSubject && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
-      console.log('[SUBJECT_FILTER]', { subject: requestedSubject, providerIds });
+    if (requestedSubjectKey && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
+      console.log('[SUBJECT_FILTER]', { subject: requestedSubjectKey, providerIds });
     }
 
     if (providerIds.length === 0) {

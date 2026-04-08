@@ -6,6 +6,7 @@ import { getProviderByUserId, upsertProviderDataByUserId } from '@/lib/providers
 import { handleApiError } from '@/lib/errorHandler';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
 import { SCHOOLS, findSchoolByName } from '@/data/schools';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 
 export async function POST(request: NextRequest) {
   try {
@@ -164,7 +165,16 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         );
       }
-      updateData.subjects = body.subjects;
+      const canonicalSubjects = Array.isArray(body.subjects)
+        ? Array.from(
+            new Set(
+              body.subjects
+                .map((s) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+                .filter((s): s is string => !!s)
+            )
+          )
+        : [];
+      updateData.subjects = canonicalSubjects;
     }
 
     // Update email (only if provided and different)
@@ -187,8 +197,19 @@ export async function POST(request: NextRequest) {
           ? (user as any).services.map((s: any) => String(s ?? '').trim()).filter(Boolean)
           : [];
 
-      const hasCounseling = services.includes('college_counseling');
-      const hasVirtualTours = services.includes('virtual_tour');
+      // Consistency rule: Test Prep is NOT a service.
+      // Preserve backward compatibility by mapping any legacy value to tutoring.
+      const servicesCanonical = Array.from(
+        new Set(
+          services
+            .map((s) => String(s ?? '').trim().toLowerCase().replace(/-/g, '_'))
+            .map((s) => (s === 'test_prep' || s === 'testprep' ? 'tutoring' : s))
+            .filter(Boolean)
+        )
+      );
+
+      const hasCounseling = servicesCanonical.includes('college_counseling');
+      const hasVirtualTours = servicesCanonical.includes('virtual_tour');
 
       // School is required for counseling OR virtual tours.
       const nextSchoolId: string | null =
@@ -214,7 +235,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Keep offersVirtualTours derived from services.
-      updateData.offersVirtualTours = services.includes('virtual_tour');
+      updateData.services = servicesCanonical;
+      updateData.offersVirtualTours = servicesCanonical.includes('virtual_tour');
 
       // Persist canonical provider payload to providers.data as well.
       const existingProvider = await getProviderByUserId(session.userId).catch(() => null);
@@ -223,12 +245,16 @@ export async function POST(request: NextRequest) {
         ? (Array.isArray(body.availability) ? body.availability : [])
         : existingAvailability;
 
+      const providerSubjects = Array.isArray(updateData.subjects) ? updateData.subjects : Array.isArray((user as any)?.subjects) ? (user as any).subjects : [];
+
       const providerData = {
-        services,
+        services: servicesCanonical,
         school: nextSchoolName ?? null,
         schoolId: nextSchoolId ?? null,
         availability: nextAvailability,
-        offersVirtualTours: services.includes('virtual_tour'),
+        offersVirtualTours: servicesCanonical.includes('virtual_tour'),
+        // Provider-level subjects used for availability filtering (canonical keys only).
+        subjects: providerSubjects,
       };
 
       await upsertProviderDataByUserId(session.userId, providerData as any);

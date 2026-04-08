@@ -399,6 +399,23 @@ function normalizeSubjectName(name: string): string {
   return name.trim().toLowerCase();
 }
 
+function formatSubjectLabel(subject: string): string {
+  const s = String(subject || '').trim().toLowerCase().replace(/-/g, '_');
+  if (!s) return '';
+  if (s === 'test_prep') return 'Test Prep';
+  if (s === 'english') return 'English';
+  if (s === 'math') return 'Math';
+  if (s === 'science') return 'Science';
+  if (s === 'history') return 'History';
+  if (s === 'languages') return 'Languages';
+  // Fallback: Title Case words
+  return s
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.slice(0, 1).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
 // Check if at least one active tutor is available for a given subject or test
 // STRICT MATCHING: Only Tutors with exact subject/test match
 // For tutoring: subject-only matching (except Foreign Languages and Computer Science which require topic-level matching)
@@ -683,10 +700,13 @@ export default function BookingFlowClient() {
           return bookingState.subject !== null && bookingState.topic !== null;
         }
         if (bookingState.service === 'counseling') {
-          return resolvedSchool !== null;
+          return !!(bookingState.school?.name || bookingState.schoolName);
         }
         if (bookingState.service === 'virtual-tour') {
-          return resolvedSchool !== null;
+          const schoolName = String(bookingState.school?.name || bookingState.schoolName || '').trim();
+          if (!schoolName) return false;
+          // BLOCK: Virtual tours must have at least 1 provider at this school.
+          return virtualTourProviderCheck.status === 'loaded' && (virtualTourProviderCheck.count ?? 0) > 0;
         }
         return false;
       case 4:
@@ -1060,7 +1080,7 @@ function Step3ChooseSubjectOrSchool({
 }) {
   // Initialize search query with selected school name if it exists
   const [searchQuery, setSearchQuery] = useState(bookingState.schoolName || bookingState.school?.name || '');
-  const [isConfirmed, setIsConfirmed] = useState(!!bookingState.school);
+  const isConfirmed = !!bookingState.school;
   const [recentSchoolIds, setRecentSchoolIds] = useState<string[]>(() => {
     // Load recent school IDs from localStorage if available
     if (typeof window !== 'undefined') {
@@ -1130,18 +1150,58 @@ function Step3ChooseSubjectOrSchool({
     return [];
   })();
 
-  const availableProviders = providersAtSelectedTime || [];
-  const noProvidersAvailable = !availableProviders || availableProviders.length === 0;
+  const noProvidersAvailable =
+    isVirtualTour && virtualTourProviderCheck.status === 'loaded' && (virtualTourProviderCheck.count ?? 0) === 0;
 
-  // Sync confirmation state and search query when bookingState.school changes
+  // Keep input value in sync with the stored school name.
   useEffect(() => {
-    if (bookingState.school) {
-      setIsConfirmed(true);
-      setSearchQuery(bookingState.schoolName || bookingState.school.name);
-    } else {
-      setIsConfirmed(false);
-    }
+    setSearchQuery(bookingState.schoolName || bookingState.school?.name || '');
   }, [bookingState.school, bookingState.schoolName]);
+
+  // Virtual tours: block progression when the selected school has 0 providers.
+  useEffect(() => {
+    if (!isVirtualTour) return;
+    const schoolId = String(bookingState.school?.id || bookingState.schoolId || '').trim();
+    const schoolName = String(bookingState.school?.name || bookingState.schoolName || '').trim();
+
+    if (!schoolId && !schoolName) {
+      setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
+      return;
+    }
+
+    let cancelled = false;
+    setVirtualTourProviderCheck((prev) => ({
+      ...prev,
+      status: 'loading',
+      count: null,
+      suggestedSchools: [],
+    }));
+
+    const params = new URLSearchParams({ serviceType: 'virtual_tour' });
+    if (schoolId) params.set('schoolId', schoolId);
+    if (schoolName) params.set('schoolName', schoolName);
+
+    fetch(`/api/providers?${params.toString()}`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to check providers'))))
+      .then((json) => {
+        if (cancelled) return;
+        const count = Array.isArray(json) ? json.length : 0;
+        setVirtualTourProviderCheck((prev) => ({
+          ...prev,
+          status: 'loaded',
+          count,
+          suggestedSchools: count === 0 ? searchSchools(schoolName).slice(0, 5) : [],
+        }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setVirtualTourProviderCheck((prev) => ({ ...prev, status: 'error', count: null }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isVirtualTour, bookingState.school, bookingState.schoolId, bookingState.schoolName, setVirtualTourProviderCheck]);
 
   const handleSubjectChange = (subject: string | null) => {
     // When subject changes, clear the topic
@@ -1164,12 +1224,12 @@ function Step3ChooseSubjectOrSchool({
     });
   };
 
-  // Confirm school selection - locks it in (must be from canonical list)
+  // Confirm school selection from the canonical list (optional; free text is allowed too).
   const confirmSchool = (school: School) => {
     if (school) {
       updateBookingState({ school, schoolId: school.id, schoolName: school.name });
       saveRecentSchool(school);
-      setIsConfirmed(true);
+      setSearchQuery(school.name);
       setShowSuggestions(false);
     }
   };
@@ -1205,24 +1265,21 @@ function Step3ChooseSubjectOrSchool({
     return allSuggestions.slice(0, 10); // Limit to 10 suggestions
   };
 
-  // Handle input change - allow editing if not confirmed
+  // Handle input change (free text allowed)
   const handleInputChange = (value: string) => {
-    if (isConfirmed) {
-      // If confirmed, allow clearing to start over
-      if (value === '') {
-        updateBookingState({ school: null, schoolId: null, schoolName: null });
-        if (isVirtualTour) {
-          setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
-        }
-        setIsConfirmed(false);
-        setSearchQuery('');
-      } else {
-        // Keep the confirmed value, but allow user to clear it
-        return;
-      }
-    } else {
-      setSearchQuery(value);
-      setShowSuggestions(true);
+    setSearchQuery(value);
+    setShowSuggestions(true);
+    const trimmed = value.trim();
+
+    // Free text is the source of truth unless the user explicitly chooses from the list.
+    updateBookingState({
+      school: null,
+      schoolId: null,
+      schoolName: trimmed ? trimmed : null,
+    });
+
+    if (!trimmed && isVirtualTour) {
+      setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
     }
   };
 
@@ -1316,23 +1373,18 @@ function Step3ChooseSubjectOrSchool({
             <div className="relative">
               <input
                 type="text"
-                placeholder={isConfirmed ? "School confirmed - clear to change" : "Type any college or university name (e.g., Harvard, Oxford)..."}
-                value={isConfirmed ? bookingState.school?.name || '' : searchQuery}
+                placeholder="Type any college or university name (e.g., Harvard, Oxford)..."
+                value={searchQuery}
                 onChange={(e) => handleInputChange(e.target.value)}
                 onFocus={() => {
-                  if (!isConfirmed) {
-                    setShowSuggestions(true);
-                  }
+                  setShowSuggestions(true);
                 }}
                 onBlur={() => {
                   // Delay hiding suggestions to allow clicks
                   setTimeout(() => setShowSuggestions(false), 200);
                 }}
-                readOnly={isConfirmed}
                 className={`w-full px-4 py-3 border rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none transition-colors ${
-                  isConfirmed
-                    ? 'border-[#0088CB] bg-blue-50 text-gray-900 cursor-default'
-                    : 'border-gray-300 bg-white'
+                  isConfirmed ? 'border-[#0088CB] bg-blue-50 text-gray-900' : 'border-gray-300 bg-white'
                 }`}
               />
               {!isConfirmed && filteredSchools.length === 1 && (
@@ -1351,7 +1403,7 @@ function Step3ChooseSubjectOrSchool({
                       setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
                     }
                     setSearchQuery('');
-                    setIsConfirmed(false);
+                    setShowSuggestions(true);
                   }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-1.5 text-[#0088CB] hover:text-[#0077B3] text-sm font-medium transition-colors"
                   aria-label="Change school"
@@ -1363,12 +1415,12 @@ function Step3ChooseSubjectOrSchool({
             <p className="text-sm text-gray-500">
               {isConfirmed
                 ? 'School confirmed. Click "Change" to select a different school.'
-                : 'Search for your school. Select from the dropdown to continue.'}
+                : 'Type any school name. Selecting from the dropdown (if available) improves matching.'}
             </p>
           </div>
 
           {/* Suggestions Dropdown - Show schools from canonical list (only when not confirmed) */}
-          {!isConfirmed && showSuggestions && getSuggestions().length > 0 && (
+          {showSuggestions && getSuggestions().length > 0 && (
             <div className="mt-2 space-y-1 max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
               {getSuggestions().map((school) => {
                 const isRecent = recentSchoolIds.includes(school.id);
@@ -1399,13 +1451,13 @@ function Step3ChooseSubjectOrSchool({
           {!isConfirmed && showSuggestions && searchQuery.trim() && filteredSchools.length === 0 && (
             <div className="mt-2 p-4 bg-amber-50 border border-amber-200 rounded-md">
               <p className="text-sm text-amber-900">
-                No schools found matching &quot;{searchQuery}&quot;. Please select from the dropdown suggestions.
+                No matches in our school list for &quot;{searchQuery}&quot; — you can still continue with this school.
               </p>
             </div>
           )}
 
-          {/* Selected School Summary - Show confirmed school */}
-          {isConfirmed && bookingState.school && (
+          {/* Selected School Summary */}
+          {!!(bookingState.school?.name || bookingState.schoolName) && (
             <div className={`mt-4 p-4 rounded-lg border-2 ${
               isVirtualTour && noProvidersAvailable
                 ? 'bg-amber-50 border-amber-300'
@@ -1422,10 +1474,20 @@ function Step3ChooseSubjectOrSchool({
                   </svg>
                 )}
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-gray-900">Confirmed School:</p>
-                  <p className="text-sm text-gray-700 font-semibold mt-1">{bookingState.school.name}</p>
-                  {isVirtualTour && noProvidersAvailable ? (
-                    <p className="text-xs text-amber-700 mt-1">No providers available for virtual tours at this school</p>
+                  <p className="text-sm font-medium text-gray-900">Selected School:</p>
+                  <p className="text-sm text-gray-700 font-semibold mt-1">
+                    {bookingState.school?.name || bookingState.schoolName}
+                  </p>
+                  {isVirtualTour ? (
+                    virtualTourProviderCheck.status === 'loading' ? (
+                      <p className="text-xs text-gray-500 mt-1">Checking virtual tour availability…</p>
+                    ) : virtualTourProviderCheck.status === 'error' ? (
+                      <p className="text-xs text-amber-700 mt-1">Unable to verify virtual tour availability. Please try again.</p>
+                    ) : noProvidersAvailable ? (
+                      <p className="text-xs text-amber-700 mt-1">We currently don’t offer virtual tours for this school yet.</p>
+                    ) : (
+                      <p className="text-xs text-gray-500 mt-1">You can proceed to the next step</p>
+                    )
                   ) : (
                     <p className="text-xs text-gray-500 mt-1">You can proceed to the next step</p>
                   )}
@@ -1437,7 +1499,7 @@ function Step3ChooseSubjectOrSchool({
                       setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
                     }
                     setSearchQuery('');
-                    setIsConfirmed(false);
+                    setShowSuggestions(true);
                   }}
                   className="text-gray-400 hover:text-gray-600 transition-colors"
                   aria-label="Change school"
@@ -1639,14 +1701,13 @@ function Step4ChooseTimeSlot({
     }
 
     // Build query params
-    const schoolId = bookingState.school?.id || bookingState.schoolId || '';
-    const schoolName = bookingState.school?.name || bookingState.schoolName || '';
-    const params = new URLSearchParams({
-      date: dateStr,
-      ...(serviceType && { serviceType }),
-      ...(bookingState.subject && { subject: bookingState.subject }),
-      ...((schoolId || schoolName) && { schoolId, schoolName }),
-    });
+    const schoolId = String(bookingState.school?.id || bookingState.schoolId || '').trim();
+    const schoolName = String(bookingState.school?.name || bookingState.schoolName || '').trim();
+    const params = new URLSearchParams({ date: dateStr });
+    if (serviceType) params.set('serviceType', serviceType);
+    if (bookingState.subject) params.set('subject', bookingState.subject);
+    if (schoolId) params.set('schoolId', schoolId);
+    if (schoolName) params.set('schoolName', schoolName);
 
     // Counseling is 60 minutes only; pass duration so API returns correct endTimeUTC.
     if (bookingState.service === 'counseling') {
@@ -2002,12 +2063,12 @@ function Step5SelectProvider({
           const startTimeUTC = String((s as any)?.startTimeUTC || '').trim();
           if (!startTimeUTC) continue;
 
-          const params = new URLSearchParams({
-            startTimeUTC,
-            serviceType,
-            ...(subject ? { subject } : {}),
-            ...((schoolId || schoolName) ? { schoolId, schoolName } : {}),
-          });
+          const params = new URLSearchParams({ startTimeUTC, serviceType });
+          if (subject) params.set('subject', subject);
+          const sid = String(schoolId || '').trim();
+          const sname = String(schoolName || '').trim();
+          if (sid) params.set('schoolId', sid);
+          if (sname) params.set('schoolName', sname);
 
           const res = await fetch(`/api/availability/providers-at-time?${params.toString()}`, { cache: 'no-store' });
           if (!res.ok) throw new Error('Failed to load providers');
@@ -2153,7 +2214,7 @@ function Step5SelectProvider({
                                 key={s}
                                 className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700"
                               >
-                                {s}
+                                {formatSubjectLabel(s)}
                               </span>
                             ))}
                           </div>

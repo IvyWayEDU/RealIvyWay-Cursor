@@ -230,7 +230,6 @@ export const supportTicketMessageSchema = z
 const CANONICAL_PROVIDER_SERVICE_TYPES = [
   'tutoring',
   'college_counseling',
-  'test_prep',
   'virtual_tour',
 ] as const;
 
@@ -261,7 +260,9 @@ function normalizeProviderServiceType(input: unknown): string {
     underscored === 'test_preparation' ||
     underscored === 'test_preparations'
   ) {
-    return 'test_prep';
+    // Consistency rule: Test Prep is a SUBJECT specialization, not a service.
+    // Preserve backward compatibility by treating any legacy test_prep service as tutoring.
+    return 'tutoring';
   }
 
   if (

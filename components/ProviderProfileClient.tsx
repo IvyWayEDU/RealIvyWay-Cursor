@@ -3,12 +3,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { User } from '@/lib/auth/types';
 import { SCHOOLS, School, searchSchools } from '@/data/schools';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 
 interface ProviderProfileClientProps {
   initialUser: User;
 }
 
-const COMMON_SUBJECTS = ['Math', 'English', 'Science', 'History', 'Languages', 'Test Prep'];
+const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages', 'test_prep'] as const;
+type SubjectKey = (typeof COMMON_SUBJECT_KEYS)[number];
+
+const SUBJECT_LABELS: Record<SubjectKey, string> = {
+  math: 'Math',
+  english: 'English',
+  science: 'Science',
+  history: 'History',
+  languages: 'Languages',
+  test_prep: 'Test Prep',
+};
 
 const normalizeProviderServiceTypeForSave = (input: unknown): string => {
   const raw = typeof input === 'string' ? input : String(input ?? '');
@@ -16,7 +27,9 @@ const normalizeProviderServiceTypeForSave = (input: unknown): string => {
   if (!v) return '';
   const underscored = v.replace(/[\s-]+/g, '_');
 
-  if (underscored === 'test_prep' || underscored === 'testprep') return 'test_prep';
+  // Consistency rule: Test Prep is a SUBJECT, not a provider service.
+  // Keep backward compatibility by mapping legacy test_prep -> tutoring.
+  if (underscored === 'test_prep' || underscored === 'testprep') return 'tutoring';
   if (underscored === 'virtual_tour' || underscored === 'virtual_tours' || underscored === 'virtualtour' || underscored === 'virtualtours')
     return 'virtual_tour';
   if (underscored === 'counseling' || underscored === 'college_counseling') return 'college_counseling';
@@ -59,7 +72,15 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         : '') || ''
   );
   const [subjects, setSubjects] = useState<string[]>(
-    (initialUser as any).subjects || []
+    Array.isArray((initialUser as any).subjects)
+      ? Array.from(
+          new Set(
+            ((initialUser as any).subjects as any[])
+              .map((s) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+              .filter((s): s is string => !!s)
+          )
+        )
+      : []
   );
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -80,7 +101,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const canEditPhone = !!email;
 
   const hasService = (key: string) => services.includes(key);
-  const isTutor = hasService('tutoring') || hasService('test_prep');
+  const isTutor = hasService('tutoring');
   const needsSchool = hasService('college_counseling') || hasService('virtual_tour');
 
   // Keep dependent fields consistent with enabled services.
@@ -668,15 +689,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
             <label className="flex items-center">
               <input
                 type="checkbox"
-                checked={hasService('test_prep')}
-                onChange={(e) => toggleService('test_prep', e.target.checked)}
-                className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
-              />
-              <span className="ml-2 text-sm text-gray-700">Test Prep</span>
-            </label>
-            <label className="flex items-center">
-              <input
-                type="checkbox"
                 checked={hasService('virtual_tour')}
                 onChange={(e) => toggleService('virtual_tour', e.target.checked)}
                 className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
@@ -743,29 +755,29 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
           </div>
         )}
 
-        {/* Subjects (if Tutoring or Test Prep) */}
+        {/* Subjects (if Tutoring) */}
         {isTutor && (
           <div className="space-y-4">
             <label className="block text-sm font-medium text-gray-700">Subjects</label>
             <div className="flex flex-wrap gap-2">
-              {COMMON_SUBJECTS.map((subject) => (
+              {COMMON_SUBJECT_KEYS.map((subjectKey) => (
                 <button
-                  key={subject}
+                  key={subjectKey}
                   type="button"
                   onClick={() => {
-                    if (subjects.includes(subject)) {
-                      handleRemoveSubject(subject);
+                    if (subjects.includes(subjectKey)) {
+                      handleRemoveSubject(subjectKey);
                     } else {
-                      handleAddSubject(subject);
+                      handleAddSubject(subjectKey);
                     }
                   }}
                   className={`px-3 py-1.5 text-sm font-medium rounded-md border transition-colors ${
-                    subjects.includes(subject)
+                    subjects.includes(subjectKey)
                       ? 'bg-[#0088CB] text-white border-[#0088CB]'
                       : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-[#0088CB] hover:text-[#0088CB]'
                   }`}
                 >
-                  {subject}
+                  {SUBJECT_LABELS[subjectKey]}
                 </button>
               ))}
             </div>
@@ -778,7 +790,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                       key={subject}
                       className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white"
                     >
-                      {subject}
+                      {SUBJECT_LABELS[subject as SubjectKey] ?? subject}
                       <button
                         type="button"
                         onClick={() => handleRemoveSubject(subject)}

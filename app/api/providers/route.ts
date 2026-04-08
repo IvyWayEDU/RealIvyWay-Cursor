@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const serviceTypeRaw = String(searchParams.get('serviceType') || '').trim().toLowerCase().replace(/-/g, '_');
     const schoolId = String(searchParams.get('schoolId') || '').trim();
+    const schoolName = String(searchParams.get('schoolName') || '').trim();
 
     if (serviceTypeRaw || schoolId) {
       const supabase = getSupabaseAdmin();
@@ -57,11 +58,14 @@ export async function GET(request: NextRequest) {
       };
 
       const matchesSchool = (p: any) => {
-        if (!schoolId) return true;
+        if (!schoolId && !schoolName) return true;
         // College counseling: school match is preference-only (ordering + messaging), never a hard filter.
         if (serviceTypeRaw === 'college_counseling' || serviceTypeRaw === 'counseling') return true;
-        const primary = String(p?.school_id || '').trim();
-        return !!primary && primary === schoolId;
+        const primaryId = String(p?.school_id || '').trim();
+        const primaryName = String(p?.school_name || '').trim();
+        if (schoolId) return !!primaryId && primaryId === schoolId;
+        if (schoolName) return !!primaryName && primaryName.toLowerCase() === schoolName.toLowerCase();
+        return true;
       };
 
       const filteredBase = providers.filter(matchesServiceType).filter(matchesSchool);
@@ -81,7 +85,9 @@ export async function GET(request: NextRequest) {
                   id: String(p?.id || ''),
                   providerName,
                   providerSchoolName,
-                  matchesRequestedSchool: !!schoolId && !!providerSchoolId && providerSchoolId === schoolId,
+                  matchesRequestedSchool:
+                    (!!schoolId && !!providerSchoolId && providerSchoolId === schoolId) ||
+                    (!!schoolName && !!providerSchoolName && providerSchoolName.toLowerCase() === schoolName.toLowerCase()),
                 };
               })
               .sort((a: any, b: any) => {
