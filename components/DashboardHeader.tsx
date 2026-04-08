@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Session } from '@/lib/auth/types';
 import ClearDevSessionsButton from '@/components/admin/ClearDevSessionsButton';
 import { Bell } from 'lucide-react';
@@ -47,6 +47,7 @@ function getPageTitle(pathname: string): string {
 
 export default function DashboardHeader({ session }: DashboardHeaderProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const pageTitle = getPageTitle(pathname);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [notifications, setNotifications] = useState<
@@ -151,89 +152,84 @@ export default function DashboardHeader({ session }: DashboardHeaderProps) {
       <div className="flex items-center gap-4">
         <ClearDevSessionsButton />
         <div className="flex items-center gap-3" ref={notificationsRef}>
-          <div className="text-right">
-            <p className="text-sm font-medium text-gray-900">{session.name}</p>
-            <p className="text-xs text-gray-500">{session.email}</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <button
-                type="button"
-                onClick={async () => {
-                  const next = !showNotificationsDropdown;
-                  setShowNotificationsDropdown(next);
-                  if (next) {
-                    await loadNotifications();
-                  }
-                }}
-                className="relative inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-gray-100 text-gray-700"
-                aria-label="Notifications"
-              >
-                <Bell className="h-5 w-5" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#0088CB] px-1 text-[10px] font-semibold leading-none text-white">
-                    {unreadBadgeText}
-                  </span>
-                )}
-              </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={async () => {
+                const next = !showNotificationsDropdown;
+                setShowNotificationsDropdown(next);
+                if (next) {
+                  await loadNotifications();
+                }
+              }}
+              className="relative inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-gray-100 text-gray-700"
+              aria-label="Notifications"
+            >
+              <Bell className="h-5 w-5" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#0088CB] px-1 text-[10px] font-semibold leading-none text-white">
+                  {unreadBadgeText}
+                </span>
+              )}
+            </button>
 
-              {showNotificationsDropdown && (
-                <div className="absolute right-0 mt-2 w-[300px] rounded-lg bg-white shadow-lg ring-1 ring-black/5 z-[80]">
-                  <div className="px-4 py-3 border-b border-gray-100">
-                    <div className="text-sm font-semibold text-gray-900">Notifications</div>
-                  </div>
+            {showNotificationsDropdown && (
+              <div className="absolute right-0 mt-2 w-[300px] rounded-lg bg-white shadow-lg ring-1 ring-black/5 z-[80]">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <div className="text-sm font-semibold text-gray-900">Notifications</div>
+                </div>
 
-                  <div
-                    className={`${
-                      notifications.length > 5 ? 'max-h-80 overflow-y-auto' : ''
-                    }`}
-                  >
-                    {notificationsLoading ? (
-                      <div className="px-4 py-4 text-sm text-gray-500">Loading…</div>
-                    ) : notifications.length === 0 ? (
-                      <div className="px-4 py-4 text-sm text-gray-500">No notifications yet</div>
-                    ) : (
-                      <div className="divide-y divide-gray-100">
-                        {notifications.map(n => (
-                          <button
-                            key={n.id}
-                            type="button"
-                            onClick={async () => {
-                              await markAsRead(n.id);
-                              setShowNotificationsDropdown(false);
-                            }}
-                            className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${
-                              n.read ? 'opacity-75' : ''
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="text-sm font-semibold text-gray-900 truncate">
-                                  {n.title || 'Notification'}
-                                </div>
-                              <div className="text-xs text-gray-600 mt-0.5 overflow-hidden text-ellipsis">
-                                  {n.message}
-                                </div>
+                <div className={`${notifications.length > 5 ? 'max-h-80 overflow-y-auto' : ''}`}>
+                  {notificationsLoading ? (
+                    <div className="px-4 py-4 text-sm text-gray-500">Loading…</div>
+                  ) : notifications.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-gray-500">No notifications yet</div>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {notifications.map(n => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={async () => {
+                            await markAsRead(n.id);
+                            setShowNotificationsDropdown(false);
+                          }}
+                          className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${
+                            n.read ? 'opacity-75' : ''
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-gray-900 truncate">
+                                {n.title || 'Notification'}
                               </div>
-                              <div className="text-[11px] text-gray-500 whitespace-nowrap">
-                                {formatNotificationTime(n.created_at)}
+                              <div className="text-xs text-gray-600 mt-0.5 overflow-hidden text-ellipsis">
+                                {n.message}
                               </div>
                             </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                            <div className="text-[11px] text-gray-500 whitespace-nowrap">
+                              {formatNotificationTime(n.created_at)}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-
-            <div className="h-8 w-8 rounded-full bg-[#0088CB] flex items-center justify-center">
-              <span className="text-sm font-medium text-white">
-                {session.name.charAt(0).toUpperCase()}
-              </span>
-            </div>
+              </div>
+            )}
           </div>
+
+          <button
+            type="button"
+            onClick={() => router.push('/dashboard/profile')}
+            className="h-8 w-8 rounded-full bg-[#0088CB] flex items-center justify-center cursor-pointer transition will-change-transform hover:opacity-90 hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/40"
+            aria-label="Profile"
+          >
+            <span className="text-sm font-medium text-white">
+              {session.name.charAt(0).toUpperCase()}
+            </span>
+          </button>
         </div>
       </div>
     </header>
