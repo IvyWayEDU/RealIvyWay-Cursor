@@ -1,7 +1,6 @@
 'use server';
 
 import crypto from 'crypto';
-import { getUserDisplayInfoById } from '@/lib/sessions/actions';
 import { getSessions } from '@/lib/sessions/storage';
 import type { Session } from '@/lib/models/types';
 import {
@@ -49,6 +48,15 @@ export interface DashboardMessagePreview {
   created_at: string;
 }
 
+export interface DashboardConversationPreview {
+  conversationId: string;
+  otherUserId: string;
+  otherUserName: string;
+  lastMessage: string;
+  lastMessageTime: string; // ISO
+  unreadCount: number;
+}
+
 function normalizePair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
 }
@@ -77,7 +85,10 @@ async function ensureConversation(userAId: string, userBId: string): Promise<Sto
 }
 
 function otherParticipant(conversation: StoredConversation, currentUserId: string): string | null {
-  const [a, b] = conversation.participants;
+  const a = String(conversation.participantA || '').trim();
+  const b = String(conversation.participantB || '').trim();
+  // Conversation list rule:
+  // If current user is participant_a -> otherUserId = participant_b; else -> participant_a.
   if (a === currentUserId) return b;
   if (b === currentUserId) return a;
   return null;
@@ -87,6 +98,48 @@ function makeFriendlyError(message: string): Error {
   const err = new Error(message);
   err.name = 'MessagingRestrictedError';
   return err;
+}
+
+async function getUnreadCountByConversationIdFallback(params: {
+  currentUserId: string;
+  conversationIds: string[];
+}): Promise<Map<string, number>> {
+  const uid = String(params?.currentUserId || '').trim();
+  const conversationIds = (params?.conversationIds ?? []).map((c) => String(c || '').trim()).filter(Boolean);
+  const out = new Map<string, number>();
+  if (!uid || conversationIds.length === 0) return out;
+
+  // Fallback unread logic (until we have per-user last_seen state):
+  // unread = count of messages in the conversation not sent by the current user.
+  const supabase = getSupabaseAdmin();
+  const pageSize = 1000;
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('conversation_id')
+      .in('conversation_id', conversationIds)
+      .neq('sender_id', uid)
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error('[messages.actions] Error loading unread counts (fallback):', { userId: uid, error });
+      throw error;
+    }
+
+    const rows = (data ?? []) as any[];
+    for (const r of rows) {
+      const cid = isNonEmptyString(r?.conversation_id) ? String(r.conversation_id).trim() : '';
+      if (!cid) continue;
+      out.set(cid, (out.get(cid) ?? 0) + 1);
+    }
+
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return out;
 }
 
 function sanitizeMessageText(raw: string): { text: string; changed: boolean } {
@@ -182,28 +235,86 @@ async function assertMessagingAllowed(senderId: string, recipientId: string): Pr
 export async function getInboxConversations(currentUserId: string): Promise<ConversationSummary[]> {
   const mine = await getConversationsForUser(currentUserId);
 
-  const summaries: ConversationSummary[] = [];
-  for (const c of mine) {
-    const participantId = otherParticipant(c, currentUserId);
-    if (!participantId) continue;
+  const conversationIds = mine.map((c) => c.id).filter(Boolean);
+  const unreadByConversationId = await getUnreadCountByConversationIdFallback({
+    currentUserId,
+    conversationIds,
+  });
 
-    const info = await getUserDisplayInfoById(participantId);
-    const participantName = info.displayName || 'User';
+  const participantIds = mine
+    .map((c) => otherParticipant(c, currentUserId))
+    .filter((id): id is string => !!id);
+  const uniqueParticipantIds = Array.from(new Set(participantIds));
 
-    summaries.push({
-      id: c.id,
-      participantId,
-      participantName,
-      serviceType: 'Tutoring',
-      lastMessage: c.lastMessageText || '',
-      lastMessageTime: c.lastMessageAt || c.updatedAt || c.createdAt,
-      unreadCount: 0,
-    });
+  const nameByParticipantId = new Map<string, string>();
+  if (uniqueParticipantIds.length > 0) {
+    const supabase = getSupabaseAdmin();
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, data')
+      .in('id', uniqueParticipantIds as any);
+
+    if (error) {
+      console.error('[messages.actions] Error loading conversation participant names:', {
+        userId: currentUserId,
+        error,
+      });
+    } else {
+      for (const u of (users ?? []) as any[]) {
+        const id = isNonEmptyString(u?.id) ? String(u.id).trim() : '';
+        const data = (u as any)?.data ?? null;
+        const nameRaw =
+          typeof data?.name === 'string'
+            ? String(data.name).trim()
+            : typeof data?.displayName === 'string'
+              ? String(data.displayName).trim()
+              : typeof data?.fullName === 'string'
+                ? String(data.fullName).trim()
+                : typeof data?.profile?.name === 'string'
+                  ? String(data.profile.name).trim()
+                  : '';
+        if (id && nameRaw) nameByParticipantId.set(id, nameRaw);
+      }
+    }
   }
+
+  const summaries: ConversationSummary[] = mine
+    .map((c) => {
+      const participantId = otherParticipant(c, currentUserId);
+      if (!participantId) return null;
+
+      const participantName = (nameByParticipantId.get(participantId) || '').trim() || 'User';
+
+      return {
+        id: c.id,
+        participantId,
+        participantName,
+        serviceType: 'Tutoring',
+        lastMessage: c.lastMessageText || '',
+        lastMessageTime: c.lastMessageAt || c.updatedAt || c.createdAt,
+        unreadCount: unreadByConversationId.get(c.id) ?? 0,
+      } satisfies ConversationSummary;
+    })
+    .filter(Boolean) as ConversationSummary[];
 
   // Newest first
   summaries.sort((a, b) => new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime());
   return summaries;
+}
+
+export async function getDashboardConversationPreviews(userId: string): Promise<DashboardConversationPreview[]> {
+  const uid = String(userId || '').trim();
+  if (!uid) return [];
+
+  const inbox = await getInboxConversations(uid);
+  return inbox.map((c) => ({
+    conversationId: c.id,
+    otherUserId: c.participantId,
+    otherUserName: c.participantName,
+    lastMessage: c.lastMessage,
+    lastMessageTime: c.lastMessageTime,
+    unreadCount: Number(c.unreadCount ?? 0) || 0,
+  }));
 }
 
 /**

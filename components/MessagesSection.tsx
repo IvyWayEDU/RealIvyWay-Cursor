@@ -2,7 +2,10 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { getDashboardLatestMessages, type DashboardMessagePreview } from '@/lib/messages/actions';
+import {
+  getDashboardConversationPreviews,
+  type DashboardConversationPreview,
+} from '@/lib/messages/actions';
 
 type MessagesSectionProps = {
   userId: string;
@@ -29,19 +32,19 @@ function formatPreviewTime(iso: string): string {
 
 export default function MessagesSection({ userId, subtitle, emptySubtitle }: MessagesSectionProps) {
   const [loading, setLoading] = useState(true);
-  const [messages, setMessages] = useState<DashboardMessagePreview[]>([]);
+  const [conversations, setConversations] = useState<DashboardConversationPreview[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     (async () => {
       try {
-        const res = await getDashboardLatestMessages(userId);
+        const res = await getDashboardConversationPreviews(userId);
         if (cancelled) return;
-        setMessages(res);
+        setConversations(res);
       } catch {
         if (cancelled) return;
-        setMessages([]);
+        setConversations([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -52,28 +55,20 @@ export default function MessagesSection({ userId, subtitle, emptySubtitle }: Mes
     };
   }, [userId]);
 
-  useEffect(() => {
-    if (!loading) {
-      console.log('Dashboard messages:', messages);
-    }
-  }, [loading, messages]);
-
-  const hasMessages = messages.length > 0;
+  const hasConversations = conversations.length > 0;
   const previewRows = useMemo(
     () =>
-      messages.slice(0, 5).map((m) => ({
-        ...m,
-        timeLabel: formatPreviewTime(m.created_at),
-        bodyPreview: (m.body || '').trim() || '(No text)',
+      conversations.slice(0, 5).map((c) => ({
+        ...c,
+        timeLabel: formatPreviewTime(c.lastMessageTime),
+        lastMessagePreview: (c.lastMessage || '').trim() || '(No messages yet)',
+        unreadCountSafe: Number(c.unreadCount ?? 0) || 0,
       })),
-    [messages]
+    [conversations]
   );
 
   return (
-    <Link
-      href="/dashboard/messages"
-      className="block overflow-hidden rounded-lg bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow"
-    >
+    <div className="block overflow-hidden rounded-lg bg-white shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
       <div className="px-6 py-4 border-b border-gray-200">
         <div className="flex items-center gap-3">
           <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -106,21 +101,39 @@ export default function MessagesSection({ userId, subtitle, emptySubtitle }: Mes
             <div className="h-4 w-2/3 rounded bg-gray-100" />
             <div className="h-4 w-1/2 rounded bg-gray-100" />
           </div>
-        ) : hasMessages ? (
+        ) : hasConversations ? (
           <div className="space-y-4">
-            {previewRows.map((m) => (
-              <div key={m.id} className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-sm text-gray-900 truncate">{m.bodyPreview}</p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    <span className="font-medium text-gray-600">From:</span> {m.sender_name?.trim() || 'User'}
-                  </p>
+            {previewRows.map((c) => (
+              <Link
+                key={c.conversationId}
+                href={`/dashboard/messages?userId=${encodeURIComponent(c.otherUserId)}`}
+                className="block rounded-md hover:bg-gray-50 px-2 py-2 -mx-2 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">
+                      {c.otherUserName || 'User'}
+                    </p>
+                    <p className="mt-1 text-sm text-gray-600 truncate">{c.lastMessagePreview}</p>
+                  </div>
+                  <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                    <div className="text-xs text-gray-400">{c.timeLabel}</div>
+                    {c.unreadCountSafe > 0 && (
+                      <span
+                        className="h-5 w-5 rounded-full bg-[#0088CB] text-white text-[10px] font-semibold flex items-center justify-center"
+                        aria-label={`${c.unreadCountSafe} unread messages`}
+                      >
+                        {c.unreadCountSafe > 99 ? '99+' : c.unreadCountSafe}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-shrink-0 text-xs text-gray-400">{m.timeLabel}</div>
-              </div>
+              </Link>
             ))}
             <div className="pt-2">
-              <span className="text-sm font-medium text-[#0088CB]">View all messages →</span>
+              <Link href="/dashboard/messages" className="text-sm font-medium text-[#0088CB]">
+                View all messages →
+              </Link>
             </div>
           </div>
         ) : (
@@ -143,7 +156,7 @@ export default function MessagesSection({ userId, subtitle, emptySubtitle }: Mes
           </div>
         )}
       </div>
-    </Link>
+    </div>
   );
 }
 

@@ -12,6 +12,8 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 export interface StoredConversation {
   id: string; // conversationId
+  participantA: string;
+  participantB: string;
   participants: [string, string];
   createdAt: string;
   updatedAt: string;
@@ -71,6 +73,8 @@ function mapConversationRow(
 
   return {
     id,
+    participantA: a,
+    participantB: b,
     participants,
     createdAt,
     updatedAt,
