@@ -1,53 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import path from 'path';
-import crypto from 'crypto';
 
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { getDisplayRole } from '@/lib/auth/utils';
 import { addSupportMessage, createSupportTicket } from '@/lib/support/ticketingStorage';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
-
-const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
-
-function safeExtFromName(name: string): string {
-  const base = (name || '').trim();
-  const idx = base.lastIndexOf('.');
-  if (idx === -1) return '';
-  const ext = base.slice(idx + 1).toLowerCase();
-  if (!ext || ext.length > 10) return '';
-  // Whitelist common image extensions
-  if (!['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return '';
-  return ext;
-}
-
-async function saveUpload(file: File): Promise<string | null> {
-  if (FS_DISABLED_IN_PROD) return null;
-  const uploadsDir = path.join(process.cwd(), 'public', 'support-uploads');
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.mkdir(uploadsDir, { recursive: true });
-  } catch {
-    return null;
-  }
-
-  const ext = safeExtFromName(file.name);
-  const id = typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const filename = ext ? `ticket_${id}.${ext}` : `ticket_${id}`;
-
-  const bytes = Buffer.from(await file.arrayBuffer());
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.writeFile(path.join(uploadsDir, filename), bytes);
-  } catch {
-    return null;
-  }
-
-  // Public URL
-  return `/support-uploads/${filename}`;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -88,7 +45,8 @@ export async function POST(request: NextRequest) {
       if (attachment.size > 5 * 1024 * 1024) {
         return NextResponse.json({ error: 'Attachment too large (max 5MB)' }, { status: 400 });
       }
-      attachmentUrl = await saveUpload(attachment);
+      // Filesystem writes are not supported on Vercel. For now, ignore attachments.
+      attachmentUrl = null;
     }
 
     const ticket = await createSupportTicket({
