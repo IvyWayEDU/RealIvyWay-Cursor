@@ -249,29 +249,32 @@ export async function createPayoutRequest(args: {
 
   if (hasSupabaseConfigured()) {
     const supabase = getSupabaseAdmin();
+    const insertRow: any = {
+      id: pr.id,
+      provider_id: pr.providerId,
+      amount_cents: pr.amountCents,
+      status: pr.status,
+      allocations: pr.allocations ? (pr.allocations as any) : null,
+      allocations_inferred: pr.allocationsInferred === true ? true : null,
+      payout_method: pr.payoutMethod ?? null,
+      payout_destination_masked: pr.payoutDestinationMasked ?? null,
+      payout_destination: pr.payoutDestination ?? null,
+      bank_name: pr.bankName ?? null,
+      bank_account_number: pr.bankAccountNumber ?? null,
+      bank_routing_number: pr.bankRoutingNumber ?? null,
+      bank_country: pr.bankCountry ?? null,
+      account_holder_name: pr.accountHolderName ?? null,
+      wise_email: pr.wiseEmail ?? null,
+      paypal_email: pr.paypalEmail ?? null,
+      zelle_contact: pr.zelleContact ?? null,
+      // created_at/updated_at handled by DB defaults/triggers
+    };
+    // Avoid hard-failing inserts if the column hasn't been migrated yet.
+    if (typeof pr.stripeTransferId === 'string') insertRow.stripe_transfer_id = pr.stripeTransferId;
+
     const { data, error } = await supabase
       .from('payout_requests')
-      .insert({
-        id: pr.id,
-        provider_id: pr.providerId,
-        amount_cents: pr.amountCents,
-        status: pr.status,
-        allocations: pr.allocations ? (pr.allocations as any) : null,
-        allocations_inferred: pr.allocationsInferred === true ? true : null,
-        payout_method: pr.payoutMethod ?? null,
-        payout_destination_masked: pr.payoutDestinationMasked ?? null,
-        payout_destination: pr.payoutDestination ?? null,
-        bank_name: pr.bankName ?? null,
-        bank_account_number: pr.bankAccountNumber ?? null,
-        bank_routing_number: pr.bankRoutingNumber ?? null,
-        bank_country: pr.bankCountry ?? null,
-        account_holder_name: pr.accountHolderName ?? null,
-        wise_email: pr.wiseEmail ?? null,
-        paypal_email: pr.paypalEmail ?? null,
-        zelle_contact: pr.zelleContact ?? null,
-        stripe_transfer_id: pr.stripeTransferId ?? null,
-        // created_at/updated_at handled by DB defaults/triggers
-      } as any)
+      .insert(insertRow)
       .select('*')
       .single();
     if (error) throw error;
