@@ -136,11 +136,12 @@ async function regenerateAvailabilitySlots(params: {
 
   if (slotsToInsert.length === 0) return;
 
-  // Insert concrete inventory (ignore duplicates due to uniqueness constraint).
-  // Supabase JS supports upsert-on-conflict; keep it simple + idempotent.
-  const { error: insErr } = await supabase
-    .from('availability_slots')
-    .upsert(slotsToInsert as any, { onConflict: 'provider_id,start_time,end_time' });
+  for (const slot of slotsToInsert) {
+    console.log("Inserting availability slot:", slot);
+  }
+
+  // Insert concrete inventory (no ON CONFLICT clause).
+  const { error: insErr } = await supabase.from('availability_slots').insert(slotsToInsert as any);
   if (insErr) throw insErr;
 }
 

@@ -1823,6 +1823,8 @@ function Step4ChooseTimeSlot({
       return;
     }
 
+    console.log("Selected date:", selectedDate);
+
     // Build API request
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
     
@@ -1864,6 +1866,9 @@ function Step4ChooseTimeSlot({
         return res.json();
       })
       .then(data => {
+        const slots = Array.isArray(data?.slots) ? data.slots : [];
+        console.log("Slots returned:", slots);
+
         // Convert API slots to display format. Keep providerId on each slot (no re-matching later).
         const rawSlots: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }> = (data.slots || [])
           .map((slot: any) => {

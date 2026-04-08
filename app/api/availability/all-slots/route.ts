@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
-import { bindDateKeyAndMinutesToUtcDate, normalizeServiceType } from '@/lib/availability/engine';
+import { normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { subjectsMatch } from '@/lib/models/subjects';
@@ -16,6 +16,8 @@ const QuerySchema = z.object({
   schoolId: z.string().optional(),
   schoolName: z.string().optional(),
   durationMinutes: z.string().optional(),
+  providerId: z.string().optional(),
+  debugOnlyProviderFilter: z.string().optional(),
 });
 
 // Business rule: all sessions must be booked at least 60 minutes in advance.
@@ -75,13 +77,15 @@ export async function GET(req: NextRequest) {
       schoolId: url.searchParams.get('schoolId') || undefined,
       schoolName: url.searchParams.get('schoolName') || undefined,
       durationMinutes: url.searchParams.get('durationMinutes') || undefined,
+      providerId: url.searchParams.get('providerId') || undefined,
+      debugOnlyProviderFilter: url.searchParams.get('debugOnlyProviderFilter') || undefined,
     });
 
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues?.[0]?.message || 'Invalid query' }, { status: 400 });
     }
 
-    const { date, serviceType, subject, schoolId, schoolName } = parsed.data;
+    const { date, serviceType, subject, schoolId, schoolName, providerId, debugOnlyProviderFilter } = parsed.data;
 
     const normalizedServiceType = normalizeServiceType(serviceType);
     // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
@@ -106,15 +110,47 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const timeZone = 'America/New_York';
-    const rangeStartISO = bindDateKeyAndMinutesToUtcDate(date, 0, timeZone).toISOString();
-    const rangeEndISO = bindDateKeyAndMinutesToUtcDate(date, 24 * 60, timeZone).toISOString();
+    // Date filtering fix: enforce DATE(start_time) = date (UTC date).
+    // In Supabase/Postgres (UTC), this is equivalent to [dateT00:00Z, nextDateT00:00Z).
+    const dayStartUTC = new Date(`${date}T00:00:00.000Z`);
+    const dayEndUTC = new Date(dayStartUTC);
+    dayEndUTC.setUTCDate(dayEndUTC.getUTCDate() + 1);
+    const rangeStartISO = dayStartUTC.toISOString();
+    const rangeEndISO = dayEndUTC.toISOString();
 
     const cutoffUTC = new Date(Date.now() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000);
     const cutoffISO = cutoffUTC.toISOString();
 
     // Provider matching must come from Supabase `providers` table (school + serviceType filters).
     const supabase = getSupabaseAdmin();
+
+    // DEBUG: Temporarily remove ALL filters except provider_id (requires providerId).
+    // This returns ALL slots for that provider (including other dates/service types/is_booked).
+    if (debugOnlyProviderFilter === '1') {
+      const pid = String(providerId || '').trim();
+      if (!pid) {
+        return NextResponse.json(
+          { error: 'providerId is required when debugOnlyProviderFilter=1' },
+          { status: 400, headers: rateHeaders }
+        );
+      }
+
+      const { data: debugRows, error: debugErr } = await supabase
+        .from('availability_slots')
+        .select('provider_id, start_time, end_time')
+        .eq('provider_id', pid)
+        .order('start_time', { ascending: true });
+      if (debugErr) throw debugErr;
+
+      const slots = (debugRows ?? []).map((r: any) => ({
+        providerId: String(r?.provider_id || '').trim(),
+        startTimeUTC: new Date(r?.start_time).toISOString(),
+        endTimeUTC: new Date(r?.end_time).toISOString(),
+      }));
+
+      return NextResponse.json({ slots, providers: [] }, { status: 200, headers: rateHeaders });
+    }
+
     const { data: providerRows, error: providersErr } = await supabase
       .from('providers')
       .select('id, data')
