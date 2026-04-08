@@ -1081,6 +1081,58 @@ function Step3ChooseSubjectOrSchool({
   const isVirtualTour = bookingState.service === 'virtual-tour';
   const availableTopics = bookingState.subject && isTutoring ? TUTORING_TOPICS[bookingState.subject] || [] : [];
 
+  // Provider availability flags (standardized across ALL services).
+  // IMPORTANT: Keep this in sync with the same provider list used for any provider UI/cards in this step.
+  const providersAtSelectedTime: Provider[] = (() => {
+    if (!bookingState.service) return [];
+
+    const service = bookingState.service;
+    const school = bookingState.school || (bookingState.schoolId && bookingState.schoolName ? { id: bookingState.schoolId, name: bookingState.schoolName } : null);
+    const subject = bookingState.subject;
+
+    if (service === 'virtual-tour') {
+      if (!school) return [];
+      // STRICT: Virtual tours require exact schoolId match, no fallback.
+      return MOCK_PROVIDERS.filter((provider) => {
+        if (provider.role !== 'Counselor') return false;
+        if (normalizeSubjectName(provider.subject) !== 'virtual tour') return false;
+        if (!provider.schoolTags || provider.schoolTags.length === 0) return false;
+        return provider.schoolTags.some((tag) => {
+          const tagSchool = SCHOOLS.find((s) => s.id === tag || s.name === tag);
+          return tagSchool?.id === school.id;
+        });
+      });
+    }
+
+    if (service === 'counseling') {
+      if (!school) return [];
+      // Counseling: school-tagged counselors OR general counselors (fallback).
+      return MOCK_PROVIDERS.filter((provider) => {
+        if (provider.role !== 'Counselor') return false;
+        if (normalizeSubjectName(provider.subject) !== 'college counseling') return false;
+        if (!provider.schoolTags || provider.schoolTags.length === 0) return true;
+        return provider.schoolTags.some((tag) => {
+          const tagSchool = SCHOOLS.find((s) => s.id === tag || s.name === tag);
+          return tagSchool?.id === school.id;
+        });
+      });
+    }
+
+    if (service === 'tutoring' || service === 'test-prep') {
+      if (!subject) return [];
+      const normalized = normalizeSubjectName(subject);
+      return MOCK_PROVIDERS.filter((provider) => {
+        if (provider.role !== 'Tutor') return false;
+        return normalizeSubjectName(provider.subject) === normalized;
+      });
+    }
+
+    return [];
+  })();
+
+  const availableProviders = providersAtSelectedTime || [];
+  const noProvidersAvailable = !availableProviders || availableProviders.length === 0;
+
   // Sync confirmation state and search query when bookingState.school changes
   useEffect(() => {
     if (bookingState.school) {
@@ -1355,12 +1407,12 @@ function Step3ChooseSubjectOrSchool({
           {/* Selected School Summary - Show confirmed school */}
           {isConfirmed && bookingState.school && (
             <div className={`mt-4 p-4 rounded-lg border-2 ${
-              isVirtualTour && virtualTourNoProviders
+              isVirtualTour && noProvidersAvailable
                 ? 'bg-amber-50 border-amber-300'
                 : 'bg-blue-50 border-[#0088CB]'
             }`}>
               <div className="flex items-start gap-2">
-                {isVirtualTour && virtualTourNoProviders ? (
+                {isVirtualTour && noProvidersAvailable ? (
                   <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
@@ -1372,7 +1424,7 @@ function Step3ChooseSubjectOrSchool({
                 <div className="flex-1">
                   <p className="text-sm font-medium text-gray-900">Confirmed School:</p>
                   <p className="text-sm text-gray-700 font-semibold mt-1">{bookingState.school.name}</p>
-                  {isVirtualTour && virtualTourNoProviders ? (
+                  {isVirtualTour && noProvidersAvailable ? (
                     <p className="text-xs text-amber-700 mt-1">No providers available for virtual tours at this school</p>
                   ) : (
                     <p className="text-xs text-gray-500 mt-1">You can proceed to the next step</p>
