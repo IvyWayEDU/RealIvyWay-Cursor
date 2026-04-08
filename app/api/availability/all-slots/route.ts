@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
     // RATE LIMITING: Booking/Payment rate limit (prevent rapid-fire availability queries)
     const rateLimitResult = checkBookingRateLimit(req, session.userId, '/api/availability/all-slots');
     const rateHeaders = createRateLimitHeaders(rateLimitResult);
-    if (!rateLimitResult.success) {
+    if (!rateLimitResult.allowed) {
       return NextResponse.json(
         { error: 'Rate limit exceeded. Please wait before querying availability again.' },
         { status: 429, headers: rateHeaders }
