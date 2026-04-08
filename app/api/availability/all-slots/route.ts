@@ -34,22 +34,17 @@ function normalizeStringArray(input: unknown): string[] {
   return input.map((v) => String(v || '').trim()).filter(Boolean);
 }
 
-function schoolMatches(params: {
-  providerSchoolIds: string[];
-  providerSchoolNames: string[];
-  requestedSchoolId?: string;
-  requestedSchoolName?: string;
-}): boolean {
-  const requestedSchoolId = String(params.requestedSchoolId || '').trim();
-  const requestedSchoolName = String(params.requestedSchoolName || '').trim();
-  if (!requestedSchoolId && !requestedSchoolName) return true;
-
-  if (requestedSchoolId) {
-    return params.providerSchoolIds.some((id) => String(id || '').trim() === requestedSchoolId);
+function uniqStrings(input: Array<string | null | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of input) {
+    const s = String(v || '').trim();
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
   }
-
-  const target = requestedSchoolName.toLowerCase();
-  return params.providerSchoolNames.some((n) => String(n || '').trim().toLowerCase() === target);
+  return out;
 }
 
 function overlapsAnyWindow(
@@ -131,12 +126,23 @@ export async function GET(req: NextRequest) {
     }
 
     // Date filtering fix: enforce DATE(start_time) = date (UTC date).
-    // In Supabase/Postgres (UTC), this is equivalent to [dateT00:00Z, nextDateT00:00Z).
-    const dayStartUTC = new Date(`${date}T00:00:00.000Z`);
-    const dayEndUTC = new Date(dayStartUTC);
-    dayEndUTC.setUTCDate(dayEndUTC.getUTCDate() + 1);
-    const rangeStartISO = dayStartUTC.toISOString();
-    const rangeEndISO = dayEndUTC.toISOString();
+    // Enforce filtering within the selected UTC day boundaries.
+    // IMPORTANT: do not mix local-time setters (setHours) with UTC setters (setUTCHours).
+    const selectedDate = new Date(date);
+    const startOfDay = new Date(selectedDate);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(selectedDate);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+
+    console.log("[TIME_FILTER]", {
+      selectedDate,
+      startOfDay,
+      endOfDay
+    });
+
+    const rangeStartISO = startOfDay.toISOString();
+    const rangeEndISO = endOfDay.toISOString();
 
     const cutoffUTC = new Date(Date.now() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000);
     const cutoffISO = cutoffUTC.toISOString();
@@ -301,27 +307,95 @@ export async function GET(req: NextRequest) {
       return p.services.includes(normalizedServiceType);
     };
 
+    // Subject filtering must be provider-based (NOT availability_slots.subject).
+    // Resolve providerIds from `providers.subjects` (array) and/or `provider_subjects` table.
+    const requestedSubject = String(subject || '').trim();
+    let subjectProviderIds: string[] | null = null;
+    if (requestedSubject && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
+      const idSet = new Set<string>();
+
+      // Source 1: `providers.subjects` (array column). This may not exist in older schemas.
+      try {
+        const { data: subjectRows, error: subjectErr } = await supabase
+          .from('providers')
+          .select('id, subjects')
+          .contains('subjects', [requestedSubject]);
+        if (subjectErr) throw subjectErr;
+        for (const r of subjectRows ?? []) {
+          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+          if (id) idSet.add(id);
+        }
+      } catch {
+        // Ignore (schema may not have providers.subjects yet).
+      }
+
+      // Source 2: `provider_subjects` join table. This may not exist in older schemas.
+      try {
+        const { data: joinRows, error: joinErr } = await supabase
+          .from('provider_subjects')
+          .select('provider_id')
+          .eq('subject', requestedSubject);
+        if (joinErr) throw joinErr;
+        for (const r of joinRows ?? []) {
+          const id = typeof (r as any)?.provider_id === 'string' ? String((r as any).provider_id).trim() : '';
+          if (id) idSet.add(id);
+        }
+      } catch {
+        // Ignore (schema may not have provider_subjects yet).
+      }
+
+      // Fallback: existing JSON subjects/specialties in providers.data (keeps old data working).
+      if (idSet.size === 0) {
+        for (const p of providersAll) {
+          if (!Array.isArray(p.subjects) || p.subjects.length === 0) continue;
+          if (p.subjects.some((ps) => subjectsMatch(ps, requestedSubject))) {
+            idSet.add(p.providerId);
+          }
+        }
+      }
+
+      subjectProviderIds = Array.from(idSet);
+    }
+
+    const subjectProviderIdSet = subjectProviderIds ? new Set(subjectProviderIds) : null;
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
-      if (!subject) return false;
-      const providerSubjects = p.subjects;
-      if (!Array.isArray(providerSubjects) || providerSubjects.length === 0) return false;
-      return providerSubjects.some((ps) => subjectsMatch(ps, subject));
+      if (!requestedSubject) return false;
+      if (!subjectProviderIdSet) return true;
+      return subjectProviderIdSet.has(p.providerId);
     };
 
-    const providerCandidates = providersAll
-      .filter(matchesServiceType)
-      .filter(matchesSchoolStrict)
-      .filter(matchesSubjectIfNeeded);
+    const baseCandidates = providersAll.filter(matchesServiceType).filter(matchesSubjectIfNeeded);
+
+    let noSchoolMatch = false;
+    let providerCandidates = baseCandidates;
+
+    // School filtering fallback:
+    // - If a school is requested AND there are providers at that school, show ONLY those providers.
+    // - If a school is requested AND there are NO providers at that school, DO NOT return empty results.
+    //   Instead, fall back to ALL providers offering the service (and subject, if applicable).
+    if (requestedSchoolId || requestedSchoolName) {
+      const schoolMatched = baseCandidates.filter(matchesSchoolStrict);
+      if (schoolMatched.length > 0) {
+        providerCandidates = schoolMatched;
+        noSchoolMatch = false;
+      } else {
+        providerCandidates = baseCandidates;
+        noSchoolMatch = true;
+      }
+    }
 
     const explicitProviderId = String(providerId || '').trim();
-    const providerIds =
-      explicitProviderId
-        ? [explicitProviderId]
-        : providerCandidates.map((p) => p.providerId).filter(Boolean);
+    const providerIds = explicitProviderId
+      ? [explicitProviderId]
+      : uniqStrings(providerCandidates.map((p) => p.providerId));
+
+    if (requestedSubject && (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
+      console.log('[SUBJECT_FILTER]', { subject: requestedSubject, providerIds });
+    }
 
     if (providerIds.length === 0) {
-      return NextResponse.json({ slots: [], providers: [] }, { status: 200, headers: rateHeaders });
+      return NextResponse.json({ slots: [], providers: [], noSchoolMatch: false }, { status: 200, headers: rateHeaders });
     }
 
     const rows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
@@ -336,7 +410,7 @@ export async function GET(req: NextRequest) {
         .eq('is_booked', false)
         .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
         .gte('start_time', rangeStartISO)
-        .lt('start_time', rangeEndISO)
+        .lte('start_time', rangeEndISO)
         .gt('start_time', cutoffISO)
         .order('start_time', { ascending: true });
       if (error) throw error;
@@ -350,7 +424,7 @@ export async function GET(req: NextRequest) {
           .eq('is_booked', false)
           .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
           .gte('start_time', rangeStartISO)
-          .lt('start_time', rangeEndISO)
+          .lte('start_time', rangeEndISO)
           .gt('start_time', cutoffISO)
           .order('start_time', { ascending: true });
         if (error) throw error;
@@ -361,7 +435,7 @@ export async function GET(req: NextRequest) {
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
       (reserved || [])
-        .filter((s) => s.startTime >= rangeStartISO && s.startTime < rangeEndISO)
+        .filter((s) => s.startTime >= rangeStartISO && s.startTime <= rangeEndISO)
         .map((s) => `${s.providerId}|${s.startTime}|${s.endTime}`)
     );
 
@@ -378,7 +452,7 @@ export async function GET(req: NextRequest) {
       windowsByProvider.set(w.providerId, arr);
     }
 
-    const slots = rows
+    const slotsWithProviders = rows
       .map((r) => {
         const providerId = String((r as any)?.provider_id || '').trim();
         const startTimeUTC = new Date((r as any)?.start_time).toISOString();
@@ -399,29 +473,16 @@ export async function GET(req: NextRequest) {
       })
       .filter(Boolean) as Array<{ providerId: string; startTimeUTC: string; endTimeUTC: string }>;
 
-    const providers =
-      normalizedServiceType === 'college_counseling' || normalizedServiceType === 'virtual_tour'
-        ? providerCandidates
-            .map((p) => {
-              const matchesRequestedSchool = schoolMatches({
-                providerSchoolIds: p.schoolIds,
-                providerSchoolNames: p.schoolNames,
-                requestedSchoolId: schoolId,
-                requestedSchoolName: schoolName,
-              });
-              return {
-                providerId: p.providerId,
-                providerName: p.providerName,
-                providerSchoolName: p.providerSchoolName,
-                profile_image_url: p.profile_image_url,
-                avatar: p.avatar,
-                matchesRequestedSchool,
-              };
-            })
-            .sort((a, b) => Number(b.matchesRequestedSchool) - Number(a.matchesRequestedSchool))
-        : [];
+    // TIME-FIRST: return unique times (not provider-specific) so the user selects time first.
+    const uniqByTime = new Map<string, { startTimeUTC: string; endTimeUTC: string }>();
+    for (const s of slotsWithProviders) {
+      const key = `${s.startTimeUTC}|${s.endTimeUTC}`;
+      if (!uniqByTime.has(key)) uniqByTime.set(key, { startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC });
+    }
+    const slots = Array.from(uniqByTime.values());
 
-    return NextResponse.json({ slots, providers }, { status: 200, headers: rateHeaders });
+    // Keep `providers` for backward compatibility, but booking UI no longer uses it.
+    return NextResponse.json({ slots, providers: [], noSchoolMatch }, { status: 200, headers: rateHeaders });
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/availability/all-slots]' });
   }

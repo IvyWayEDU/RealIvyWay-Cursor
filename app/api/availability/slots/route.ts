@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
-import { bindDateKeyAndMinutesToUtcDate, normalizeServiceType } from '@/lib/availability/engine';
+import { normalizeServiceType } from '@/lib/availability/engine';
 import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
     
     const { searchParams } = new URL(request.url);
     const date = searchParams.get('date');
-    const timezone = searchParams.get('timezone') || 'America/New_York';
     const serviceTypeAll = searchParams
       .getAll('serviceType')
       .map((s) => String(s || '').trim())
@@ -107,8 +106,20 @@ export async function GET(request: NextRequest) {
       )
     );
 
-    const dayStartUTC = bindDateKeyAndMinutesToUtcDate(date, 0, timezone);
-    const dayEndUTC = bindDateKeyAndMinutesToUtcDate(date, 24 * 60, timezone);
+    // Enforce filtering within the selected UTC day boundaries.
+    // IMPORTANT: do not mix local-time setters (setHours) with UTC setters (setUTCHours).
+    const selectedDate = new Date(date);
+    const startOfDay = new Date(selectedDate);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(selectedDate);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+
+    console.log("[TIME_FILTER]", {
+      selectedDate,
+      startOfDay,
+      endOfDay
+    });
 
     const leadTimeHours = normalized === 'virtual_tour' ? 2 : 0;
     const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
@@ -121,8 +132,8 @@ export async function GET(request: NextRequest) {
       .select('provider_id, start_time, end_time')
       .eq('is_booked', false)
       .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
-      .gte('start_time', dayStartUTC.toISOString())
-      .lt('start_time', dayEndUTC.toISOString());
+      .gte('start_time', startOfDay.toISOString())
+      .lte('start_time', endOfDay.toISOString());
 
     if (providerId) {
       query = query.eq('provider_id', providerId);
@@ -141,8 +152,8 @@ export async function GET(request: NextRequest) {
     const providerIds = Array.from(
       new Set((rows ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
     );
-    const sessionQueryStartISO = new Date(dayStartUTC.getTime() - 60 * 60 * 1000).toISOString();
-    const sessionQueryEndISO = new Date(dayEndUTC.getTime() + 60 * 60 * 1000).toISOString();
+    const sessionQueryStartISO = new Date(startOfDay.getTime() - 60 * 60 * 1000).toISOString();
+    const sessionQueryEndISO = new Date(endOfDay.getTime() + 60 * 60 * 1000).toISOString();
     const bookedWindows = await getBookedSessionWindowsForProviders({
       providerIds,
       rangeStartISO: sessionQueryStartISO,

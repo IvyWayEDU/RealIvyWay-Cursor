@@ -3,9 +3,7 @@
 import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SCHOOLS, School, searchSchools } from '@/data/schools';
-import { getUserDisplayInfoById } from '@/lib/sessions/actions';
 import { PRICING_CATALOG, formatUsdFromCents } from '@/lib/pricing/catalog';
-import { Star } from 'lucide-react';
 
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
 type Plan = string | null;
@@ -676,40 +674,19 @@ export default function BookingFlowClient() {
       case 2:
         return bookingState.plan !== null;
       case 3:
-        // For tutoring, both subject and topic are required (topic for context/preparation)
-        // Availability checking: subject-only for non-specialized subjects, subject+topic for Foreign Languages and Computer Science
+        // Step 3 collects inputs only. Availability is resolved in Step 4 (time slots),
+        // and provider selection happens in Step 5.
         if (bookingState.service === 'tutoring') {
-          const hasSubjectAndTopic = bookingState.subject !== null && bookingState.topic !== null;
-          if (!hasSubjectAndTopic) return false;
-          
-          // Check if this is Foreign Languages or Computer Science (requires topic-level matching)
-          const isForeignLanguages = bookingState.subject && normalizeSubjectName(bookingState.subject) === 'foreign languages';
-          const isComputerScience = bookingState.subject && normalizeSubjectName(bookingState.subject) === 'computer science';
-          
-          // For Foreign Languages and Computer Science, availability requires both subject AND topic
-          // For all other subjects, availability is subject-only (topic is for context only)
-          const hasAvailability = (isForeignLanguages || isComputerScience)
-            ? hasTutorAvailableForSubject(bookingState.service, bookingState.subject, bookingState.topic)
-            : hasTutorAvailableForSubject(bookingState.service, bookingState.subject);
-          
-          return hasAvailability;
+          return bookingState.subject !== null && bookingState.topic !== null;
         }
-        // For test prep, subject + topic are required (topic is for context/preparation)
-        // Availability logic remains subject-only.
         if (bookingState.service === 'test-prep') {
-          const hasSubjectAndTopic = bookingState.subject !== null && bookingState.topic !== null;
-          const hasAvailability = bookingState.subject !== null && hasTutorAvailableForSubject(bookingState.service, bookingState.subject);
-          return hasSubjectAndTopic && hasAvailability;
+          return bookingState.subject !== null && bookingState.topic !== null;
         }
-        // For counseling, school is required (availability is enforced in Step 4 via backend filtering).
         if (bookingState.service === 'counseling') {
           return resolvedSchool !== null;
         }
-        // For virtual tours, school is required (availability is enforced in Step 4 via backend filtering).
         if (bookingState.service === 'virtual-tour') {
-          // IMPORTANT: also gate on provider existence so users never reach the calendar with an empty state.
-          // Block progression while we are checking, and when count is 0.
-          return resolvedSchool !== null && virtualTourProviderCheck.status === 'loaded' && (virtualTourProviderCheck.count || 0) > 0;
+          return resolvedSchool !== null;
         }
         return false;
       case 4:
@@ -1103,29 +1080,6 @@ function Step3ChooseSubjectOrSchool({
   const isTestPrep = bookingState.service === 'test-prep';
   const isVirtualTour = bookingState.service === 'virtual-tour';
   const availableTopics = bookingState.subject && isTutoring ? TUTORING_TOPICS[bookingState.subject] || [] : [];
-  
-  // Virtual Tours: enforce provider existence BEFORE Step 4 to avoid empty calendar UX.
-  const virtualTourNoProviders =
-    isVirtualTour && virtualTourProviderCheck.status === 'loaded' && virtualTourProviderCheck.count === 0;
-  const virtualTourChecking = isVirtualTour && virtualTourProviderCheck.status === 'loading';
-  
-  // Check if tutor is available for selected subject/test (for Tutoring and Test Prep only)
-  // For Foreign Languages and Computer Science, availability requires topic to be selected
-  // For other subjects, availability is checked by subject only (topic is for context)
-  const hasTutorAvailable = (isTutoring || isTestPrep) && bookingState.subject
-    ? (() => {
-        const isForeignLanguages = normalizeSubjectName(bookingState.subject!) === 'foreign languages';
-        const isComputerScience = normalizeSubjectName(bookingState.subject!) === 'computer science';
-        // For Foreign Languages and Computer Science, need topic for availability check
-        // For other subjects, subject-only check (topic ignored for availability)
-        if ((isForeignLanguages || isComputerScience) && isTutoring) {
-          return bookingState.topic 
-            ? hasTutorAvailableForSubject(bookingState.service, bookingState.subject, bookingState.topic)
-            : false; // Foreign Languages and Computer Science require topic to check availability
-        }
-        return hasTutorAvailableForSubject(bookingState.service, bookingState.subject);
-      })()
-    : true; // Always true if no subject selected yet or not tutoring/test-prep
 
   // Sync confirmation state and search query when bookingState.school changes
   useEffect(() => {
@@ -1135,86 +1089,7 @@ function Step3ChooseSubjectOrSchool({
     } else {
       setIsConfirmed(false);
     }
-  }, [bookingState.school]);
-
-  // Virtual Tours: provider-count check after school selection.
-  // This prevents proceeding to Step 4 (calendar) when a school has zero providers.
-  useEffect(() => {
-    if (!isVirtualTour) {
-      // Reset when switching away from virtual tours
-      if (virtualTourProviderCheck.status !== 'idle') {
-        setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
-      }
-      return;
-    }
-
-    const selectedSchoolId =
-      (bookingState.school && bookingState.school.id) ||
-      (typeof bookingState.schoolId === 'string' ? bookingState.schoolId : '') ||
-      '';
-
-    if (!selectedSchoolId) {
-      setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
-      return;
-    }
-
-    let cancelled = false;
-    (async () => {
-      setVirtualTourProviderCheck({ status: 'loading', count: null, suggestedSchools: [], notifyRequested: false });
-      try {
-        const res = await fetch(
-          `/api/providers?serviceType=virtual_tour&schoolId=${encodeURIComponent(selectedSchoolId)}`,
-          { cache: 'no-store' }
-        );
-        const json = await res.json();
-        const providers: any[] = Array.isArray(json) ? json : Array.isArray((json as any)?.providers) ? (json as any).providers : [];
-        const count = providers.length;
-
-        if (cancelled) return;
-
-        if (count === 0) {
-          // Optional suggestions: other schools that have virtual tour providers.
-          let suggestedSchools: School[] = [];
-          try {
-            const resAll = await fetch(`/api/providers?serviceType=virtual_tour`, { cache: 'no-store' });
-            const jsonAll = await resAll.json();
-            const allProviders: any[] = Array.isArray(jsonAll)
-              ? jsonAll
-              : Array.isArray((jsonAll as any)?.providers)
-                ? (jsonAll as any).providers
-                : [];
-
-            const schoolIds = Array.from(
-              new Set(
-                allProviders
-                  .map((p) => String(p?.school_id || p?.schoolId || '').trim())
-                  .filter((id) => !!id && id !== selectedSchoolId)
-              )
-            );
-
-            suggestedSchools = schoolIds
-              .map((id) => SCHOOLS.find((s) => s.id === id))
-              .filter((s): s is School => !!s)
-              .slice(0, 3);
-          } catch {
-            // Best-effort only
-          }
-
-          setVirtualTourProviderCheck({ status: 'loaded', count: 0, suggestedSchools, notifyRequested: false });
-        } else {
-          setVirtualTourProviderCheck({ status: 'loaded', count, suggestedSchools: [], notifyRequested: false });
-        }
-      } catch {
-        if (cancelled) return;
-        setVirtualTourProviderCheck({ status: 'error', count: null, suggestedSchools: [], notifyRequested: false });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // We intentionally depend on canonical school identity to re-run checks on selection changes.
-  }, [isVirtualTour, bookingState.school?.id, bookingState.schoolId]);
+  }, [bookingState.school, bookingState.schoolName]);
 
   const handleSubjectChange = (subject: string | null) => {
     // When subject changes, clear the topic
@@ -1321,11 +1196,7 @@ function Step3ChooseSubjectOrSchool({
             <select
               value={bookingState.subject || ''}
               onChange={(e) => handleSubjectChange(e.target.value || null)}
-              className={`w-full px-4 py-3 border rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none ${
-                (isTutoring || isTestPrep) && bookingState.subject && !hasTutorAvailable
-                  ? 'border-amber-300 bg-amber-50'
-                  : 'border-gray-300'
-              }`}
+              className="w-full px-4 py-3 border rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none border-gray-300"
             >
               <option value="">Select a subject...</option>
               {(bookingState.service === 'tutoring' ? TUTORING_SUBJECTS : TEST_PREP_SUBJECTS).map((subject) => (
@@ -1334,39 +1205,6 @@ function Step3ChooseSubjectOrSchool({
                 </option>
               ))}
             </select>
-            
-            {/* Error message when no tutors available */}
-            {/* For Foreign Languages and Computer Science, only show error after topic is selected */}
-            {(isTutoring || isTestPrep) && bookingState.subject && (() => {
-              const isForeignLanguages = normalizeSubjectName(bookingState.subject!) === 'foreign languages';
-              const isComputerScience = normalizeSubjectName(bookingState.subject!) === 'computer science';
-              // For Foreign Languages and Computer Science, need topic selected to check availability
-              // For other subjects, check availability immediately after subject selection
-              const shouldShowError = (isForeignLanguages || isComputerScience)
-                ? bookingState.topic !== null && !hasTutorAvailable
-                : !hasTutorAvailable;
-              return shouldShowError;
-            })() && (
-              <div className="mt-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <div className="flex items-start gap-3">
-                  <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <p className="text-sm font-medium text-amber-900">
-                    {(() => {
-                      const normalizedSubject = normalizeSubjectName(bookingState.subject!);
-                      if (normalizedSubject === 'foreign languages') {
-                        return "Whoops, looks like we don't have any tutors available for this language right now. Try another.";
-                      }
-                      if (normalizedSubject === 'computer science') {
-                        return "Whoops, looks like we don't have any tutors available for this Computer Science topic right now. Try another.";
-                      }
-                      return "Whoops, looks like we don't have any tutors available for this subject right now. Try another.";
-                    })()}
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Topic Input (free text) - Tutoring + Test Prep, and only after subject is selected */}
@@ -1475,93 +1313,6 @@ function Step3ChooseSubjectOrSchool({
                 ? 'School confirmed. Click "Change" to select a different school.'
                 : 'Search for your school. Select from the dropdown to continue.'}
             </p>
-            
-            {/* Virtual Tours: provider count check + error state (blocks Next) */}
-            {isVirtualTour && isConfirmed && bookingState.school && (
-              <div className="mt-3 space-y-3">
-                {virtualTourChecking && (
-                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-[#0088CB] mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <p className="text-sm font-medium text-blue-900">Checking provider availability…</p>
-                    </div>
-                  </div>
-                )}
-
-                {virtualTourProviderCheck.status === 'error' && (
-                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <p className="text-sm font-medium text-amber-900">Unable to check providers right now. Please try again.</p>
-                    </div>
-                  </div>
-                )}
-
-                {virtualTourNoProviders && (
-                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-4">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium text-amber-900">
-                          We currently do not have any providers available at this school.
-                        </p>
-                        {virtualTourProviderCheck.notifyRequested && (
-                          <p className="text-sm text-amber-800">Thanks — we’ll reach out when providers are available.</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          updateBookingState({ school: null, schoolId: null, schoolName: null });
-                          setSearchQuery('');
-                          setIsConfirmed(false);
-                          setVirtualTourProviderCheck({ status: 'idle', count: null, suggestedSchools: [], notifyRequested: false });
-                        }}
-                        className="px-4 py-2 rounded-md bg-white border border-amber-200 text-amber-900 hover:bg-amber-100 transition-colors text-sm font-medium"
-                      >
-                        Browse other schools
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVirtualTourProviderCheck((prev) => ({ ...prev, notifyRequested: true }));
-                        }}
-                        className="px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors text-sm font-medium"
-                      >
-                        Notify me when available
-                      </button>
-                    </div>
-
-                    {virtualTourProviderCheck.suggestedSchools.length > 0 && (
-                      <div className="pt-2 border-t border-amber-200">
-                        <p className="text-sm font-medium text-amber-900">Providers are available at:</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {virtualTourProviderCheck.suggestedSchools.map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => confirmSchool(s)}
-                              className="px-3 py-1.5 rounded-full bg-white border border-amber-200 text-amber-900 hover:bg-amber-100 transition-colors text-sm"
-                            >
-                              {s.name}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Suggestions Dropdown - Show schools from canonical list (only when not confirmed) */}
@@ -1662,21 +1413,10 @@ function Step4ChooseTimeSlot({
 }) {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  // IMPORTANT: Each slot is provider-specific (slot includes providerId). Do not group by time
-  // or we'll lose the exact slot→provider mapping needed for correct booking validation.
   const [availableSlots, setAvailableSlots] = useState<
-    Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }>
+    Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string }>
   >([]);
-  const [counselingProviders, setCounselingProviders] = useState<
-    Array<{
-      providerId: string;
-      providerName: string;
-      providerSchoolName: string | null;
-      profile_image_url: string | null;
-      avatar: string | null;
-      matchesRequestedSchool: boolean;
-    }>
-  >([]);
+  const [noSchoolMatch, setNoSchoolMatch] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
 
@@ -1731,9 +1471,9 @@ function Step4ChooseTimeSlot({
     });
   };
 
-  const isSlotSelected = (startTimeUTC: string, endTimeUTC: string, providerId: string): boolean => {
+  const isSlotSelected = (startTimeUTC: string, endTimeUTC: string): boolean => {
     return bookingState.selectedSessions.some(
-      (s) => s.startTimeUTC === startTimeUTC && s.endTimeUTC === endTimeUTC && s.providerId === providerId
+      (s) => s.startTimeUTC === startTimeUTC && s.endTimeUTC === endTimeUTC
     );
   };
 
@@ -1742,32 +1482,34 @@ function Step4ChooseTimeSlot({
     setSelectedDate(date);
   };
 
-  const handleTimeSlotClick = (slot: { startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }) => {
+  const handleTimeSlotClick = (slot: { startTimeUTC: string; endTimeUTC: string; displayTime: string }) => {
     const slotDate = new Date(slot.startTimeUTC);
     if (isNaN(slotDate.getTime())) return;
 
     const existingIndex = bookingState.selectedSessions.findIndex(
       (s) =>
-        s.startTimeUTC === slot.startTimeUTC && s.endTimeUTC === slot.endTimeUTC && s.providerId === slot.providerId
+        s.startTimeUTC === slot.startTimeUTC && s.endTimeUTC === slot.endTimeUTC
     );
 
     if (existingIndex !== -1) {
       // Remove if already selected
-      const updatedSessions = bookingState.selectedSessions.filter((_, index) => index !== existingIndex);
+      const updatedSessions = bookingState.selectedSessions
+        .filter((_, index) => index !== existingIndex)
+        .map((s) => ({ ...s, providerId: null }));
       // Any time changes require re-confirming provider.
       updateBookingState({ selectedSessions: updatedSessions, provider: null });
     } else {
       // Add if not at limit and not already selected
       if (selectedCount < requiredSessions) {
         const newSession: SelectedSession = {
-          providerId: slot.providerId,
+          providerId: null,
           startTimeUTC: slot.startTimeUTC,
           endTimeUTC: slot.endTimeUTC,
           date: slotDate,
           displayTime: slot.displayTime,
           displayString: formatDateString(slotDate, slot.displayTime),
         };
-        const updatedSessions = [...bookingState.selectedSessions, newSession];
+        const updatedSessions = [...bookingState.selectedSessions, newSession].map((s) => ({ ...s, providerId: null }));
         // Any time changes require re-confirming provider.
         updateBookingState({ selectedSessions: updatedSessions, provider: null });
       }
@@ -1775,7 +1517,9 @@ function Step4ChooseTimeSlot({
   };
 
   const handleRemoveSession = (index: number) => {
-    const updatedSessions = bookingState.selectedSessions.filter((_, i) => i !== index);
+    const updatedSessions = bookingState.selectedSessions
+      .filter((_, i) => i !== index)
+      .map((s) => ({ ...s, providerId: null }));
     updateBookingState({ selectedSessions: updatedSessions, provider: null });
   };
 
@@ -1821,7 +1565,7 @@ function Step4ChooseTimeSlot({
   useEffect(() => {
     if (!selectedDate) {
       setAvailableSlots([]);
-      setCounselingProviders([]);
+      setNoSchoolMatch(false);
       return;
     }
 
@@ -1870,9 +1614,10 @@ function Step4ChooseTimeSlot({
       .then(data => {
         const slots = Array.isArray(data?.slots) ? data.slots : [];
         console.log("Slots returned:", slots);
+        setNoSchoolMatch(Boolean(data?.noSchoolMatch));
 
-        // Convert API slots to display format. Keep providerId on each slot (no re-matching later).
-        const rawSlots: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; providerId: string }> = (data.slots || [])
+        // Convert API slots to display format (time-first).
+        const rawSlots: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string }> = (data.slots || [])
           .map((slot: any) => {
           const startDate = new Date(slot.startTimeUTC);
           const formatter = new Intl.DateTimeFormat('en-US', {
@@ -1885,43 +1630,31 @@ function Step4ChooseTimeSlot({
             startTimeUTC: slot.startTimeUTC,
             endTimeUTC: slot.endTimeUTC,
             displayTime: formatter.format(startDate),
-            providerId: slot.providerId,
           };
           })
-          .filter((s: { providerId: string }) => typeof s.providerId === 'string' && s.providerId.length > 0);
+          .filter((s: any) => typeof s.startTimeUTC === 'string' && typeof s.endTimeUTC === 'string');
 
         setAvailableSlots(rawSlots);
-
-        // College Counseling: show ordered provider list + badges (school match influences ordering only).
-        if (bookingState.service === 'counseling') {
-          const rawProviders: any[] = Array.isArray(data?.providers) ? data.providers : [];
-          const normalizedProviders = rawProviders
-            .map((p) => ({
-              providerId: String(p?.providerId || ''),
-              providerName: typeof p?.providerName === 'string' && p.providerName.trim() ? p.providerName.trim() : 'Provider',
-              providerSchoolName:
-                typeof p?.providerSchoolName === 'string' && p.providerSchoolName.trim() ? p.providerSchoolName.trim() : null,
-              profile_image_url:
-                typeof p?.profile_image_url === 'string' && p.profile_image_url.trim() ? p.profile_image_url.trim() : null,
-              avatar: typeof p?.avatar === 'string' && p.avatar.trim() ? p.avatar.trim() : null,
-              matchesRequestedSchool: p?.matchesRequestedSchool === true,
-            }))
-            .filter((p) => !!p.providerId);
-          setCounselingProviders(normalizedProviders);
-        } else {
-          setCounselingProviders([]);
-        }
       })
       .catch(err => {
         console.error('Error fetching slots:', err);
         setSlotsError('Unable to load available time slots. Please try again.');
         setAvailableSlots([]);
-        setCounselingProviders([]);
+        setNoSchoolMatch(false);
       })
       .finally(() => {
         setLoadingSlots(false);
       });
-  }, [selectedDate, bookingState.service, bookingState.subject, bookingState.school, year, month]);
+  }, [
+    selectedDate,
+    bookingState.service,
+    bookingState.subject,
+    bookingState.school,
+    bookingState.schoolId,
+    bookingState.schoolName,
+    year,
+    month,
+  ]);
 
   // Get helper text based on plan
   const getHelperText = (): string => {
@@ -1935,13 +1668,6 @@ function Step4ChooseTimeSlot({
 
   const isComplete = selectedCount === requiredSessions;
   const shouldShowCounter = requiredSessions > 1 || (requiredSessions === 1 && selectedCount > 0);
-  const isCounseling = bookingState.service === 'counseling';
-  const requestedSchoolId = bookingState.school?.id || bookingState.schoolId || '';
-  const counselingHasNoSchoolMatches =
-    isCounseling &&
-    !!requestedSchoolId &&
-    counselingProviders.length > 0 &&
-    counselingProviders.every((p) => p.matchesRequestedSchool !== true);
 
   return (
     <div className="space-y-6">
@@ -2054,60 +1780,11 @@ function Step4ChooseTimeSlot({
           <h3 className="text-lg font-semibold text-gray-900">
             Available times for {monthNames[month]} {selectedDate.getDate()}, {year}
           </h3>
-
-          {/* College Counseling provider list (school match = ordering + messaging only) */}
-          {isCounseling && counselingProviders.length > 0 ? (
-            <div className="space-y-3">
-              {counselingHasNoSchoolMatches ? (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                  <p className="text-sm font-medium text-blue-900">
-                    Oops, we currently don’t have any counselors at this school. Check out these other counselors instead.
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {counselingProviders.map((p) => {
-                  const avatarSrc = p.profile_image_url || p.avatar || '/default-avatar.svg';
-                  return (
-                    <div
-                      key={p.providerId}
-                      className="rounded-lg border border-gray-200 bg-white shadow-sm py-3 px-4"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <img
-                            src={avatarSrc}
-                            alt={`${p.providerName} profile photo`}
-                            className="h-10 w-10 rounded-full object-cover flex-shrink-0"
-                            loading="lazy"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-gray-900 leading-tight break-words">
-                              {p.providerName}
-                            </div>
-                            {p.providerSchoolName ? (
-                              <div className="mt-0.5 text-xs text-gray-500 leading-tight break-words">
-                                {p.providerSchoolName}
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold border flex-shrink-0 ${
-                            p.matchesRequestedSchool
-                              ? 'bg-green-50 text-green-800 border-green-200'
-                              : 'bg-gray-50 text-gray-700 border-gray-200'
-                          }`}
-                        >
-                          {p.matchesRequestedSchool ? 'Attends this school' : 'General College Counselor'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+          {noSchoolMatch ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <p className="text-sm font-medium text-blue-900">
+                We currently don’t have a provider from this school. You can still book a session with one of our available counselors.
+              </p>
             </div>
           ) : null}
 
@@ -2127,12 +1804,12 @@ function Step4ChooseTimeSlot({
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {availableSlots.map((slot) => {
-                const isSelectedTime = isSlotSelected(slot.startTimeUTC, slot.endTimeUTC, slot.providerId);
+                const isSelectedTime = isSlotSelected(slot.startTimeUTC, slot.endTimeUTC);
                 const isDisabled = selectedCount >= requiredSessions && !isSelectedTime;
 
                 return (
                   <button
-                    key={`${slot.startTimeUTC}|${slot.endTimeUTC}|${slot.providerId}`}
+                    key={`${slot.startTimeUTC}|${slot.endTimeUTC}`}
                     onClick={() => handleTimeSlotClick(slot)}
                     disabled={isDisabled}
                     className={`p-4 rounded-lg border-2 transition-all text-center ${
@@ -2219,12 +1896,11 @@ function Step5SelectProvider({
 }) {
   const [eligibleProviders, setEligibleProviders] = useState<
     Array<{
-      userId: string;
-      displayName: string;
+      providerId: string;
+      name: string;
       profileImageUrl: string | null;
-      ratingAverage?: number | null;
-      reviewCount?: number;
       schoolName?: string | null;
+      subjects?: string[];
     }>
   >([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
@@ -2246,44 +1922,86 @@ function Step5SelectProvider({
           return;
         }
 
-        // Slot → Provider matching MUST be exact: use providerId already attached to each selected slot.
-        const providerIds = selectedSlots.map((s) => s.providerId).filter((id): id is string => typeof id === 'string' && id.length > 0);
+        // Determine serviceType for provider availability query (backend expects canonical types).
+        const serviceType =
+          bookingState.service === 'tutoring'
+            ? 'tutoring'
+            : bookingState.service === 'test-prep'
+              ? 'test_prep'
+              : bookingState.service === 'counseling'
+                ? 'college_counseling'
+                : bookingState.service === 'virtual-tour'
+                  ? 'virtual_tour'
+                  : null;
 
-        if (providerIds.length !== selectedSlots.length) {
-          setProvidersError('Missing provider for one or more selected slots. Please go back and re-select your times.');
+        if (!serviceType) {
+          setProvidersError('Service type not set. Please go back and try again.');
           return;
         }
 
-        // Only enforce “Same Provider” rule when bundle > 1. Skip entirely for a single session.
-        const uniqueProviders = new Set(providerIds);
-        if (selectedSlots.length > 1 && uniqueProviders.size > 1) {
-          setProvidersError('No single provider is available for all selected times. Please go back and adjust your times.');
-          return;
+        const schoolId = bookingState.school?.id || bookingState.schoolId || '';
+        const schoolName = bookingState.school?.name || bookingState.schoolName || '';
+        const subject = bookingState.subject || '';
+
+        let noSchoolMatch = false;
+        let intersection: Map<string, (typeof eligibleProviders)[number]> | null = null;
+
+        for (const s of selectedSlots) {
+          const startTimeUTC = String((s as any)?.startTimeUTC || '').trim();
+          if (!startTimeUTC) continue;
+
+          const params = new URLSearchParams({
+            startTimeUTC,
+            serviceType,
+            ...(subject ? { subject } : {}),
+            ...((schoolId || schoolName) ? { schoolId, schoolName } : {}),
+          });
+
+          const res = await fetch(`/api/availability/providers-at-time?${params.toString()}`, { cache: 'no-store' });
+          if (!res.ok) throw new Error('Failed to load providers');
+          const json = await res.json();
+
+          if (json?.noSchoolMatch === true) noSchoolMatch = true;
+
+          const providers: any[] = Array.isArray(json?.providers) ? json.providers : [];
+          const current = new Map<string, (typeof eligibleProviders)[number]>();
+          for (const p of providers) {
+            const providerId = String(p?.providerId || '').trim();
+            if (!providerId) continue;
+            current.set(providerId, {
+              providerId,
+              name: typeof p?.name === 'string' && p.name.trim() ? p.name.trim() : 'Provider',
+              profileImageUrl: typeof p?.profileImageUrl === 'string' && p.profileImageUrl.trim() ? p.profileImageUrl.trim() : null,
+              schoolName: typeof p?.school === 'string' && p.school.trim() ? p.school.trim() : null,
+              subjects: Array.isArray(p?.subjects) ? p.subjects : [],
+            });
+          }
+
+          if (intersection === null) {
+            intersection = current;
+          } else {
+            for (const id of Array.from(intersection.keys())) {
+              if (!current.has(id)) intersection.delete(id);
+            }
+          }
         }
 
-        const providerId = providerIds[0];
-        if (!cancelled && bookingState.provider !== providerId) {
-          updateBookingState({ provider: providerId });
-        }
+        const providersOut = intersection ? Array.from(intersection.values()) : [];
+        const providerIds = providersOut.map((p) => p.providerId);
 
-        const info = await getUserDisplayInfoById(providerId);
+        console.log('[BOOKING_FLOW]', {
+          selectedService: serviceType,
+          selectedTime: selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((s) => s.startTimeUTC),
+          providerIds,
+          noSchoolMatch,
+        });
+
         if (!cancelled) {
-          const reviewCount = typeof (info as any)?.reviewCount === 'number' ? (info as any).reviewCount : 0;
-          const ratingAverageRaw = typeof (info as any)?.ratingAverage === 'number' ? (info as any).ratingAverage : null;
-
-          // Safety: never pass ratingAverage to UI when there are zero reviews.
-          const ratingAverage = reviewCount === 0 ? null : ratingAverageRaw;
-
-          setEligibleProviders([
-            {
-              userId: providerId,
-              displayName: info.displayName || 'Provider',
-              profileImageUrl: info.profileImageUrl ? String(info.profileImageUrl) : null,
-              schoolName: typeof (info as any)?.schoolName === 'string' ? String((info as any).schoolName) : null,
-              ratingAverage,
-              reviewCount,
-            },
-          ]);
+          if (providersOut.length === 0) {
+            setProvidersError('No providers are available for all selected times. Please go back and adjust your times.');
+            return;
+          }
+          setEligibleProviders(providersOut);
         }
       } catch (e) {
         if (!cancelled) setProvidersError('Unable to load providers. Please try again.');
@@ -2296,7 +2014,15 @@ function Step5SelectProvider({
     return () => {
       cancelled = true;
     };
-  }, [bookingState.selectedSessions, bookingState.service, bookingState.subject, bookingState.school, bookingState.plan]);
+  }, [
+    bookingState.selectedSessions,
+    bookingState.service,
+    bookingState.subject,
+    bookingState.school,
+    bookingState.schoolId,
+    bookingState.schoolName,
+    bookingState.plan,
+  ]);
 
   // Keep provider cards consistent across ALL services (college counseling UI is the reference).
   const showProviderSchool = true;
@@ -2326,15 +2052,19 @@ function Step5SelectProvider({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {eligibleProviders.map((p) => {
-            const selected = selectedProviderId === p.userId;
-            const reviewCount = typeof p.reviewCount === 'number' ? p.reviewCount : 0;
-            const ratingAverage = typeof p.ratingAverage === 'number' ? p.ratingAverage : null;
-            const isNewProvider = reviewCount === 0;
-            const isHighlyRated = !isNewProvider && typeof ratingAverage === 'number' && ratingAverage >= 4.8;
+            const selected = selectedProviderId === p.providerId;
+            const subjects = Array.isArray(p.subjects) ? p.subjects.filter((s) => typeof s === 'string' && s.trim()) : [];
             return (
-              <div
-                key={p.userId}
-                className={`w-full text-left p-5 rounded-lg border-2 transition-all ${
+              <button
+                key={p.providerId}
+                type="button"
+                onClick={() => {
+                  updateBookingState({
+                    provider: p.providerId,
+                    selectedSessions: (bookingState.selectedSessions || []).map((s) => ({ ...s, providerId: p.providerId })),
+                  });
+                }}
+                className={`w-full text-left p-5 rounded-lg border-2 transition-all focus:outline-none focus:ring-2 focus:ring-[#0088CB]/40 ${
                   selected
                     ? 'border-[#0088CB] bg-[#0088CB]/10 shadow-sm'
                     : 'border-gray-200 bg-white hover:border-gray-300'
@@ -2346,12 +2076,12 @@ function Step5SelectProvider({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={p.profileImageUrl}
-                        alt={p.displayName}
+                        alt={p.name}
                         className="w-12 h-12 rounded-full object-cover border border-gray-200"
                       />
                     ) : (
                       <div className="w-12 h-12 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-sm font-semibold text-gray-600">
-                        {p.displayName.slice(0, 1).toUpperCase()}
+                        {p.name.slice(0, 1).toUpperCase()}
                       </div>
                     )}
                   </div>
@@ -2359,30 +2089,23 @@ function Step5SelectProvider({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-base font-semibold text-gray-900">{p.displayName}</div>
+                        <div className="text-base font-semibold text-gray-900">{p.name}</div>
                         {showProviderSchool && typeof p.schoolName === 'string' && p.schoolName.trim() ? (
                           <div className="mt-0.5 text-sm text-gray-500">{p.schoolName.trim()}</div>
                         ) : null}
 
-                        <div className="mt-2 flex items-center gap-2 text-sm text-gray-700">
-                          {isNewProvider ? (
-                            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">
-                              New Provider
-                            </span>
-                          ) : isHighlyRated ? (
-                            <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                              <span className="inline-flex items-center gap-1">
-                                Highly Rated
-                                <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+                        {subjects.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {subjects.slice(0, 3).map((s) => (
+                              <span
+                                key={s}
+                                className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700"
+                              >
+                                {s}
                               </span>
-                            </span>
-                          ) : typeof ratingAverage === 'number' ? (
-                            <span className="inline-flex items-center gap-1 text-sm font-medium text-gray-700">
-                              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                              {ratingAverage.toFixed(1)}
-                            </span>
-                          ) : null}
-                        </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
 
                       {selected ? (
@@ -2395,7 +2118,7 @@ function Step5SelectProvider({
                     </div>
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
