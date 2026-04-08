@@ -2,16 +2,12 @@
 
 /**
  * Notification Storage
- * 
+ *
  * Manages dashboard notifications for users.
  * Notifications are dismissible and won't reappear after dismissal.
  */
 
-import path from 'path';
-
-const STORAGE_FILE = path.join(process.cwd(), 'data', 'notifications.json');
-
-const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 export interface Notification {
   id: string;
@@ -24,45 +20,37 @@ export interface Notification {
 }
 
 /**
- * Ensure the data directory exists
+ * Map a DB row to the frontend Notification shape.
  */
-async function ensureDataDirectory(): Promise<void> {
-  if (FS_DISABLED_IN_PROD) return;
-  const dataDir = path.dirname(STORAGE_FILE);
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.mkdir(dataDir, { recursive: true });
-  } catch (error) {
-    // Directory might already exist, ignore error
-  }
+function toNotification(row: {
+  id: string;
+  user_id: string;
+  type: string;
+  message: string;
+  read: boolean;
+  created_at: string;
+}): Notification {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    message: row.message,
+    type: row.type as Notification['type'],
+    createdAt: row.created_at,
+    dismissed: row.read,
+  };
 }
 
-/**
- * Read all notifications from storage
- */
-async function getNotifications(): Promise<Notification[]> {
-  if (FS_DISABLED_IN_PROD) return [];
-  try {
-    await ensureDataDirectory();
-    const fsp = await import('fs/promises');
-    const data = await fsp.readFile(STORAGE_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Save notifications to storage
- */
-async function saveNotifications(notifications: Notification[]): Promise<void> {
-  if (FS_DISABLED_IN_PROD) return;
-  try {
-    await ensureDataDirectory();
-    const fsp = await import('fs/promises');
-    await fsp.writeFile(STORAGE_FILE, JSON.stringify(notifications, null, 2), 'utf-8');
-  } catch {
-    return;
+function titleFromType(type: Notification['type']): string {
+  switch (type) {
+    case 'success':
+      return 'Success';
+    case 'error':
+      return 'Error';
+    case 'warning':
+      return 'Warning';
+    case 'info':
+    default:
+      return 'Info';
   }
 }
 
@@ -70,10 +58,20 @@ async function saveNotifications(notifications: Notification[]): Promise<void> {
  * Get active (non-dismissed) notifications for a user
  */
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
-  const allNotifications = await getNotifications();
-  return allNotifications.filter(
-    notification => notification.userId === userId && !notification.dismissed
-  );
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching notifications:', error);
+    return [];
+  }
+
+  const all = (data ?? []).map(toNotification);
+  return all.filter(n => n.userId === userId && !n.dismissed);
 }
 
 /**
@@ -84,19 +82,38 @@ export async function createNotification(
   message: string,
   type: 'info' | 'success' | 'warning' | 'error' = 'info'
 ): Promise<Notification> {
-  const notification: Notification = {
-    id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    userId,
-    message,
+  const id = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+  const supabase = getSupabaseAdmin();
+
+  const payload = {
+    id,
+    user_id: userId,
     type,
-    createdAt: new Date().toISOString(),
-    dismissed: false,
+    title: titleFromType(type),
+    message,
+    read: false,
   };
 
-  const notifications = await getNotifications();
-  notifications.push(notification);
-  await saveNotifications(notifications);
+  const { data, error } = await supabase
+    .from('notifications')
+    .insert(payload)
+    .select('*')
+    .single();
 
+  if (error || !data) {
+    console.error('Error creating notification:', error);
+    return {
+      id,
+      userId,
+      message,
+      type,
+      createdAt: new Date().toISOString(),
+      dismissed: false,
+    };
+  }
+
+  const notification = toNotification(data as any);
+  console.log("Notification created:", notification);
   return notification;
 }
 
@@ -104,18 +121,22 @@ export async function createNotification(
  * Dismiss a notification
  */
 export async function dismissNotification(notificationId: string, userId: string): Promise<boolean> {
-  const notifications = await getNotifications();
-  const notification = notifications.find(n => n.id === notificationId && n.userId === userId);
+  const supabase = getSupabaseAdmin();
 
-  if (!notification || notification.dismissed) {
+  // MARK AS READ
+  const { data, error } = await supabase
+    .from('notifications')
+    .update({ read: true })
+    .eq('id', notificationId)
+    .eq('user_id', userId)
+    .select('id');
+
+  if (error) {
+    console.error('Error marking notification as read:', error);
     return false;
   }
 
-  notification.dismissed = true;
-  notification.dismissedAt = new Date().toISOString();
-  await saveNotifications(notifications);
-
-  return true;
+  return (data?.length ?? 0) > 0;
 }
 
 
