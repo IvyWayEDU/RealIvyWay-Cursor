@@ -11,6 +11,7 @@
 import { getUserById } from '@/lib/auth/storage';
 import { getSessionsByStudentId } from '@/lib/sessions/storage';
 import { issueReferralCredit } from './actions';
+import { markReferralCreditCompleted } from './storage';
 import { createNotification } from '@/lib/notifications/storage';
 
 const REFERRER_CREDIT_CENTS = 1000; // $10
@@ -59,10 +60,10 @@ export async function issueReferralCreditsForFirstPaidSession(
 
   try {
     // Issue credit to referrer ($10)
-    await issueReferralCredit(referrer.id, REFERRER_CREDIT_CENTS, {
-      referralCode: undefined, // We don't have the original code here
-      referredByUserId: undefined, // This is the referrer, not the referred
+    const referral = await issueReferralCredit(referrer.id, REFERRER_CREDIT_CENTS, {
+      referredUserId: studentId,
     });
+    await markReferralCreditCompleted(referral.id);
 
     // Create notification for referrer
     await createNotification(
@@ -78,10 +79,10 @@ export async function issueReferralCreditsForFirstPaidSession(
 
   try {
     // Issue credit to referred user ($10)
-    await issueReferralCredit(studentId, REFERRED_USER_CREDIT_CENTS, {
-      referralCode: undefined,
-      referredByUserId: user.referredByUserId,
+    const referral = await issueReferralCredit(studentId, REFERRED_USER_CREDIT_CENTS, {
+      referredUserId: studentId,
     });
+    await markReferralCreditCompleted(referral.id);
 
     // Create notification for referred user
     await createNotification(

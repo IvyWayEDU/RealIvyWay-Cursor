@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { resolvePricing, mapToPlanType } from '@/lib/pricing/resolver';
-import { getActiveReferralCredits } from '@/lib/referrals/storage';
 import { handleApiError } from '@/lib/errorHandler';
 
 /**

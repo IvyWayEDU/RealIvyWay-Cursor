@@ -4,263 +4,148 @@
  * Referral Credit Storage
  * 
  * Manages referral credit data storage and retrieval.
- * Uses file-based storage for development (similar to other storage modules).
+ * Uses Supabase/Postgres for storage.
  */
 
 import { ReferralCredit, ReferralCreditStatus } from '@/lib/models/types';
-import path from 'path';
-import { REFERRAL_CREDIT_EXPIRATION_MS } from './constants';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
-const STORAGE_FILE = path.join(process.cwd(), 'data', 'referral-credits.json');
+type ReferralCreditRow = {
+  id: string;
+  user_id: string;
+  referred_user_id: string | null;
+  amount_cents: number;
+  status: ReferralCreditStatus;
+  created_at: string;
+  updated_at: string | null;
+};
 
-const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
-
-/**
- * Ensure the data directory exists
- */
-async function ensureDataDirectory(): Promise<void> {
-  if (FS_DISABLED_IN_PROD) return;
-  const dataDir = path.dirname(STORAGE_FILE);
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.mkdir(dataDir, { recursive: true });
-  } catch (error) {
-    // Directory might already exist, ignore error
-  }
+function mapRowToReferralCredit(row: ReferralCreditRow): ReferralCredit {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    referredUserId: row.referred_user_id,
+    amountCents: row.amount_cents,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
 /**
  * Read all referral credits from storage
  */
 export async function getReferralCredits(): Promise<ReferralCredit[]> {
-  if (FS_DISABLED_IN_PROD) return [];
-  try {
-    await ensureDataDirectory();
-    const fsp = await import('fs/promises');
-    const data = await fsp.readFile(STORAGE_FILE, 'utf-8');
-    const credits: ReferralCredit[] = JSON.parse(data);
-    
-    // Update status for expired credits and recalculate remaining amounts
-    const now = new Date().getTime();
-    const updatedCredits = credits.map(credit => {
-      const expiresAt = new Date(credit.expiresAt).getTime();
-      const isExpired = now > expiresAt;
-      
-      // If expired and not already marked as expired, update status
-      if (isExpired && credit.status !== 'expired' && credit.status !== 'used') {
-        return {
-          ...credit,
-          status: 'expired' as ReferralCreditStatus,
-          remainingAmountCents: 0,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      
-      // Recalculate remaining amount
-      const remaining = Math.max(0, credit.amountCents - credit.usedAmountCents);
-      
-      // Update status based on usage
-      let status = credit.status;
-      if (remaining === 0 && credit.amountCents > 0) {
-        status = credit.usedAmountCents > 0 ? 'used' : 'expired';
-      } else if (remaining > 0 && remaining < credit.amountCents) {
-        status = 'partially_used';
-      } else if (remaining === credit.amountCents && credit.status !== 'expired') {
-        status = 'active';
-      }
-      
-      return {
-        ...credit,
-        remainingAmountCents: remaining,
-        status,
-        updatedAt: credit.updatedAt,
-      };
-    });
-    
-    // Save updated credits if any changes were made
-    const hasChanges = updatedCredits.some((credit, index) => 
-      credit.status !== credits[index].status || 
-      credit.remainingAmountCents !== credits[index].remainingAmountCents
-    );
-    
-    if (hasChanges) {
-      await saveReferralCredits(updatedCredits);
-    }
-    
-    return updatedCredits;
-  } catch {
-    return [];
-  }
-}
+  const supabase = getSupabaseAdmin();
 
-/**
- * Save referral credits to storage
- */
-async function saveReferralCredits(credits: ReferralCredit[]): Promise<void> {
-  if (FS_DISABLED_IN_PROD) return;
-  try {
-    await ensureDataDirectory();
-    const fsp = await import('fs/promises');
-    await fsp.writeFile(STORAGE_FILE, JSON.stringify(credits, null, 2), 'utf-8');
-  } catch {
-    return;
+  const { data, error } = await supabase
+    .from('referral_credits')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to fetch referral credits: ${error.message}`);
   }
+
+  return (data as ReferralCreditRow[]).map(mapRowToReferralCredit);
 }
 
 /**
  * Get referral credits for a specific user
  */
 export async function getReferralCreditsByUserId(userId: string): Promise<ReferralCredit[]> {
-  const allCredits = await getReferralCredits();
-  return allCredits.filter(credit => credit.userId === userId);
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from('referral_credits')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to fetch referral credits for user ${userId}: ${error.message}`);
+  }
+
+  return (data as ReferralCreditRow[]).map(mapRowToReferralCredit);
 }
 
 /**
- * Get active (non-expired, non-used) referral credits for a user
+ * Get "active" referral credits for a user (completed only).
  */
 export async function getActiveReferralCredits(userId: string): Promise<ReferralCredit[]> {
   const userCredits = await getReferralCreditsByUserId(userId);
-  const now = new Date().getTime();
-  
-  return userCredits.filter(credit => {
-    const expiresAt = new Date(credit.expiresAt).getTime();
-    const isExpired = now > expiresAt;
-    const hasRemaining = credit.remainingAmountCents > 0;
-    
-    return !isExpired && hasRemaining && credit.status !== 'used';
-  });
+  return userCredits.filter((c) => c.status === 'completed');
 }
 
 /**
- * Create a new referral credit
- * Sets expiration to 31 days from issuance (per new expiration policy)
+ * Create a new referral credit (pending).
+ *
+ * Inserts into `referral_credits`:
+ * - id
+ * - user_id
+ * - referred_user_id
+ * - amount_cents
+ * - status = 'pending'
  */
 export async function createReferralCredit(
   userId: string,
   amountCents: number,
   options?: {
-    referralCode?: string;
-    referredByUserId?: string;
+    referredUserId?: string | null;
   }
 ): Promise<ReferralCredit> {
-  const now = new Date();
-  // All new credits expire 31 days after issuance
-  const expiresAt = new Date(now.getTime() + REFERRAL_CREDIT_EXPIRATION_MS);
-  
-  const credit: ReferralCredit = {
-    id: `credit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    userId,
-    amountCents,
-    usedAmountCents: 0,
-    remainingAmountCents: amountCents,
-    issuedAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(), // 31 days from issuance
-    status: 'active',
-    referralCode: options?.referralCode,
-    referredByUserId: options?.referredByUserId,
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
+  const supabase = getSupabaseAdmin();
+
+  const id = crypto.randomUUID();
+  const insertPayload = {
+    id,
+    user_id: userId,
+    referred_user_id: options?.referredUserId ?? null,
+    amount_cents: amountCents,
+    status: 'pending' as ReferralCreditStatus,
   };
-  
-  const credits = await getReferralCredits();
-  credits.push(credit);
-  await saveReferralCredits(credits);
-  
-  return credit;
+
+  const { data, error } = await supabase
+    .from('referral_credits')
+    .insert(insertPayload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to create referral credit: ${error.message}`);
+  }
+
+  const referral = mapRowToReferralCredit(data as ReferralCreditRow);
+  console.log("Referral created:", referral);
+  return referral;
 }
 
 /**
- * Update existing referral credits to use 31-day expiration
- * Only updates credits that haven't expired yet
+ * Mark a referral credit as completed.
+ *
+ * update referral_credits set status = 'completed' where id = X
+ */
+export async function markReferralCreditCompleted(id: string): Promise<ReferralCredit> {
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await supabase
+    .from('referral_credits')
+    .update({ status: 'completed' as ReferralCreditStatus })
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to mark referral credit completed (id=${id}): ${error.message}`);
+  }
+
+  return mapRowToReferralCredit(data as ReferralCreditRow);
+}
+
+/**
+ * Legacy migration hook (no-op after Supabase migration).
  */
 export async function updateExistingCreditsTo31Days(): Promise<number> {
-  const credits = await getReferralCredits();
-  const now = new Date().getTime();
-  let updatedCount = 0;
-  
-  const updatedCredits = credits.map(credit => {
-    const expiresAt = new Date(credit.expiresAt).getTime();
-    const isExpired = now > expiresAt;
-    
-    // Only update if not expired and not already using 31-day expiration
-    if (!isExpired && credit.status !== 'expired' && credit.status !== 'used') {
-      const issuedAt = new Date(credit.issuedAt).getTime();
-      const newExpiresAt = new Date(issuedAt + REFERRAL_CREDIT_EXPIRATION_MS);
-      
-      // Only update if the expiration would change (was set to 90 days)
-      const oldExpiresAt = new Date(credit.expiresAt).getTime();
-      const daysDifference = (oldExpiresAt - issuedAt) / (24 * 60 * 60 * 1000);
-      
-      if (Math.abs(daysDifference - 90) < 1) {
-        // Was 90 days, update to 31 days
-        updatedCount++;
-        return {
-          ...credit,
-          expiresAt: newExpiresAt.toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-      }
-    }
-    
-    return credit;
-  });
-  
-  if (updatedCount > 0) {
-    await saveReferralCredits(updatedCredits);
-  }
-  
-  return updatedCount;
-}
-
-/**
- * Use a referral credit (deduct amount)
- */
-export async function useReferralCredit(
-  creditId: string,
-  amountCents: number
-): Promise<ReferralCredit | null> {
-  const credits = await getReferralCredits();
-  const creditIndex = credits.findIndex(c => c.id === creditId);
-  
-  if (creditIndex === -1) {
-    return null;
-  }
-  
-  const credit = credits[creditIndex];
-  
-  // Check if credit is still valid
-  const now = new Date().getTime();
-  const expiresAt = new Date(credit.expiresAt).getTime();
-  if (now > expiresAt) {
-    // Credit expired
-    credits[creditIndex] = {
-      ...credit,
-      status: 'expired',
-      remainingAmountCents: 0,
-      updatedAt: new Date().toISOString(),
-    };
-    await saveReferralCredits(credits);
-    return credits[creditIndex];
-  }
-  
-  // Check if there's enough remaining
-  const available = Math.min(credit.remainingAmountCents, amountCents);
-  const newUsedAmount = credit.usedAmountCents + available;
-  const newRemaining = credit.amountCents - newUsedAmount;
-  
-  const updatedCredit: ReferralCredit = {
-    ...credit,
-    usedAmountCents: newUsedAmount,
-    remainingAmountCents: newRemaining,
-    status: newRemaining === 0 ? 'used' : 'partially_used',
-    usedAt: credit.usedAt || new Date().toISOString(),
-    lastUsedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  
-  credits[creditIndex] = updatedCredit;
-  await saveReferralCredits(credits);
-  
-  return updatedCredit;
+  return 0;
 }
 

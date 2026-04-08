@@ -36,8 +36,7 @@ export async function issueReferralCredit(
   userId: string,
   amountCents: number,
   options?: {
-    referralCode?: string;
-    referredByUserId?: string;
+    referredUserId?: string | null;
   }
 ): Promise<ReferralCredit> {
   return await createReferralCredit(userId, amountCents, options);

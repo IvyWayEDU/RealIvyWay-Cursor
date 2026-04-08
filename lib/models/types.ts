@@ -526,25 +526,17 @@ export interface AuditLog {
 
 /**
  * Referral Credits
- * Stored in dev file-based storage and used for checkout discounts.
+ * Stored in Supabase (`referral_credits`).
  */
-export type ReferralCreditStatus = 'active' | 'partially_used' | 'used' | 'expired';
+export type ReferralCreditStatus = 'pending' | 'completed';
 
 export interface ReferralCredit {
   id: string;
   userId: string;
+  referredUserId: string | null;
   amountCents: number;
-  usedAmountCents: number;
-  remainingAmountCents: number;
-  issuedAt: string; // ISO
-  expiresAt: string; // ISO
   status: ReferralCreditStatus;
-  referralCode?: string;
-  referredByUserId?: string;
-  usedAt?: string;
-  lastUsedAt?: string;
   createdAt: string;
-  updatedAt: string;
-  [key: string]: any;
+  updatedAt?: string | null;
 }
 
