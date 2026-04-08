@@ -211,6 +211,9 @@ export default function WithdrawFormClient({
         // Optimistically update available balance immediately (subtract the withdrawn amount)
         setAvailableBalanceCents(prev => Math.max(0, prev - amountCents));
         setSuccess(true);
+        setIsSubmitting(false);
+        // Ensure we don't show stale balances on the next screen.
+        router.refresh();
         // Redirect to earnings page after a brief delay
         setTimeout(() => {
           router.push('/dashboard/earnings');

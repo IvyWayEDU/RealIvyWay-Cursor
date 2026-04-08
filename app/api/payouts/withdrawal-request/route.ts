@@ -12,6 +12,7 @@ import { getProviderPayoutSummaryFromLedger } from '@/lib/payouts/summary.server
 import { buildPayoutRequestSnapshot, normalizePayoutMethod } from '@/lib/payouts/payout-snapshot';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { getProviderEarningsBalance, updateProviderEarningsBalance } from '@/lib/earnings/balances.server';
 // VALIDATION
 import { validateRequestBody } from '@/lib/validation/utils';
 import { withdrawalRequestSchema } from '@/lib/validation/schemas';
@@ -292,6 +293,40 @@ export async function POST(request: NextRequest) {
       paypalEmail: snapshot.paypalEmail,
       zelleContact: snapshot.zelleContact,
     });
+
+    // Update provider earnings balance: reserve funds for pending payout.
+    // Order requirement: create payout request FIRST, update balance SECOND.
+    try {
+      const balance = await getProviderEarningsBalance(providerId);
+      console.log('Before withdrawal:', balance);
+      const new_available = Math.max(0, Math.floor((balance.availableCents || 0) - requestedCents));
+      const new_pending = Math.max(0, Math.floor((balance.pendingCents || 0) + requestedCents));
+
+      const updated = await updateProviderEarningsBalance({
+        providerId,
+        availableCents: new_available,
+        pendingCents: new_pending,
+        withdrawnCents: balance.withdrawnCents || 0,
+      });
+
+      console.log('After withdrawal:', new_available, new_pending);
+      // Useful in case a trigger modified values (or row was created).
+      console.log('[withdrawal-request] balance row updated', {
+        providerId,
+        availableCents: updated.availableCents,
+        pendingCents: updated.pendingCents,
+        withdrawnCents: updated.withdrawnCents,
+      });
+    } catch (e) {
+      // We do NOT fail the request here because the payout request is already created.
+      // If this fails, we want visibility via logs so we can reconcile.
+      console.error('[withdrawal-request] balance update failed after creating payout request', {
+        providerId,
+        payoutRequestId: String((payoutRequest as any)?.id || ''),
+        requestedCents,
+        error: e,
+      });
+    }
 
     console.log('[api/payouts/withdrawal-request] Withdrawal request created', {
       payoutRequestId: String((payoutRequest as any)?.id || ''),
