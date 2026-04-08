@@ -2,13 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getAuthContext } from '@/lib/auth/session';
 import { getProviderByUserId } from '@/lib/providers/storage';
-import {
-  createPayoutRequest,
-  listProviderPayoutRequests,
-  updatePayoutRequestAllocations,
-  type PayoutAllocation,
-} from '@/lib/payouts/payout-requests.server';
-import { getProviderPayoutSummaryFromLedger } from '@/lib/payouts/summary.server';
+import { createPayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { buildPayoutRequestSnapshot, normalizePayoutMethod } from '@/lib/payouts/payout-snapshot';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
@@ -17,27 +11,6 @@ import { getProviderEarningsBalance, updateProviderEarningsBalance } from '@/lib
 import { validateRequestBody } from '@/lib/validation/utils';
 import { withdrawalRequestSchema } from '@/lib/validation/schemas';
 import type { ProviderProfile } from '@/lib/models/types';
-import { getSessionsByProviderId } from '@/lib/sessions/storage';
-import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
-
-function toIsoOrNull(v: unknown): string | null {
-  const s = typeof v === 'string' ? v : '';
-  if (!s) return null;
-  const d = new Date(s);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-}
-
-function sessionCompletedAtIso(session: any): string | null {
-  return (
-    toIsoOrNull(session?.completedAt) ||
-    toIsoOrNull(session?.actualEndTime) ||
-    toIsoOrNull(session?.endTime) ||
-    toIsoOrNull(session?.scheduledEndTime) ||
-    toIsoOrNull(session?.updatedAt) ||
-    null
-  );
-}
 
 function hasManualPayoutDetails(provider: ProviderProfile | null, normalizedMethod: ReturnType<typeof normalizePayoutMethod>): boolean {
   const p: any = provider as any;
@@ -63,31 +36,6 @@ function hasManualPayoutDetails(provider: ProviderProfile | null, normalizedMeth
     return Boolean(typeof p?.zelleContact === 'string' && p.zelleContact.trim());
   }
   return false;
-}
-
-function allocateFromSessions(args: {
-  sessions: Array<{ sessionId: string; payoutCents: number; completedAtIso: string }>;
-  alreadyAllocatedBySession: Map<string, number>;
-  amountToAllocateCents: number;
-}): { allocations: PayoutAllocation[]; remainingCents: number } {
-  let remaining = Math.max(0, Math.floor(args.amountToAllocateCents || 0));
-  const out: PayoutAllocation[] = [];
-
-  for (const s of args.sessions) {
-    if (remaining <= 0) break;
-    const payout = Math.max(0, Math.floor(s.payoutCents || 0));
-    if (payout <= 0) continue;
-    const used = Math.max(0, Math.floor(args.alreadyAllocatedBySession.get(s.sessionId) || 0));
-    const available = Math.max(0, payout - used);
-    if (available <= 0) continue;
-    const take = Math.min(remaining, available);
-    if (take <= 0) continue;
-    out.push({ sessionId: s.sessionId, amountCents: take });
-    args.alreadyAllocatedBySession.set(s.sessionId, used + take);
-    remaining -= take;
-  }
-
-  return { allocations: out, remainingCents: remaining };
 }
 
 export async function POST(request: NextRequest) {
@@ -164,11 +112,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get available balance from the canonical ledger + payout-request totals.
-    const payoutSummary = await getProviderPayoutSummaryFromLedger(providerId);
-    const availableBalanceCents = payoutSummary.availableBalanceCents || 0;
-
-    const availableCents = Math.max(0, Math.floor(availableBalanceCents));
+    // Source of truth: provider_earnings_balances
+    const balance = await getProviderEarningsBalance(providerId);
+    const availableCents = Math.max(0, Math.floor(balance.availableCents || 0));
     const requestedCents =
       typeof requestedAmount === 'number' && Number.isFinite(requestedAmount)
         ? Math.round(requestedAmount * 100)
@@ -196,146 +142,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build deterministic per-session allocations so admins can trace payouts back to bookings.
-    // This also backfills allocations for legacy payout requests (marked inferred) so new requests
-    // don't overlap already-withdrawn amounts.
-    const providerSessions = await getSessionsByProviderId(providerId);
-    const completed = (providerSessions || [])
-      .filter((s: any) => {
-        const status = String(s?.status || '').trim().toLowerCase();
-        if (status !== 'completed') return false;
-        const providerEarned = (s as any)?.providerEarned;
-        const provider_earned = (s as any)?.provider_earned;
-        const earned =
-          typeof providerEarned === 'boolean' ? providerEarned : typeof provider_earned === 'boolean' ? provider_earned : false;
-        return earned === true;
-      })
-      .map((s: any) => {
-        const completedAtIso = sessionCompletedAtIso(s) || new Date().toISOString();
-        return {
-          sessionId: String(s?.id || '').trim(),
-          completedAtIso,
-          payoutCents: calculateProviderPayoutCentsFromSession(s as any),
-        };
-      })
-      .filter((s) => s.sessionId && s.payoutCents > 0)
-      .sort((a, b) => String(a.completedAtIso).localeCompare(String(b.completedAtIso)));
+    console.log("Withdrawal using balance only");
 
-    console.log("Completed sessions found:", completed.length);
+    // Step 4: Process withdrawal using balance only
+    const new_available = Math.max(0, Math.floor((balance.availableCents || 0) - requestedCents));
+    const new_pending = Math.max(0, Math.floor((balance.pendingCents || 0) + requestedCents));
 
-    const existingRequests = await listProviderPayoutRequests(providerId);
-    const alreadyAllocatedBySession = new Map<string, number>();
-
-    // 1) Apply explicit allocations and infer + persist missing ones (legacy).
-    const existingChrono = [...(existingRequests || [])].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-    for (const r of existingChrono as any[]) {
-      const status = String(r?.status || '').trim().toLowerCase();
-      if (status === 'rejected') continue;
-      const amount = Math.max(0, Math.floor(Number(r?.amountCents || 0)));
-      if (amount <= 0) continue;
-
-      const allocationsRaw = Array.isArray(r?.allocations) ? (r.allocations as any[]) : null;
-      if (allocationsRaw && allocationsRaw.length > 0) {
-        for (const a of allocationsRaw) {
-          const sid = String(a?.sessionId || '').trim();
-          const cents = Math.max(0, Math.floor(Number(a?.amountCents || 0)));
-          if (!sid || cents <= 0) continue;
-          alreadyAllocatedBySession.set(sid, (alreadyAllocatedBySession.get(sid) || 0) + cents);
-        }
-        continue;
-      }
-
-      // Infer allocations for legacy requests (FIFO by completion time) and persist for auditability.
-      const inferred = allocateFromSessions({
-        sessions: completed,
-        alreadyAllocatedBySession,
-        amountToAllocateCents: amount,
-      });
-
-      const inferredAllocations = inferred.allocations;
-      const remainder = inferred.remainingCents;
-      const finalAllocations =
-        remainder > 0 ? [...inferredAllocations, { sessionId: '__unattributed__', amountCents: remainder }] : inferredAllocations;
-
-      await updatePayoutRequestAllocations({
-        id: String(r.id || ''),
-        allocations: finalAllocations,
-        allocationsInferred: true,
-      });
-    }
-
-    // 2) Allocate this new request from remaining per-session earnings.
-    const alloc = allocateFromSessions({
-      sessions: completed,
-      alreadyAllocatedBySession,
-      amountToAllocateCents: requestedCents,
+    await updateProviderEarningsBalance({
+      providerId,
+      availableCents: new_available,
+      pendingCents: new_pending,
+      withdrawnCents: balance.withdrawnCents || 0,
     });
-    const finalAllocations =
-      alloc.remainingCents > 0
-        ? [...alloc.allocations, { sessionId: '__unattributed__', amountCents: alloc.remainingCents }]
-        : alloc.allocations;
-
-    if (alloc.remainingCents > 0) {
-      console.warn('[withdrawal-request] allocations include unattributed remainder', {
-        requestedCents,
-        remainingCents: alloc.remainingCents,
-        completedSessionsCount: completed.length,
-      });
-    }
 
     const snapshot = buildPayoutRequestSnapshot({ provider, bankMeta: null });
 
     // Create payout request (admin-facing approval flow)
-    const payoutRequest = await createPayoutRequest({
-      providerId,
-      amountCents: requestedCents,
-      allocations: finalAllocations,
-      payoutMethod: snapshot.payoutMethod,
-      payoutDestinationMasked: snapshot.payoutDestinationMasked,
-      // legacy (keep populated for older UI codepaths that still look here)
-      payoutDestination: snapshot.payoutDestinationMasked,
-      bankName: snapshot.bankName,
-      bankAccountNumber: snapshot.bankAccountNumber,
-      bankRoutingNumber: snapshot.bankRoutingNumber,
-      bankCountry: snapshot.bankCountry,
-      accountHolderName: snapshot.accountHolderName,
-      wiseEmail: snapshot.wiseEmail,
-      paypalEmail: snapshot.paypalEmail,
-      zelleContact: snapshot.zelleContact,
-    });
-
-    // Update provider earnings balance: reserve funds for pending payout.
-    // Order requirement: create payout request FIRST, update balance SECOND.
+    let payoutRequest: any;
     try {
-      const balance = await getProviderEarningsBalance(providerId);
-      console.log('Before withdrawal:', balance);
-      const new_available = Math.max(0, Math.floor((balance.availableCents || 0) - requestedCents));
-      const new_pending = Math.max(0, Math.floor((balance.pendingCents || 0) + requestedCents));
-
-      const updated = await updateProviderEarningsBalance({
+      payoutRequest = await createPayoutRequest({
         providerId,
-        availableCents: new_available,
-        pendingCents: new_pending,
-        withdrawnCents: balance.withdrawnCents || 0,
-      });
-
-      console.log('After withdrawal:', new_available, new_pending);
-      // Useful in case a trigger modified values (or row was created).
-      console.log('[withdrawal-request] balance row updated', {
-        providerId,
-        availableCents: updated.availableCents,
-        pendingCents: updated.pendingCents,
-        withdrawnCents: updated.withdrawnCents,
+        amountCents: requestedCents,
+        // Step 5: Insert payout request WITHOUT allocations.
+        // allocations = null, allocations_inferred = true
+        allocationsInferred: true,
+        payoutMethod: snapshot.payoutMethod,
+        payoutDestinationMasked: snapshot.payoutDestinationMasked,
+        // legacy (keep populated for older UI codepaths that still look here)
+        payoutDestination: snapshot.payoutDestinationMasked,
+        bankName: snapshot.bankName,
+        bankAccountNumber: snapshot.bankAccountNumber,
+        bankRoutingNumber: snapshot.bankRoutingNumber,
+        bankCountry: snapshot.bankCountry,
+        accountHolderName: snapshot.accountHolderName,
+        wiseEmail: snapshot.wiseEmail,
+        paypalEmail: snapshot.paypalEmail,
+        zelleContact: snapshot.zelleContact,
       });
     } catch (e) {
-      // We do NOT fail the request here because the payout request is already created.
-      // If this fails, we want visibility via logs so we can reconcile.
-      console.error('[withdrawal-request] balance update failed after creating payout request', {
+      // Best-effort rollback: restore the balance if payout request insert fails.
+      console.error('[withdrawal-request] payout request insert failed after balance reservation; attempting rollback', {
         providerId,
-        payoutRequestId: String((payoutRequest as any)?.id || ''),
         requestedCents,
         error: e,
       });
+      try {
+        await updateProviderEarningsBalance({
+          providerId,
+          availableCents: balance.availableCents || 0,
+          pendingCents: balance.pendingCents || 0,
+          withdrawnCents: balance.withdrawnCents || 0,
+        });
+      } catch (rollbackErr) {
+        console.error('[withdrawal-request] rollback failed', { providerId, rollbackErr });
+      }
+      throw e;
     }
 
     console.log('[api/payouts/withdrawal-request] Withdrawal request created', {
