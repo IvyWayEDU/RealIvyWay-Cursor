@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
-import { generateSlots } from '@/lib/availability/slots';
-import { normalizeServiceType } from '@/lib/availability/engine';
+import { readReservedSlotsFile } from '@/lib/availability/store.server';
+import { bindDateKeyAndMinutesToUtcDate, normalizeServiceType } from '@/lib/availability/engine';
 import { handleApiError } from '@/lib/errorHandler';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
+
+type SlotOut = { start: string; end: string; providerId: string };
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +20,6 @@ export async function GET(request: NextRequest) {
     const timezone = searchParams.get('timezone') || 'America/New_York';
     const serviceType = searchParams.get('serviceType') || undefined;
     const subject = searchParams.get('subject') || undefined;
-    const school = searchParams.get('school') || undefined;
     
     // Validate input
     if (!date) {
@@ -45,7 +48,7 @@ export async function GET(request: NextRequest) {
     // Validate/normalize serviceType early to return 400 on bad inputs (not 500)
     try {
       normalizeServiceType(serviceType);
-    } catch (e) {
+    } catch {
       return NextResponse.json(
         { error: 'Invalid serviceType parameter' },
         { status: 400 }
@@ -61,8 +64,81 @@ export async function GET(request: NextRequest) {
       );
     }
     
-    // Generate slots (server-filtered; excludes RESERVED slots)
-    const slots = await generateSlots(date, timezone, serviceType, subject, school);
+    // Fetch concrete slots from Supabase (excludes reserved slots + booked sessions defensively)
+    const normalized = normalizeServiceType(serviceType);
+    const availabilityServiceType =
+      normalized === 'virtual_tour'
+        ? 'college_counseling'
+        : normalized === 'test_prep'
+          ? 'tutoring'
+          : normalized;
+
+    const dayStartUTC = bindDateKeyAndMinutesToUtcDate(date, 0, timezone);
+    const dayEndUTC = bindDateKeyAndMinutesToUtcDate(date, 24 * 60, timezone);
+
+    const leadTimeHours = normalized === 'virtual_tour' ? 2 : 0;
+    const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
+
+    const supabase = getSupabaseAdmin();
+    const { data: rows, error } = await supabase
+      .from('availability_slots')
+      .select('provider_id, start_time, end_time')
+      .eq('is_booked', false)
+      .eq('service_type', availabilityServiceType)
+      .gte('start_time', dayStartUTC.toISOString())
+      .lt('start_time', dayEndUTC.toISOString())
+      .order('start_time', { ascending: true });
+    if (error) throw error;
+
+    const reserved = await readReservedSlotsFile();
+    const reservedSet = new Set(
+      (reserved || [])
+        .filter((s) => (s.status ?? 'available') === 'reserved')
+        .map((s) => `${s.providerId}|${s.startTime}|${s.endTime}`)
+    );
+
+    const providerIds = Array.from(
+      new Set((rows ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
+    );
+    const sessionQueryStartISO = new Date(dayStartUTC.getTime() - 60 * 60 * 1000).toISOString();
+    const sessionQueryEndISO = new Date(dayEndUTC.getTime() + 60 * 60 * 1000).toISOString();
+    const bookedWindows = await getBookedSessionWindowsForProviders({
+      providerIds,
+      rangeStartISO: sessionQueryStartISO,
+      rangeEndISO: sessionQueryEndISO,
+      defaultDurationMinutesWhenMissingEnd: 60,
+    });
+    const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
+    for (const w of bookedWindows || []) {
+      const arr = windowsByProvider.get(w.providerId) || [];
+      arr.push({ sessionStartMs: w.sessionStartMs, sessionEndMs: w.sessionEndMs });
+      windowsByProvider.set(w.providerId, arr);
+    }
+
+    const slots: SlotOut[] = (rows ?? [])
+      .map((r: any) => {
+        const providerId = String(r?.provider_id || '').trim();
+        const start = new Date(r?.start_time).toISOString();
+        const end = new Date(r?.end_time).toISOString();
+        if (!providerId) return null;
+        const startMs = new Date(start).getTime();
+        const endMs = new Date(end).getTime();
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
+        if (startMs < minStartMs) return null;
+
+        const reservationKey = `${providerId}|${start}|${end}`;
+        if (reservedSet.has(reservationKey)) return null;
+
+        const windows = windowsByProvider.get(providerId) || [];
+        if (windows.length > 0) {
+          for (const w of windows) {
+            if (startMs < w.sessionEndMs && endMs > w.sessionStartMs) return null;
+          }
+        }
+
+        return { providerId, start, end } satisfies SlotOut;
+      })
+      .filter(Boolean) as SlotOut[];
     
     return NextResponse.json({ slots });
   } catch (error) {

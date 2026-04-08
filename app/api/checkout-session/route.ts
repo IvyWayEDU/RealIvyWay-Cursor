@@ -448,6 +448,28 @@ export async function GET(request: NextRequest) {
           created.push(s);
           existingByTime.add(key);
 
+          // Mark concrete inventory as booked (best-effort; do not block checkout-session handler).
+          try {
+            const supabase = getSupabaseAdmin();
+            const slotServiceType = serviceType === 'virtual_tour' ? 'college_counseling' : serviceType === 'test_prep' ? 'tutoring' : serviceType;
+            const { error } = await supabase
+              .from('availability_slots')
+              .update({ is_booked: true })
+              .eq('provider_id', providerId)
+              .eq('service_type', slotServiceType)
+              .eq('start_time', startIso)
+              .eq('end_time', endIso)
+              .eq('is_booked', false);
+            if (error) throw error;
+          } catch (e) {
+            console.warn('[AVAILABILITY_SLOT_BOOK_MARK_FAILED]', {
+              providerId,
+              start: startIso,
+              end: endIso,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+
           // Best-effort Zoom meeting creation (must NOT block booking).
           await ensureZoomForSession(s, startIso);
         } catch {

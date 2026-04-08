@@ -679,6 +679,29 @@ export async function POST(request: NextRequest) {
           availabilityId: `${session.id}#${i + 1}`,
         } as any);
 
+        // Mark concrete inventory as booked (best-effort; do not fail webhook).
+        try {
+          const supabase = getSupabaseAdmin();
+          const canonical = (service_type === 'counseling' ? 'college_counseling' : service_type) as any;
+          const slotServiceType = canonical === 'virtual_tour' ? 'college_counseling' : canonical === 'test_prep' ? 'tutoring' : canonical;
+          const { error } = await supabase
+            .from('availability_slots')
+            .update({ is_booked: true })
+            .eq('provider_id', providerId)
+            .eq('service_type', slotServiceType)
+            .eq('start_time', startIso)
+            .eq('end_time', endIso)
+            .eq('is_booked', false);
+          if (error) throw error;
+        } catch (e) {
+          console.warn('[AVAILABILITY_SLOT_BOOK_MARK_FAILED]', {
+            providerId,
+            start: startIso,
+            end: endIso,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+
         // Best-effort Zoom meeting creation (must NOT block booking).
         if (isZoomConfigured()) {
           try {

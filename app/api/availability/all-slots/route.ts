@@ -1,1420 +1,334 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { readAvailabilityFile, readReservedSlotsFile } from '@/lib/availability/store.server';
-import { 
-  normalizeServiceType,
-  normalizeServiceTypeOrNull,
-  normalizeDateKey, 
-  generateSlots,
-  generateSlotsForBlocks,
-  bindDateKeyAndMinutesToUtcDate,
-  timeStringFromMinutes
-} from '@/lib/availability/engine';
-import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
-import { getUsers } from '@/lib/auth/storage';
-import { UserRole } from '@/lib/auth/types';
-import { normalizeSubjectToCanonical, subjectsMatch, normalizeSubjectId } from '@/lib/models/subjects';
-import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
-// RATE LIMITING
-import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
-import { auth } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/requireAuth';
 import { handleApiError } from '@/lib/errorHandler';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { bindDateKeyAndMinutesToUtcDate, normalizeServiceType } from '@/lib/availability/engine';
+import { readReservedSlotsFile } from '@/lib/availability/store.server';
+import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
+import { subjectsMatch } from '@/lib/models/subjects';
+import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 
 const QuerySchema = z.object({
-  date: z.string(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
   serviceType: z.string(),
   subject: z.string().optional(),
-  topic: z.string().optional(),
   schoolId: z.string().optional(),
+  schoolName: z.string().optional(),
+  durationMinutes: z.string().optional(),
 });
-
-/**
- * Service duration mapping (in minutes)
- * These durations are used to generate slots from availability ranges
- * 
- * SERVICE DURATIONS (using normalized snake_case):
- * - tutoring: 60 minutes
- * - test_prep: 60 minutes
- * - college_counseling: 60 minutes (counseling)
- * - virtual_tour: 60 minutes
- */
-const SERVICE_DURATIONS: Record<string, number> = {
-  'tutoring': 60,
-  'test_prep': 60,
-  'college_counseling': 60,
-  'virtual_tour': 60,
-};
 
 // Business rule: all sessions must be booked at least 60 minutes in advance.
 const LEAD_TIME_BUFFER_MINUTES = 60;
 
-/**
- * Get service duration in minutes
- * Normalizes serviceType before lookup
- * Defaults to 60 minutes if service type is unknown
- */
-function getServiceDuration(serviceType: string | null): number {
-  if (!serviceType) return 60;
-  const normalized = normalizeServiceType(serviceType);
-  return SERVICE_DURATIONS[normalized] || 60;
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
-/**
- * Check if a service type is a counselor service
- * Counselor services: college_counseling, virtual_tour
- */
-function isCounselorService(serviceType: string | null): boolean {
-  if (!serviceType) return false;
-  const normalized = normalizeServiceType(serviceType);
-  return normalized === 'college_counseling' || normalized === 'virtual_tour';
+function normalizeStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input.map((v) => String(v || '').trim()).filter(Boolean);
 }
 
-function isValidAvailabilityRowServiceType(value: unknown): value is 'tutoring' | 'college_counseling' | 'virtual_tour' {
-  return value === 'tutoring' || value === 'college_counseling' || value === 'virtual_tour';
-}
+function schoolMatches(params: {
+  providerSchoolIds: string[];
+  providerSchoolNames: string[];
+  requestedSchoolId?: string;
+  requestedSchoolName?: string;
+}): boolean {
+  const requestedSchoolId = String(params.requestedSchoolId || '').trim();
+  const requestedSchoolName = String(params.requestedSchoolName || '').trim();
+  if (!requestedSchoolId && !requestedSchoolName) return true;
 
-const DAY_NAME_TO_INDEX: Record<string, number> = {
-  sunday: 0,
-  monday: 1,
-  tuesday: 2,
-  wednesday: 3,
-  thursday: 4,
-  friday: 5,
-  saturday: 6,
-};
-
-function normalizeDayOfWeek(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    // Common variants:
-    // - 0..6 (Sun..Sat)
-    // - 1..7 (Mon..Sun) → map 7 → 0 for Sunday
-    if (value >= 0 && value <= 6) return value;
-    if (value >= 1 && value <= 7) return value === 7 ? 0 : value;
-    return null;
-  }
-  if (typeof value === 'string') {
-    const v = value.trim().toLowerCase();
-    if (v in DAY_NAME_TO_INDEX) return DAY_NAME_TO_INDEX[v];
-    // Short forms: mon, tue, wed, thu, fri, sat, sun
-    const short = v.slice(0, 3);
-    if (short === 'sun') return 0;
-    if (short === 'mon') return 1;
-    if (short === 'tue') return 2;
-    if (short === 'wed') return 3;
-    if (short === 'thu') return 4;
-    if (short === 'fri') return 5;
-    if (short === 'sat') return 6;
-  }
-  return null;
-}
-
-function blockMatchesRequestedDay(blockDayOfWeek: unknown, requestedDayOfWeek: number): boolean {
-  const normalized = normalizeDayOfWeek(blockDayOfWeek);
-  return normalized !== null && normalized === requestedDayOfWeek;
-}
-
-/**
- * College counseling slot generation:
- * - Do NOT depend on subject
- * - Step size MUST equal durationMinutes
- * - Bind requested date + provider-local times into real UTC Date objects
- */
-function generateCounselingSlotStartISOsFromBlocks(params: {
-  blocksForDay: any[];
-  dateKey: string;
-  timeZone: string;
-  durationMinutes: number;
-}): string[] {
-  const { blocksForDay, dateKey, timeZone, durationMinutes } = params;
-  const out: string[] = [];
-  const stepMs = Math.max(1, durationMinutes) * 60 * 1000;
-
-  for (const block of blocksForDay) {
-    const startMinutes = Number((block as any)?.startMinutes);
-    const endMinutes = Number((block as any)?.endMinutes);
-    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)) continue;
-
-    const startDateTime = bindDateKeyAndMinutesToUtcDate(dateKey, startMinutes, timeZone);
-    let endDateTime = bindDateKeyAndMinutesToUtcDate(dateKey, endMinutes, timeZone);
-
-    // Defensive: if a block crosses midnight, bind end to next day so end > start.
-    if (endDateTime <= startDateTime) {
-      endDateTime = new Date(endDateTime.getTime() + 24 * 60 * 60 * 1000);
-    }
-
-    let cursor = startDateTime;
-    while (cursor.getTime() + stepMs <= endDateTime.getTime()) {
-      out.push(cursor.toISOString());
-      cursor = new Date(cursor.getTime() + stepMs);
-    }
+  if (requestedSchoolId) {
+    return params.providerSchoolIds.some((id) => String(id || '').trim() === requestedSchoolId);
   }
 
-  return Array.from(new Set(out)).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  const target = requestedSchoolName.toLowerCase();
+  return params.providerSchoolNames.some((n) => String(n || '').trim().toLowerCase() === target);
 }
 
-/**
- * Comprehensive provider eligibility check for a booking request
- * 
- * @param provider - Provider user object
- * @param request - Booking request parameters
- * @param request.serviceType - Service type (tutoring, test_prep, college_counseling, virtual_tour)
- * @param request.subject - Subject for tutoring/test_prep (required for these services)
- * @param request.schoolId - School ID for virtual_tour/college_counseling (optional)
- * @returns true if provider is eligible for this request, false otherwise
- */
-function isProviderEligibleForRequest(
-  provider: any,
-  request: {
-    serviceType: string | null;
-    subject: string | null;
-    schoolId?: string | null;
-  }
+function overlapsAnyWindow(
+  slotStartMs: number,
+  slotEndMs: number,
+  windows: Array<{ sessionStartMs: number; sessionEndMs: number }>
 ): boolean {
-  const { serviceType, subject, schoolId } = request;
-  
-  if (!serviceType) {
-    return false; // Service type is required
+  for (const w of windows) {
+    if (slotStartMs < w.sessionEndMs && slotEndMs > w.sessionStartMs) return true;
   }
-  
-  const normalized = normalizeServiceType(serviceType);
-  
-  // Tutoring and test_prep require subject matching
-  if (normalized === 'tutoring' || normalized === 'test_prep') {
-    if (!subject) {
-      return false; // Subject is required for tutoring/test_prep
-    }
-    
-    // Check service eligibility first
-    if (!isProviderEligibleForService(provider, normalized)) {
-      return false;
-    }
-    
-    // Check subject matching
-    return doesProviderTeachSubject(provider, subject);
-  }
-  
-  // Virtual tours require counselor eligibility and school matching
-  if (normalized === 'virtual_tour') {
-    if (!isProviderEligibleForService(provider, normalized)) {
-      return false;
-    }
-    
-    // If schoolId is provided, provider must have that school (EXACT match by provider.school_id).
-    if (schoolId) {
-      const pid =
-        (typeof provider?.data?.schoolId === 'string' && provider.data.schoolId.trim()
-          ? provider.data.schoolId.trim()
-          : null) ??
-        (typeof provider?.school_id === 'string' && provider.school_id.trim()
-          ? provider.school_id.trim()
-          : null) ??
-        (Array.isArray(provider?.schoolIds) && provider.schoolIds.length > 0 ? String(provider.schoolIds[0] || '').trim() : null);
-      return !!pid && pid === schoolId;
-    }
-    
-    // If no schoolId, allow general counselors (but this is unusual for virtual tours)
-    return true;
-  }
-  
-  // College counseling requires counselor eligibility
-  if (normalized === 'college_counseling') {
-    if (!isProviderEligibleForService(provider, normalized)) {
-      return false;
-    }
-
-    // College Counseling matching update:
-    // School match is a PREFERENCE, not a requirement. Do NOT filter counselors out
-    // based on school mismatch. Ordering + messaging is handled elsewhere.
-    void schoolId;
-    return true;
-  }
-  
-  // Unknown service type
   return false;
 }
 
-/**
- * Check if a provider teaches a specific subject
- * For tutoring and test prep, providers must have the requested subject in their subjects array
- * 
- * Uses canonical subject keys for matching (case-insensitive, handles variations)
- * Test Prep is a SUBJECT, not a service - uses SAME matching logic as Math or English
- * 
- * STRICT MATCHING: Provider must have the exact subject in their subjects array
- * 
- * @param provider - Provider user object
- * @param requestedSubject - The subject being requested (e.g., "Math", "English & Language Arts", "Test Prep", "SAT", "ACT")
- * @returns true if provider teaches the subject, false otherwise
- */
-function doesProviderTeachSubject(provider: any, requestedSubject: string | null): boolean {
-  if (!requestedSubject) return false; // STRICT: Subject is required, no subject = not eligible
-  
-  // Get provider's subjects array (check both provider and profile)
-  const providerSubjects = provider.subjects || provider.profile?.subjects || [];
-  
-  if (!Array.isArray(providerSubjects) || providerSubjects.length === 0) {
-    return false; // No subjects = not eligible for any specific subject
-  }
-  
-  // Step 3: Use normalization on both sides of the match
-  // Normalize requested subject to canonical key
-  // This handles all Test Prep variations: "Test Prep", "SAT", "ACT", "SAT Prep", etc. → "test_prep"
-  const requestedCanonical = normalizeSubjectId(requestedSubject);
-  if (!requestedCanonical) {
-    // Requested subject doesn't normalize - don't match
-    // [SUBJECT_NORMALIZATION] Log when subject doesn't normalize
-    console.log('[SUBJECT_NORMALIZATION] Requested subject does not normalize to canonical key', {
-      requestedSubject,
-      requestedCanonical: null,
-    });
-    return false;
-  }
-  
-  // Step 3: Use normalization on both sides of the match
-  // Check if any provider subject matches the canonical key
-  // A slot is valid ONLY if: canonical(providerSubject) === canonical(requestedSubject)
-  // Note: Special handling for Test Prep "Other" is done at the call site (where serviceType context is available)
-  const hasMatch = providerSubjects.some((providerSubject: string) => {
-    const providerCanonical = normalizeSubjectId(providerSubject);
-    const matches = providerCanonical === requestedCanonical;
-    
-    // [SUBJECT_NORMALIZATION] Log each subject comparison
-    if (matches || requestedCanonical === 'test_prep' || providerCanonical === 'test_prep') {
-      console.log('[SUBJECT_NORMALIZATION] Subject comparison', {
-        requestedSubjectRaw: requestedSubject,
-        requestedSubjectCanonical: requestedCanonical,
-        providerSubjectRaw: providerSubject,
-        providerSubjectCanonical: providerCanonical,
-        matches,
-      });
-    }
-    
-    return matches;
-  });
-  
-  // [SUBJECT_NORMALIZATION] Log final comparison result
-  console.log('[SUBJECT_NORMALIZATION] Final subject comparison result', {
-    requestedSubjectRaw: requestedSubject,
-    requestedSubjectCanonical: requestedCanonical,
-    providerSubjectsRaw: providerSubjects,
-    providerSubjectsCanonical: providerSubjects.map((s: string) => normalizeSubjectId(s)).filter((s: string | null): s is string => s !== null),
-    finalMatch: hasMatch,
-  });
-  
-  return hasMatch;
-}
-
-/**
- * Provider service eligibility.
- *
- * Providers are eligible based on their `services` array (canonical service keys).
- * Legacy role/flag fields like `isTutor` / `isCounselor` are intentionally NOT used.
- */
-function isProviderEligibleForService(
-  provider: any,
-  serviceType: string
-): boolean {
-  const normalized = normalizeServiceType(serviceType);
-
-  const normalizeServiceEntry = (value: unknown): string | null => {
-    const raw = typeof value === 'string' ? value : String(value ?? '');
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    try {
-      return normalizeServiceType(trimmed);
-    } catch {
-      return null;
-    }
-  };
-
-  // Provider services must be read from provider.data.services (canonical).
-  // Backward compatibility: fall back to top-level/user services.
-  const servicesRaw = provider?.data?.services ?? provider?.services ?? provider?.profile?.services ?? [];
-  const services = Array.isArray(servicesRaw)
-    ? (servicesRaw.map(normalizeServiceEntry).filter((s): s is string => !!s) as Array<string>)
-    : [];
-
-  // Booking services eligibility rules
-  if (normalized === 'college_counseling') return services.includes('college_counseling');
-  if (normalized === 'tutoring') return services.includes('tutoring');
-  if (normalized === 'test_prep') return services.includes('test_prep');
-
-  // Virtual tours support an explicit boolean flag (provider.data.offersVirtualTours is canonical).
-  if (normalized === 'virtual_tour') {
-    return provider?.data?.offersVirtualTours === true || provider?.offersVirtualTours === true || services.includes('virtual_tour');
-  }
-
-  return false;
-}
-
-/**
- * GET /api/availability/all-slots?date=YYYY-MM-DD&serviceType=xxx
- * Get all available time slots from all providers for a specific date
- * 
- * Required query params:
- * - date
- * - serviceType
- * 
- * Returns array of:
- * {
- *   providerId,
- *   startTimeISO,
- *   displayTime
- * }
- */
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
   try {
-    // RATE LIMITING: Check booking rate limit (prevent rapid-fire availability queries)
-    // Note: This endpoint is public (used for booking flow), so we use IP-based limiting
-    const { getSession } = await import('@/lib/auth/session');
-    const session = await getSession();
-    const userId = session?.userId || null;
-    const rateLimitResult = checkBookingRateLimit(req, userId, '/api/availability/all-slots');
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded. Please wait before querying availability again.' },
-        {
-          status: 429,
-          headers: createRateLimitHeaders(rateLimitResult),
-        }
-      );
-    }
+    const authResult = await requireAuth();
+    if (authResult instanceof NextResponse) return authResult;
+    const { session } = authResult;
 
+    const url = new URL(req.url);
     const parsed = QuerySchema.safeParse({
-      date: searchParams.get('date'),
-      serviceType: searchParams.get('serviceType'),
-      subject: searchParams.get('subject') ?? undefined,
-      topic: searchParams.get('topic') ?? undefined,
-      schoolId: searchParams.get('schoolId') ?? undefined,
+      date: url.searchParams.get('date'),
+      serviceType: url.searchParams.get('serviceType'),
+      subject: url.searchParams.get('subject') || undefined,
+      schoolId: url.searchParams.get('schoolId') || undefined,
+      schoolName: url.searchParams.get('schoolName') || undefined,
+      durationMinutes: url.searchParams.get('durationMinutes') || undefined,
     });
 
     if (!parsed.success) {
-      console.error('Invalid query:', parsed.error);
+      return NextResponse.json({ error: parsed.error.issues?.[0]?.message || 'Invalid query' }, { status: 400 });
+    }
+
+    const { date, serviceType, subject, schoolId, schoolName } = parsed.data;
+
+    const normalizedServiceType = normalizeServiceType(serviceType);
+    // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
+    const availabilityServiceType =
+      normalizedServiceType === 'virtual_tour'
+        ? 'college_counseling'
+        : normalizedServiceType === 'test_prep'
+          ? 'tutoring'
+          : normalizedServiceType;
+
+    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !subject) {
+      return NextResponse.json({ error: 'subject is required for tutoring and test prep services' }, { status: 400 });
+    }
+
+    // RATE LIMITING: Booking/Payment rate limit (prevent rapid-fire availability queries)
+    const rateLimitResult = checkBookingRateLimit(req, session.userId, '/api/availability/all-slots');
+    const rateHeaders = createRateLimitHeaders(rateLimitResult);
+    if (!rateLimitResult.success) {
       return NextResponse.json(
-        { error: 'Invalid query parameters', details: parsed.error.issues },
-        { status: 400 }
+        { error: 'Rate limit exceeded. Please wait before querying availability again.' },
+        { status: 429, headers: rateHeaders }
       );
     }
 
-    const {
-      date: dateStr,
-      serviceType,
-      subject: subjectParam,
-      schoolId: schoolIdParam,
-    } = parsed.data;
-    const schoolNameParam = searchParams.get('schoolName') ?? undefined;
+    const timeZone = 'America/New_York';
+    const rangeStartISO = bindDateKeyAndMinutesToUtcDate(date, 0, timeZone).toISOString();
+    const rangeEndISO = bindDateKeyAndMinutesToUtcDate(date, 24 * 60, timeZone).toISOString();
 
-    // Apply standard normalization if provided (optional)
-    // virtual_tour must remain virtual_tour - never normalize to college_counseling
-    const originalServiceType = serviceType;
-    let normalizedServiceType: string | null = null;
-    if (!serviceType) {
-      return NextResponse.json({ error: 'Missing serviceType' }, { status: 400 });
-    }
-    try {
-      normalizedServiceType = normalizeServiceTypeOrNull(serviceType);
-    } catch (e) {
-      console.warn('[AVAILABILITY_ALL_SLOTS] Invalid serviceType query param', {
-        serviceType,
-        error: e instanceof Error ? e.message : String(e),
-      });
-      return NextResponse.json({ error: 'Invalid serviceType' }, { status: 400 });
-    }
-    
-    // CRITICAL: Normalize test_prep to tutoring EARLY for behavioral parity
-    // Test prep must behave IDENTICALLY to tutoring in availability logic
-    // This ensures same-day slots appear and no special lead time rules apply
-    const originalNormalizedServiceType = normalizedServiceType; // Preserve for response
-    if (normalizedServiceType === 'test_prep') {
-      console.log('[TEST_PREP_AVAILABILITY] Using tutoring availability rules');
-      normalizedServiceType = 'tutoring';
-    }
-    
-    // Guard: ensure virtual_tour returns virtual_tour
-    if (normalizedServiceType === 'virtual_tour') {
-      normalizedServiceType = 'virtual_tour';
-    }
-    
-    // Map virtual_tour to college_counseling for availability lookup
-    // Virtual tours reuse counselor availability, but booking serviceType remains virtual_tour
-    let availabilityServiceType: string | null = null;
-    if (normalizedServiceType === 'virtual_tour') {
-      availabilityServiceType = 'college_counseling';
-    } else {
-      availabilityServiceType = normalizedServiceType;
-    }
+    const cutoffUTC = new Date(Date.now() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000);
+    const cutoffISO = cutoffUTC.toISOString();
 
-    if (!availabilityServiceType) {
-      return NextResponse.json({ error: 'Invalid serviceType' }, { status: 400 });
-    }
-    
-    // Strict filtering requirement: do NOT accept null/undefined serviceType rows.
-    // Availability rows must have explicit serviceType populated.
-    const allowsNull = false;
-    
-    // [AVAILABILITY_SERVICE_USED] Debug log
-    console.log('[AVAILABILITY_SERVICE_USED]', {
-      requestedService: normalizedServiceType,
-      availabilityServiceUsed: availabilityServiceType,
-    });
-    
-    // [AVAILABILITY_QUERY_FILTER] Debug log
-    console.log('[AVAILABILITY_QUERY_FILTER]', {
-      availabilityServiceType,
-      allowsNull: allowsNull
-    });
-    
-    // [SERVICE_TYPE_FINAL] Debug log after normalization
-    if (normalizedServiceType) {
-      console.log('[SERVICE_TYPE_FINAL]', normalizedServiceType);
-    }
+    // Provider matching must come from Supabase `providers` table (school + serviceType filters).
+    const supabase = getSupabaseAdmin();
+    const { data: providerRows, error: providersErr } = await supabase
+      .from('providers')
+      .select('id, data')
+      .order('id', { ascending: true });
+    if (providersErr) throw providersErr;
 
-    // Detect when requestedService === 'college_counseling' (must not depend on tutoring/subject logic)
-    const isCollegeCounselingRequest = normalizedServiceType === 'college_counseling';
+    const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
 
-    // Use availabilityServiceType for duration calculation
-    // VIRTUAL TOUR: Force 60 minutes
-    // College counseling is 60 minutes only
-    let durationMinutes = getServiceDuration(availabilityServiceType || normalizedServiceType);
-    if (normalizedServiceType === 'virtual_tour') {
-      durationMinutes = 60; // Force 60 minutes for virtual tours
-    }
+    const requestedSchoolId = String(schoolId || '').trim();
+    const requestedSchoolName = String(schoolName || '').trim();
 
-    // Optional duration override (historical). Counseling no longer supports 30-minute sessions.
-    // Only allow for college counseling to avoid changing other services unexpectedly.
-    const durationMinutesParam = searchParams.get('durationMinutes');
-    const parsedDuration = durationMinutesParam ? parseInt(durationMinutesParam, 10) : NaN;
-    if (
-      availabilityServiceType === 'college_counseling' &&
-      Number.isFinite(parsedDuration) &&
-      parsedDuration === 60
-    ) {
-      durationMinutes = parsedDuration;
-    }
-    
-    // [SCHOOL_MATCH_DEBUG] Log incoming parameters
-    console.log(`[SCHOOL_MATCH_DEBUG] serviceType=${normalizedServiceType || 'none'}, schoolId=${schoolIdParam || 'none'}, schoolName=${schoolNameParam || 'none'}`);
-    
-    // Normalize date to YYYY-MM-DD format in America/New_York timezone
-    const dateKey = normalizeDateKey(dateStr);
-    
-    // Parse dateKey to get dayOfWeek (0-6, Sunday-Saturday) in America/New_York
-    const [year, month, day] = dateKey.split('-').map(Number);
-    const tzDate = new Date(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T12:00:00`);
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      weekday: 'long',
-    });
-    const dayName = formatter.format(tzDate);
-    const dayOfWeekMap: Record<string, number> = {
-      'Sunday': 0,
-      'Monday': 1,
-      'Tuesday': 2,
-      'Wednesday': 3,
-      'Thursday': 4,
-      'Friday': 5,
-      'Saturday': 6,
+    const providersAll = (providerRows ?? [])
+      .map((r: any) => {
+        const id = typeof r?.id === 'string' ? r.id.trim() : '';
+        const data = r?.data && typeof r.data === 'object' ? r.data : {};
+        if (!id) return null;
+
+        const servicesRaw: unknown = (data as any)?.services;
+        const services = Array.isArray(servicesRaw) ? servicesRaw.map(norm).filter(Boolean) : [];
+
+        const schoolIds = Array.from(
+          new Set(
+            [
+              ...normalizeStringArray((data as any)?.schoolIds),
+              typeof (data as any)?.schoolId === 'string' ? String((data as any).schoolId).trim() : '',
+              typeof (data as any)?.school_id === 'string' ? String((data as any).school_id).trim() : '',
+            ].filter(Boolean)
+          )
+        );
+
+        const schoolNames = Array.from(
+          new Set(
+            [
+              ...normalizeStringArray((data as any)?.schoolNames),
+              typeof (data as any)?.school === 'string' ? String((data as any).school).trim() : '',
+              typeof (data as any)?.school_name === 'string' ? String((data as any).school_name).trim() : '',
+            ].filter(Boolean)
+          )
+        );
+
+        const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
+
+        const subjects = Array.from(
+          new Set(
+            [
+              ...normalizeStringArray((data as any)?.subjects),
+              ...normalizeStringArray((data as any)?.specialties),
+            ].filter(Boolean)
+          )
+        );
+
+        const providerName =
+          typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
+            ? String((data as any).displayName).trim()
+            : 'Provider';
+
+        const providerSchoolName =
+          schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
+
+        return {
+          id,
+          providerId: id,
+          providerName,
+          providerSchoolName,
+          schoolIds,
+          schoolNames,
+          services,
+          offersVirtualTours,
+          subjects,
+        };
+      })
+      .filter(Boolean) as Array<{
+      providerId: string;
+      providerName: string;
+      providerSchoolName: string | null;
+      schoolIds: string[];
+      schoolNames: string[];
+      services: string[];
+      offersVirtualTours: boolean;
+      subjects: string[];
+    }>;
+
+    const matchesSchoolStrict = (p: (typeof providersAll)[number]) => {
+      // If no school is provided, don't filter.
+      if (!requestedSchoolId && !requestedSchoolName) return true;
+      if (requestedSchoolId) {
+        return p.schoolIds.some((id) => String(id || '').trim() === requestedSchoolId);
+      }
+      const target = requestedSchoolName.toLowerCase();
+      return p.schoolNames.some((n) => String(n || '').trim().toLowerCase() === target);
     };
-    const dayOfWeek = dayOfWeekMap[dayName] ?? 0;
-    
-    // Read all availability from store.server.ts
-    const availabilityStorage = await readAvailabilityFile();
 
-    // Read reserved slots once and build a fast lookup set
-    const reservedSlots = await readReservedSlotsFile();
+    const matchesServiceType = (p: (typeof providersAll)[number]) => {
+      // Service filtering is strict: provider must offer the requested service (or an allowed equivalent).
+      if (normalizedServiceType === 'virtual_tour') {
+        return p.offersVirtualTours === true || p.services.includes('virtual_tour');
+      }
+      if (normalizedServiceType === 'college_counseling') {
+        return (
+          p.services.includes('college_counseling') ||
+          p.services.includes('counseling') ||
+          p.offersVirtualTours === true
+        );
+      }
+      if (normalizedServiceType === 'tutoring') {
+        return p.services.includes('tutoring');
+      }
+      if (normalizedServiceType === 'test_prep') {
+        // Test prep inventory uses tutoring slots, but provider must still offer test prep (or tutoring if you model it that way).
+        return p.services.includes('test_prep') || p.services.includes('tutoring');
+      }
+      return p.services.includes(normalizedServiceType);
+    };
+
+    const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
+      if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
+      if (!subject) return false;
+      const providerSubjects = p.subjects;
+      if (!Array.isArray(providerSubjects) || providerSubjects.length === 0) return false;
+      return providerSubjects.some((ps) => subjectsMatch(ps, subject));
+    };
+
+    const providerCandidates = providersAll
+      .filter(matchesServiceType)
+      .filter(matchesSchoolStrict)
+      .filter(matchesSubjectIfNeeded);
+
+    const providerIds = providerCandidates.map((p) => p.providerId).filter(Boolean);
+
+    if (providerIds.length === 0) {
+      return NextResponse.json({ slots: [], providers: [] }, { status: 200, headers: rateHeaders });
+    }
+
+    const rows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
+
+    for (const batch of chunkArray(providerIds, 200)) {
+      const { data, error } = await supabase
+        .from('availability_slots')
+        .select('provider_id, start_time, end_time')
+        .in('provider_id', batch)
+        .eq('is_booked', false)
+        .eq('service_type', availabilityServiceType)
+        .gte('start_time', rangeStartISO)
+        .lt('start_time', rangeEndISO)
+        .gt('start_time', cutoffISO)
+        .order('start_time', { ascending: true });
+      if (error) throw error;
+      for (const r of data ?? []) rows.push(r as any);
+    }
+
+    const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
-      reservedSlots
-        .filter((s) => (s.status ?? 'available') === 'reserved')
+      (reserved || [])
+        .filter((s) => s.startTime >= rangeStartISO && s.startTime < rangeEndISO)
         .map((s) => `${s.providerId}|${s.startTime}|${s.endTime}`)
     );
-    
-    // Get all users to check provider roles and filter
-    const allUsers = await getUsers();
-    const userMap = new Map(allUsers.map(u => [u.id, u]));
-
-    // Load provider.data payloads for eligibility checks (services, flags, school).
-    const providerIdsFromAvailability = Array.from(
-      new Set(
-        Object.values(availabilityStorage || {})
-          .map((e: any) => (typeof e?.providerId === 'string' ? e.providerId.trim() : ''))
-          .filter(Boolean)
-      )
-    );
-    const providerDataById = new Map<string, any>();
-    if (providerIdsFromAvailability.length > 0) {
-      const supabase = getSupabaseAdmin();
-      const chunkSize = 200;
-      for (let i = 0; i < providerIdsFromAvailability.length; i += chunkSize) {
-        const chunk = providerIdsFromAvailability.slice(i, i + chunkSize);
-        const { data: rows, error } = await supabase.from('providers').select('id, data').in('id', chunk as any);
-        if (error) throw error;
-        for (const r of rows ?? []) {
-          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-          const d = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : null;
-          if (id) providerDataById.set(id, d);
-        }
-      }
-    }
-    
-    // If serviceType is provided, filter providers by their roles
-    let providerIdsToInclude: Set<string> | null = null;
-    if (normalizedServiceType) {
-      providerIdsToInclude = new Set<string>();
-      
-      for (const entry of Object.values(availabilityStorage)) {
-        const providerId = (entry as any)?.providerId;
-        const entryServiceTypeRaw = (entry as any)?.serviceType;
-        if (!isValidAvailabilityRowServiceType(entryServiceTypeRaw)) {
-          console.warn('[AVAILABILITY_INVALID_ROW_SERVICE_TYPE]', {
-            providerId: providerId || null,
-            serviceType: entryServiceTypeRaw ?? null,
-          });
-          continue;
-        }
-        const user = providerId ? userMap.get(providerId) : null;
-        if (!user) continue;
-        const providerData = providerDataById.get(providerId) || null;
-        const eligibilityProvider = { ...(user as any), data: providerData };
-        
-        // Check eligibility and prepare debug info
-        const eligible = isProviderEligibleForService(eligibilityProvider, normalizedServiceType);
-        
-        // [ELIGIBILITY_DEBUG] Log eligibility check for each provider
-        console.log('[ELIGIBILITY_DEBUG]', {
-          providerId: user.id,
-          requestedService: normalizedServiceType,
-          services: (user as any).services || (user as any).profile?.services,
-          providerDataServices: Array.isArray((providerData as any)?.services) ? (providerData as any).services : null,
-          eligible
-        });
-        
-        if (!eligible) {
-          continue; // Skip providers not eligible for the service
-        }
-        
-        // For tutoring/test_prep: apply STRICT subject-based filtering
-        // This ensures providers only appear for subjects they actually teach
-        if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
-          // Subject is REQUIRED for tutoring/test_prep - validation should catch this, but double-check
-          if (!subjectParam) {
-            continue; // Skip if subject is missing (should not happen due to validation)
-          }
-          
-          // Use the comprehensive subject matching function
-          if (!doesProviderTeachSubject(eligibilityProvider, subjectParam)) {
-            continue; // Skip providers who don't teach the requested subject
-          }
-        }
-        
-        providerIdsToInclude.add(providerId);
-      }
-    }
-    
-    // Virtual Tours ONLY: strict provider school matching is enforced here.
-    // College Counseling: school match is preference-only (ordering + messaging), never a hard filter.
-    let schoolFilterClause = 'none';
-    if (schoolIdParam && normalizedServiceType === 'virtual_tour') {
-      const beforeCount = providerIdsToInclude ? providerIdsToInclude.size : Object.keys(availabilityStorage).length;
-      
-      // Helper function to normalize school name for fallback matching
-      const normalizeSchoolNameForMatch = (name: string): string => {
-        return name
-          .toLowerCase()
-          .trim()
-          .replace(/[^\w\s]/g, '') // Remove punctuation
-          .replace(/\s+/g, ' '); // Collapse whitespace
-      };
-      
-      // Filter providerIdsToInclude by schoolId
-      if (providerIdsToInclude) {
-        const filteredProviderIds = new Set<string>();
-        
-        for (const providerId of providerIdsToInclude) {
-          const user = userMap.get(providerId);
-          if (!user) continue;
-          
-          // Check if provider has this schoolId
-          const providerData = providerDataById.get(providerId) || null;
-          const providerSchoolIds =
-            (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
-              ? [String((providerData as any).schoolId).trim()]
-              : Array.isArray((providerData as any)?.schoolIds)
-                ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
-                : []) || (user.schoolIds || []);
-          if (providerSchoolIds.includes(schoolIdParam)) {
-            filteredProviderIds.add(providerId);
-            continue;
-          }
-          
-          // Fallback: match by normalized schoolName if schoolId not found
-          if (schoolNameParam) {
-            const normalizedRequestName = normalizeSchoolNameForMatch(schoolNameParam);
-            const providerSchoolNames = user.schoolNames || [];
-            
-            // Check if any provider school name matches (normalized)
-            let nameMatch = false;
-            for (const providerSchoolName of providerSchoolNames) {
-              const normalizedProviderName = normalizeSchoolNameForMatch(providerSchoolName);
-              if (normalizedProviderName === normalizedRequestName) {
-                nameMatch = true;
-                break;
-              }
-            }
-            
-            // Also check legacy schools field
-            if (!nameMatch && user.schools && user.schools.length > 0) {
-              for (const legacySchool of user.schools) {
-                const normalizedLegacyName = normalizeSchoolNameForMatch(legacySchool);
-                if (normalizedLegacyName === normalizedRequestName) {
-                  nameMatch = true;
-                  break;
-                }
-              }
-            }
-            
-            if (nameMatch) {
-              filteredProviderIds.add(providerId);
-              continue;
-            }
-          }
-          
-          // For virtual tours: strict schoolId matching (no fallback, no string matching)
-          // Virtual tours require exact schoolId match - providers must have the requested schoolId
-          if (normalizedServiceType === 'virtual_tour') {
-            // Only match by schoolId, no fallback to name matching or general counselors
-            continue; // Skip this provider - strict schoolId matching required (already checked above)
-          }
-          
-          // For counseling: allow general counselors (no school tags) as fallback
-          if (normalizedServiceType === 'college_counseling') {
-          const providerData = providerDataById.get(providerId) || null;
-          const providerSchoolIds =
-            (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
-              ? [String((providerData as any).schoolId).trim()]
-              : Array.isArray((providerData as any)?.schoolIds)
-                ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
-                : []) || (user.schoolIds || []);
-            const providerSchoolNames = user.schoolNames || [];
-            const hasLegacySchools = user.schools && user.schools.length > 0;
-            // General counselor: no schools specified
-            if (providerSchoolIds.length === 0 && providerSchoolNames.length === 0 && !hasLegacySchools) {
-              filteredProviderIds.add(providerId);
-            }
-          }
-        }
-        
-        providerIdsToInclude = filteredProviderIds;
-      } else {
-        // If no serviceType filter, create a new set and filter by school
-        providerIdsToInclude = new Set<string>();
-        
-        for (const entry of Object.values(availabilityStorage)) {
-          const providerId = (entry as any)?.providerId;
-          const user = providerId ? userMap.get(providerId) : null;
-          if (!user) continue;
-          
-          // Check if provider has this schoolId
-          const providerData = providerDataById.get(providerId) || null;
-          const providerSchoolIds =
-            (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
-              ? [String((providerData as any).schoolId).trim()]
-              : Array.isArray((providerData as any)?.schoolIds)
-                ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
-                : []) || (user.schoolIds || []);
-          if (providerSchoolIds.includes(schoolIdParam)) {
-            providerIdsToInclude.add(providerId);
-            continue;
-          }
-          
-          // For virtual tours: strict schoolId matching only (no fallback to name matching)
-          if (normalizedServiceType === 'virtual_tour') {
-            // Skip this provider - Virtual Tours require exact schoolId match, no fallback
-            continue;
-          }
-          
-          // Fallback: match by normalized schoolName if schoolId not found (only for counseling)
-          if (schoolNameParam && normalizedServiceType === 'college_counseling') {
-            const normalizedRequestName = normalizeSchoolNameForMatch(schoolNameParam);
-            const providerSchoolNames = user.schoolNames || [];
-            
-            // Check if any provider school name matches (normalized)
-            let nameMatch = false;
-            for (const providerSchoolName of providerSchoolNames) {
-              const normalizedProviderName = normalizeSchoolNameForMatch(providerSchoolName);
-              if (normalizedProviderName === normalizedRequestName) {
-                nameMatch = true;
-                break;
-              }
-            }
-            
-            // Also check legacy schools field
-            if (!nameMatch && user.schools && user.schools.length > 0) {
-              for (const legacySchool of user.schools) {
-                const normalizedLegacyName = normalizeSchoolNameForMatch(legacySchool);
-                if (normalizedLegacyName === normalizedRequestName) {
-                  nameMatch = true;
-                  break;
-                }
-              }
-            }
-            
-            if (nameMatch) {
-              providerIdsToInclude.add(providerId);
-              providerIdsToInclude.add(providerId);
-              continue;
-            }
-          }
-          
-          // For virtual tours: strict schoolId matching (no fallback, no string matching)
-          // Virtual tours require exact schoolId match - providers must have the requested schoolId
-          if (normalizedServiceType === 'virtual_tour') {
-            // Only match by schoolId, no fallback to name matching or general counselors
-            continue; // Skip this provider - strict schoolId matching required (already checked above)
-          }
-          
-          // For counseling: allow general counselors (no school tags) as fallback
-          if (normalizedServiceType === 'college_counseling') {
-            const providerData = providerDataById.get(providerId) || null;
-            const providerSchoolIds =
-              (typeof (providerData as any)?.schoolId === 'string' && String((providerData as any).schoolId).trim()
-                ? [String((providerData as any).schoolId).trim()]
-                : Array.isArray((providerData as any)?.schoolIds)
-                  ? ((providerData as any).schoolIds as any[]).map((id: any) => String(id || '').trim()).filter(Boolean)
-                  : []) || (user.schoolIds || []);
-            const providerSchoolNames = user.schoolNames || [];
-            const hasLegacySchools = user.schools && user.schools.length > 0;
-            // General counselor: no schools specified
-            if (providerSchoolIds.length === 0 && providerSchoolNames.length === 0 && !hasLegacySchools) {
-              providerIdsToInclude.add(providerId);
-            }
-          }
-        }
-      }
-      
-      const afterCount = providerIdsToInclude ? providerIdsToInclude.size : 0;
-      schoolFilterClause = `schoolId=${schoolIdParam} (matched ${afterCount} of ${beforeCount} providers)`;
-      
-      // [SCHOOL_MATCH_DEBUG] Log school filtering results
-      console.log(`[SCHOOL_MATCH_DEBUG] ${schoolFilterClause}`);
-    }
-    
-      // [AVAILABILITY_TUTORING_DEBUG] Debug log before querying availability rows
-      const matchedProviderIds = providerIdsToInclude ? Array.from(providerIdsToInclude) : [];
-      console.log('[AVAILABILITY_TUTORING_DEBUG]', {
-        requestedService: normalizedServiceType,
-        availabilityServiceUsed: availabilityServiceType,
-        availabilityServiceType: availabilityServiceType,
-        allowsNull: allowsNull,
-        schoolId: schoolIdParam || null,
-        matchedProviderIds: matchedProviderIds,
-      });
-      
-      // Step 1: Log final counts before querying availability rows
-      const eligibleProvidersCount = providerIdsToInclude ? providerIdsToInclude.size : 0;
-      const subjectMatchedProvidersCount = eligibleProvidersCount; // Already filtered by subject above
-      console.log('[TEST_PREP_DEBUG] Final counts before availability query', {
-        eligibleProvidersCount: eligibleProvidersCount,
-        subjectMatchedProvidersCount: subjectMatchedProvidersCount,
-      });
-    
-    // Collect slots from all providers
-    const allSlots: Array<{
-      providerId: string;
-      startTimeISO: string;
-      displayTime: string;
-      startMinutes: number;
-    }> = [];
-
-    // Debug: ensure time-only availability is bound to requested date before any comparisons/slot generation.
-    let didLogAfterDateBinding = false;
-    
-    // Count matching availability rows for debug log
-    let availabilityRowCount = 0;
-    const availabilityRows: any[] = [];
-    const countsByServiceType: Record<string, number> = {};
-    let exampleRow: any = null;
-    for (const entry of Object.values(availabilityStorage)) {
-      const providerId = (entry as any)?.providerId;
-      if (!providerId) continue;
-
-      const entryServiceTypeRaw = (entry as any)?.serviceType;
-      if (!isValidAvailabilityRowServiceType(entryServiceTypeRaw)) {
-        console.warn('[AVAILABILITY_INVALID_ROW_SERVICE_TYPE]', {
-          providerId,
-          serviceType: entryServiceTypeRaw ?? null,
-        });
-        continue;
-      }
-
-      // Filter by explicit availability.serviceType (no null/undefined fallback)
-      if (entryServiceTypeRaw !== availabilityServiceType) continue;
-      
-      // Skip providers that don't offer the requested service
-      if (providerIdsToInclude && !providerIdsToInclude.has(providerId)) {
-        continue;
-      }
-      
-      // Additional defensive check
-      if (normalizedServiceType) {
-        const user = userMap.get(providerId);
-        const providerData = providerDataById.get(providerId) || null;
-        const eligibilityProvider = user ? ({ ...(user as any), data: providerData } as any) : null;
-        if (!eligibilityProvider || !isProviderEligibleForService(eligibilityProvider, normalizedServiceType)) {
-          continue;
-        }
-      }
-      
-      availabilityRowCount++;
-      availabilityRows.push(entry);
-      
-      // Collect statistics for debug log
-      const entryServiceType = String((entry as any).serviceType || '');
-      const serviceTypeKey = entryServiceType || 'unknown';
-      countsByServiceType[serviceTypeKey] = (countsByServiceType[serviceTypeKey] || 0) + 1;
-      
-      // Store first example row
-      if (!exampleRow && entry.blocks && entry.blocks.length > 0) {
-        const firstBlock = entry.blocks[0];
-        exampleRow = {
-          id: `${providerId}:${entryServiceType || 'unknown'}`,
-          providerId: providerId,
-          serviceType: entryServiceType,
-          startTimeUTC: firstBlock.startMinutes !== undefined ? timeStringFromMinutes(firstBlock.startMinutes) : null,
-          endTimeUTC: firstBlock.endMinutes !== undefined ? timeStringFromMinutes(firstBlock.endMinutes) : null,
-        };
-      }
-    }
-    
-    // [AVAILABILITY_TUTORING_ROWS] Debug log after fetching availability rows
-    console.log('[AVAILABILITY_TUTORING_ROWS]', {
-      rowCount: availabilityRowCount,
-      countsByServiceType: countsByServiceType,
-      exampleRow: exampleRow,
-    });
-
-    // Fetch booked sessions from Supabase `sessions` table (canonical fields).
-    // We query a small window around the requested day to catch overlaps at boundaries.
-    const providerIdsForSessionQuery = Array.from(
-      new Set(
-        availabilityRows
-          .map((e) => (typeof (e as any)?.providerId === 'string' ? String((e as any).providerId).trim() : ''))
-          .filter(Boolean)
-      )
-    );
-
-    const requestedDayStartUTC = bindDateKeyAndMinutesToUtcDate(dateKey, 0, 'America/New_York');
-    const requestedDayEndUTC = new Date(requestedDayStartUTC.getTime() + 24 * 60 * 60 * 1000);
-    const sessionQueryStartISO = new Date(requestedDayStartUTC.getTime() - 60 * 60 * 1000).toISOString();
-    const sessionQueryEndISO = new Date(requestedDayEndUTC.getTime() + 60 * 60 * 1000).toISOString();
 
     const bookedWindows = await getBookedSessionWindowsForProviders({
-      providerIds: providerIdsForSessionQuery,
-      rangeStartISO: sessionQueryStartISO,
-      rangeEndISO: sessionQueryEndISO,
+      providerIds,
+      rangeStartISO,
+      rangeEndISO,
       defaultDurationMinutesWhenMissingEnd: 60,
     });
-
-    const bookedWindowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
-    for (const w of bookedWindows) {
-      const arr = bookedWindowsByProvider.get(w.providerId) || [];
+    const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
+    for (const w of bookedWindows || []) {
+      const arr = windowsByProvider.get(w.providerId) || [];
       arr.push({ sessionStartMs: w.sessionStartMs, sessionEndMs: w.sessionEndMs });
-      bookedWindowsByProvider.set(w.providerId, arr);
+      windowsByProvider.set(w.providerId, arr);
     }
 
-    const slotOverlapsBookedSession = (providerId: string, slotStartISO: string, durationMinutes: number): boolean => {
-      const slotStartMs = new Date(slotStartISO).getTime();
-      if (!Number.isFinite(slotStartMs)) return false;
-      const slotEndMs = slotStartMs + Math.max(1, durationMinutes) * 60 * 1000;
-      const windows = bookedWindowsByProvider.get(providerId) || [];
-      for (const s of windows) {
-        // Exclude slot if:
-        // (slot_start < session_end) AND (slot_end > session_start)
-        if (slotStartMs < s.sessionEndMs && slotEndMs > s.sessionStartMs) return true;
-      }
-      return false;
-    };
-    
-    // Safety check: if requestedService is tutoring (or was test_prep) and rows are still zero
-    if (normalizedServiceType === 'tutoring' && availabilityRowCount === 0) {
-      const providerCount = providerIdsToInclude ? providerIdsToInclude.size : 0;
-      console.log('[AVAILABILITY_TUTORING_ZERO]', {
-        requestedService: normalizedServiceType,
-        availabilityServiceUsed: availabilityServiceType,
-        availabilityServiceType: availabilityServiceType,
-        allowsNull: allowsNull,
-        schoolId: schoolIdParam || null,
-        matchedProviderIds: matchedProviderIds,
-        providerCount: providerCount,
-        rowCount: availabilityRowCount,
-        countsByServiceType: countsByServiceType,
-      });
-    }
-    
-    // [VIRTUAL_TOUR_DEBUG] Log before slot generation
-    console.log('[VIRTUAL_TOUR_DEBUG]', {
-      requestedService: normalizedServiceType,
-      availabilityServiceUsed: availabilityServiceType,
-      durationMinutes,
-      slotStepMinutes: durationMinutes, // generateSlots uses durationMinutes as step
-      providerCount: providerIdsToInclude ? providerIdsToInclude.size : 0,
-      availabilityRowCount,
-    });
-    
-    // Iterate through availability entries
-    // Availability is provider-level, not service-specific, so we get all entries
-    // IMPORTANT: Virtual tours reuse college counseling availability blocks
-    // - Virtual tours use the same availability blocks as college counseling
-    // - No separate availability is required for virtual tours
-    // - School matching is enforced in the provider filtering logic above
-    // Attach explicit request date context to time-only availability rows.
-    // Availability rows themselves are not date-specific; we bind the requested date during slot generation.
-    const requestedDateISO = dateKey;
-    const requestedDateDayOfWeek = dayOfWeek;
-    const mappedRows = availabilityRows.map((r) => ({
-      ...(r as any),
-      date: requestedDateISO,
-      dayOfWeek: requestedDateDayOfWeek,
-    }));
+    const slots = rows
+      .map((r) => {
+        const providerId = String((r as any)?.provider_id || '').trim();
+        const startTimeUTC = new Date((r as any)?.start_time).toISOString();
+        const endTimeUTC = new Date((r as any)?.end_time).toISOString();
+        if (!providerId) return null;
 
-    // [AVAILABILITY_ROWS_AFTER_FIX] must not drop rows (rowCount should match [AVAILABILITY_TUTORING_ROWS].rowCount)
-    console.log('[AVAILABILITY_ROWS_AFTER_FIX]', {
-      rowCount: mappedRows.length,
-      sample: mappedRows[0]
-        ? {
-            providerId: (mappedRows[0] as any)?.providerId ?? null,
-            serviceType: (mappedRows[0] as any)?.serviceType ?? null,
-            date: (mappedRows[0] as any)?.date ?? null,
-            dayOfWeek: (mappedRows[0] as any)?.dayOfWeek ?? null,
-            blocksCount: Array.isArray((mappedRows[0] as any)?.blocks) ? (mappedRows[0] as any).blocks.length : 0,
-            firstBlock: Array.isArray((mappedRows[0] as any)?.blocks) ? (mappedRows[0] as any).blocks[0] : null,
-          }
-        : null,
-    });
+        const key = `${providerId}|${startTimeUTC}|${endTimeUTC}`;
+        if (reservedSet.has(key)) return null;
 
-    // Counseling-only debug + invariant-supporting input rowCount.
-    // rowCount here means: rows that pass eligibility + school match + have >=1 block that yields >=1 slot
-    // (and yields >=1 slot AFTER the lead-time buffer filter).
-    let counselingAvailabilityInputRowCount = 0;
-    if (isCollegeCounselingRequest) {
-      const nowUTCForFiltering = new Date();
-      const cutoffUTCForFiltering = new Date(
-        nowUTCForFiltering.getTime() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000
-      );
+        const startMs = new Date(startTimeUTC).getTime();
+        const endMs = new Date(endTimeUTC).getTime();
+        if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
 
-      for (const entry of mappedRows) {
-        const providerId = (entry as any)?.providerId;
-        if (!providerId) continue;
+        const windows = windowsByProvider.get(providerId) || [];
+        if (windows.length > 0 && overlapsAnyWindow(startMs, endMs, windows)) return null;
 
-        const entryServiceTypeRaw = (entry as any)?.serviceType;
-        if (!isValidAvailabilityRowServiceType(entryServiceTypeRaw)) continue;
+        return { providerId, startTimeUTC, endTimeUTC };
+      })
+      .filter(Boolean) as Array<{ providerId: string; startTimeUTC: string; endTimeUTC: string }>;
 
-        // College counseling MUST ONLY use blocks for serviceType === 'college_counseling'
-        if (entryServiceTypeRaw !== 'college_counseling') continue;
+    const providers =
+      normalizedServiceType === 'college_counseling' || normalizedServiceType === 'virtual_tour'
+        ? providerCandidates
+            .map((p) => {
+              const matchesRequestedSchool = schoolMatches({
+                providerSchoolIds: p.schoolIds,
+                providerSchoolNames: p.schoolNames,
+                requestedSchoolId: schoolId,
+                requestedSchoolName: schoolName,
+              });
+              return {
+                providerId: p.providerId,
+                providerName: p.providerName,
+                providerSchoolName: p.providerSchoolName,
+                matchesRequestedSchool,
+              };
+            })
+            .sort((a, b) => Number(b.matchesRequestedSchool) - Number(a.matchesRequestedSchool))
+        : [];
 
-        // School match + provider eligibility are enforced by providerIdsToInclude
-        if (providerIdsToInclude && !providerIdsToInclude.has(providerId)) continue;
-
-        const user = userMap.get(providerId);
-        const providerData = providerDataById.get(providerId) || null;
-        const eligibilityProvider = user ? ({ ...(user as any), data: providerData } as any) : null;
-        if (!eligibilityProvider || !isProviderEligibleForService(eligibilityProvider, 'college_counseling')) continue;
-
-        const allBlocks = Array.isArray((entry as any).blocks) ? (entry as any).blocks : [];
-        const blocksForDay = allBlocks.filter((block: any) =>
-          blockMatchesRequestedDay(block?.dayOfWeek, requestedDateDayOfWeek)
-        );
-        if (blocksForDay.length === 0) continue;
-
-        const tz = (entry as any)?.timezone || 'America/New_York';
-        const slotISOs = generateCounselingSlotStartISOsFromBlocks({
-          blocksForDay,
-          dateKey,
-          timeZone: tz,
-          durationMinutes,
-        });
-
-        if (slotISOs.length === 0) continue;
-
-        // Count the row only if it can produce at least one AVAILABLE slot after the same filters
-        // applied in the final response (lead-time buffer, booked sessions, reserved slots).
-        const hasAtLeastOneAvailableSlot = slotISOs.some((startTimeISO) => {
-          // Mirror the lead-time buffer filter (UTC-based, applies to all services).
-          if (new Date(startTimeISO).getTime() <= cutoffUTCForFiltering.getTime()) return false;
-
-          const endTimeISO = new Date(new Date(startTimeISO).getTime() + durationMinutes * 60 * 1000).toISOString();
-          const reservationKey = `${providerId}|${startTimeISO}|${endTimeISO}`;
-          if (reservedSet.has(reservationKey)) return false;
-          return !slotOverlapsBookedSession(providerId, startTimeISO, durationMinutes);
-        });
-
-        if (hasAtLeastOneAvailableSlot) {
-          counselingAvailabilityInputRowCount++;
-        }
-      }
-
-      console.log('[COUNSELING_AVAILABILITY_INPUT]', {
-        rowCount: counselingAvailabilityInputRowCount,
-        dateKey,
-        durationMinutes,
-      });
-    }
-
-    // Debug: log availability rows BEFORE slot generation (do not drop rows here; only compute blocksForRequestedDayCount)
-    const rowsBeforeSlotGen: Array<{ providerId: string; serviceType: string; blocksForRequestedDayCount: number }> = [];
-
-    for (const entry of mappedRows) {
-      const providerId = (entry as any)?.providerId;
-      if (!providerId) continue;
-
-      const entryServiceTypeRaw = (entry as any)?.serviceType;
-      if (!isValidAvailabilityRowServiceType(entryServiceTypeRaw)) {
-        console.warn('[AVAILABILITY_INVALID_ROW_SERVICE_TYPE]', {
-          providerId,
-          serviceType: entryServiceTypeRaw ?? null,
-        });
-        continue;
-      }
-
-      // Filter by explicit availability.serviceType (no null/undefined fallback)
-      if (entryServiceTypeRaw !== availabilityServiceType) continue;
-      
-      // Skip providers that don't offer the requested service (if serviceType was provided)
-      if (providerIdsToInclude && !providerIdsToInclude.has(providerId)) {
-        continue;
-      }
-      
-      // Eligibility check:
-      // - college_counseling MUST NOT depend on subject matching
-      // - other services keep existing comprehensive request eligibility
-      const user = userMap.get(providerId);
-      if (!user) continue;
-      const providerData = providerDataById.get(providerId) || null;
-      const eligibilityProvider = { ...(user as any), data: providerData };
-      if (isCollegeCounselingRequest) {
-        if (!isProviderEligibleForService(eligibilityProvider, 'college_counseling')) continue;
-      } else {
-        if (!isProviderEligibleForRequest(eligibilityProvider, {
-          serviceType: normalizedServiceType,
-          subject: subjectParam || null,
-          schoolId: schoolIdParam || null,
-        })) {
-          continue;
-        }
-      }
-      
-      // Find blocks for this dayOfWeek
-      // These blocks are reused for both college_counseling and virtual_tour services
-      const allBlocks = Array.isArray((entry as any).blocks) ? (entry as any).blocks : [];
-      const blocksForDay = allBlocks.filter((block: any) => blockMatchesRequestedDay(block?.dayOfWeek, requestedDateDayOfWeek));
-
-      rowsBeforeSlotGen.push({
-        providerId,
-        serviceType: entryServiceTypeRaw,
-        blocksForRequestedDayCount: blocksForDay.length,
-      });
-
-      // [AVAILABILITY_ROWS_AFTER_DATE_BINDING] Bind the requested booking date to provider-local availability times.
-      // We convert once to UTC (no double conversion) and only compare Date-to-Date downstream.
-      if (!didLogAfterDateBinding) {
-        const tz = (entry as any)?.timezone || 'America/New_York';
-        const firstBlock = blocksForDay[0];
-        const startMinutes = Number(firstBlock?.startMinutes);
-        const endMinutes = Number(firstBlock?.endMinutes);
-
-        const startDateTime = Number.isFinite(startMinutes)
-          ? bindDateKeyAndMinutesToUtcDate(dateKey, startMinutes, tz)
-          : null;
-        let endDateTime = Number.isFinite(endMinutes)
-          ? bindDateKeyAndMinutesToUtcDate(dateKey, endMinutes, tz)
-          : null;
-
-        // Defensive: if a block crosses midnight, bind end to next day so end > start.
-        if (startDateTime && endDateTime && endDateTime <= startDateTime) {
-          endDateTime = new Date(endDateTime.getTime() + 24 * 60 * 60 * 1000);
-        }
-
-        console.log('[AVAILABILITY_ROWS_AFTER_DATE_BINDING]', {
-          dateKey,
-          providerId,
-          serviceType: entryServiceTypeRaw,
-          timeZone: tz,
-          sample: {
-            startMinutes,
-            endMinutes,
-            startDateTime,
-            endDateTime,
-            startDateTimeUTC: startDateTime?.toISOString?.() || null,
-            endDateTimeUTC: endDateTime?.toISOString?.() || null,
-          },
-        });
-        didLogAfterDateBinding = true;
-      }
-      
-      // Generate all slots for this provider's blocks using the new function
-      // Use consistent slotIntervalMinutes (60) and sessionDurationMinutes
-      if (blocksForDay.length === 0) {
-        continue;
-      }
-      let slotISOs: string[] = [];
-      if (isCollegeCounselingRequest) {
-        slotISOs = generateCounselingSlotStartISOsFromBlocks({
-          blocksForDay,
-          dateKey,
-          timeZone: (entry as any)?.timezone || 'America/New_York',
-          durationMinutes,
-        });
-      } else {
-        const slotIntervalMinutes = 60;
-        slotISOs = generateSlotsForBlocks(
-          blocksForDay,
-          dateKey,
-          {
-            slotIntervalMinutes,
-            sessionDurationMinutes: durationMinutes,
-            roundToInterval: true,
-            timeZone: (entry as any)?.timezone || 'America/New_York',
-          }
-        );
-      }
-      
-      // Debug logging (dev only)
-      const isDev = process.env.NODE_ENV === 'development';
-      if (isDev) {
-        const now = new Date();
-        const leadTimeMinutes = 0; // No lead time for now (can be added later)
-        console.log('[SLOT_GENERATION_DEBUG]', {
-          requestedServiceType: originalServiceType || normalizedServiceType,
-          requestedSubject: subjectParam || null,
-          requestedDate: dateKey,
-          nowTimestamp: now.toISOString(),
-          leadTimeMinutes,
-          providerId,
-          providerSubjects: (user as any).subjects || (user as any).profile?.subjects || [],
-          blocks: blocksForDay.map((b: any) => ({
-            start: timeStringFromMinutes(b?.startMinutes),
-            end: timeStringFromMinutes(b?.endMinutes),
-          })),
-          generatedSlotCount: slotISOs.length,
-        });
-      }
-      
-      // Process each generated slot
-      for (const startTimeISO of slotISOs) {
-          // Check if this slot is already booked
-          const endTimeISO = new Date(new Date(startTimeISO).getTime() + durationMinutes * 60 * 1000).toISOString();
-
-          const isBooked = slotOverlapsBookedSession(providerId, startTimeISO, durationMinutes);
-          const reservationKey = `${providerId}|${startTimeISO}|${endTimeISO}`;
-          const isReserved = reservedSet.has(reservationKey);
-
-          if (!isBooked && !isReserved) {
-            // Convert ISO to display time for compatibility (in America/New_York timezone)
-            const slotDate = new Date(startTimeISO);
-            const formatter = new Intl.DateTimeFormat('en-US', {
-              timeZone: 'America/New_York',
-              hour: 'numeric',
-              minute: 'numeric',
-              hour12: false,
-            });
-            const parts = formatter.formatToParts(slotDate);
-            const slotHours = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
-            const slotMins = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
-            const startMinutes = slotHours * 60 + slotMins;
-            
-            allSlots.push({
-              providerId: providerId,
-              startTimeISO,
-              displayTime: timeStringFromMinutes(startMinutes),
-              startMinutes,
-            });
-          }
-        }
-      }
-    
-    // Sort slots by startTimeISO
-    allSlots.sort((a, b) => new Date(a.startTimeISO).getTime() - new Date(b.startTimeISO).getTime());
-
-    console.log('[AVAILABILITY_ROWS_BEFORE_SLOT_GENERATION]', {
-      requestedService: normalizedServiceType,
-      availabilityServiceUsed: availabilityServiceType,
-      rowCount: rowsBeforeSlotGen.length,
-      sample: rowsBeforeSlotGen.slice(0, 25),
-    });
-    
-    // Step 1: Log final counts after generating slots
-    const availabilityRowsCount = availabilityRowCount;
-    const slotsCount = allSlots.length;
-    console.log('[TEST_PREP_DEBUG] Final counts after slot generation', {
-      eligibleProvidersCount: eligibleProvidersCount,
-      subjectMatchedProvidersCount: subjectMatchedProvidersCount,
-      availabilityRowsCount: availabilityRowsCount,
-      slotsCount: slotsCount,
-    });
-    
-    // Format response as requested: { startTimeUTC, endTimeUTC, providerId, serviceType, schoolId, schoolName }
-    const slots = allSlots.map(slot => {
-      const startTimeUTC = slot.startTimeISO;
-      const endTimeUTC = new Date(new Date(startTimeUTC).getTime() + durationMinutes * 60 * 1000).toISOString();
-      
-      // For counselor services, use provider's school info from profile
-      let slotSchoolId: string | null = null;
-      let slotSchoolName: string | null = null;
-      
-      if (normalizedServiceType === 'college_counseling') {
-        const provider = userMap.get(slot.providerId);
-        if (provider) {
-          // For college counseling, use provider's schoolId and schoolName from arrays
-          // Only use null if provider.schoolIds is null/empty (don't default to "Various")
-          slotSchoolId = provider.schoolIds?.[0] || null;
-          slotSchoolName = provider.schoolNames?.[0] || null;
-          
-          // [COUNSELING_SLOT_DEBUG] Log slot school assignment
-          console.log("[COUNSELING_SLOT_DEBUG]", {
-            providerId: provider.id,
-            schoolId: slotSchoolId,
-            schoolName: slotSchoolName
-          });
-        }
-      } else if (isCounselorService(normalizedServiceType)) {
-        // For virtual tours, keep existing logic unchanged (don't affect virtual tours yet)
-        const provider = userMap.get(slot.providerId);
-        if (provider) {
-          slotSchoolId = provider.schoolIds?.[0] || null;
-          slotSchoolName = provider.schoolNames?.[0] || null;
-        }
-      } else {
-        // For non-counselor services (tutoring, test_prep), use query params or null
-        slotSchoolId = schoolIdParam || null;
-        slotSchoolName = schoolNameParam || null;
-      }
-      
-      return {
-        startTimeUTC,
-        endTimeUTC,
-        providerId: slot.providerId,
-        serviceType: originalNormalizedServiceType || null, // Use original service type (test_prep) for response
-        schoolId: slotSchoolId,
-        schoolName: slotSchoolName,
-      };
-    });
-
-    // Final output-stage filtering: never return slots that are in the past
-    // or within the required minimum lead-time buffer.
-    const nowUTC = new Date();
-    const cutoffUTC = new Date(nowUTC.getTime() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000);
-    const originalSlotsCount = slots.length;
-    const filteredSlots = slots.filter((s) => new Date(s.startTimeUTC).getTime() > cutoffUTC.getTime());
-
-    // Temporary debug logging (remove once validated in prod)
-    console.log('[SLOT_TIME_FILTER]', {
-      nowUTC: nowUTC.toISOString(),
-      leadTimeBufferMinutes: LEAD_TIME_BUFFER_MINUTES,
-      originalSlotsCount,
-      filteredSlotsCount: filteredSlots.length,
-      firstRemainingSlot: filteredSlots[0] ?? null,
-    });
-
-    if (isCollegeCounselingRequest) {
-      console.log('[COUNSELING_SLOTS_GENERATED]', {
-        slotsCount: filteredSlots.length,
-        exampleSlot: filteredSlots[0],
-      });
-    }
-    
-    // [VIRTUAL_TOUR_DEBUG_RESULT] Log after slot generation
-    console.log('[VIRTUAL_TOUR_DEBUG_RESULT]', {
-      requestedService: normalizedServiceType,
-      availabilityServiceUsed: availabilityServiceType,
-      slotsCount: filteredSlots.length,
-      sample: filteredSlots[0],
-    });
-    
-    // [ALL_SLOTS_RESPONSE_DEBUG] Log response before returning
-    console.log('[ALL_SLOTS_RESPONSE_DEBUG]', { slotsCount: filteredSlots.length, sample: filteredSlots[0] });
-    
-    // [SCHOOL_MATCH_DEBUG] Log final results
-    const finalProviderCount = providerIdsToInclude ? providerIdsToInclude.size : Object.keys(availabilityStorage).length;
-    console.log(`[SCHOOL_MATCH_DEBUG] Final: serviceType=${normalizedServiceType || 'none'}, schoolId=${schoolIdParam || 'none'}, schoolName=${schoolNameParam || 'none'}, providersMatched=${finalProviderCount}, slotsCount=${filteredSlots.length}, whereClause=${schoolFilterClause}`);
-    
-    // College Counseling: return ordered provider list with school match metadata for UX.
-    let providers:
-      | Array<{
-          providerId: string;
-          providerName: string;
-          providerSchoolName: string | null;
-          matchesRequestedSchool: boolean;
-        }>
-      | undefined;
-
-    if (normalizedServiceType === 'college_counseling') {
-      const requestedSchoolId = schoolIdParam ? String(schoolIdParam).trim() : '';
-      const providerIdsWithSlots = Array.from(new Set(filteredSlots.map((s) => s.providerId))).filter(
-        (id): id is string => typeof id === 'string' && id.length > 0
-      );
-
-      const computeProviderName = (u: any): string => {
-        const p0 =
-          typeof u?.profile?.displayName === 'string' && u.profile.displayName.trim()
-            ? u.profile.displayName.trim()
-            : '';
-        if (p0) return p0;
-        const p1 = typeof u?.displayName === 'string' && u.displayName.trim() ? u.displayName.trim() : '';
-        if (p1) return p1;
-        const p2 = typeof u?.name === 'string' && u.name.trim() ? u.name.trim() : '';
-        return p2 || 'Provider';
-      };
-
-      const computeProviderSchoolName = (u: any): string | null => {
-        const primary =
-          typeof u?.school_name === 'string' && String(u.school_name).trim() ? String(u.school_name).trim() : '';
-        if (primary) return primary;
-        if (Array.isArray(u?.schoolNames) && u.schoolNames.length > 0) {
-          const n = String(u.schoolNames[0] || '').trim();
-          return n || null;
-        }
-        const alt = typeof u?.schoolName === 'string' && u.schoolName.trim() ? u.schoolName.trim() : '';
-        return alt || null;
-      };
-
-      const computeProviderSchoolId = (u: any): string => {
-        const primary = typeof u?.school_id === 'string' ? u.school_id.trim() : '';
-        if (primary) return primary;
-        if (Array.isArray(u?.schoolIds) && u.schoolIds.length > 0) return String(u.schoolIds[0] || '').trim();
-        const alt = typeof u?.schoolId === 'string' ? u.schoolId.trim() : '';
-        return alt || '';
-      };
-
-      providers = providerIdsWithSlots
-        .map((providerId) => {
-          const u = userMap.get(providerId);
-          const providerName = computeProviderName(u);
-          const providerSchoolName = computeProviderSchoolName(u);
-          const providerSchoolId = computeProviderSchoolId(u);
-          const matchesRequestedSchool = !!requestedSchoolId && !!providerSchoolId && providerSchoolId === requestedSchoolId;
-          return { providerId, providerName, providerSchoolName, matchesRequestedSchool };
-        })
-        .sort((a, b) => {
-          if (requestedSchoolId) {
-            if (a.matchesRequestedSchool !== b.matchesRequestedSchool) return a.matchesRequestedSchool ? -1 : 1;
-          }
-          return a.providerName.localeCompare(b.providerName);
-        });
-    }
-
-    return NextResponse.json({ 
-      slots: filteredSlots,
-      ...(providers ? { providers } : {}),
-      meta: {
-        providersMatched: finalProviderCount,
-        availabilityRowCount,
-        serviceTypeFinal: originalNormalizedServiceType || null, // Use original service type (test_prep) for response
-        availabilityServiceUsed: availabilityServiceType || null,
-        schoolId: schoolIdParam || null,
-        date: dateKey,
-      },
-    });
+    return NextResponse.json({ slots, providers }, { status: 200, headers: rateHeaders });
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/availability/all-slots]' });
   }
 }
+

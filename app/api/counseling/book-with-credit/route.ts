@@ -181,6 +181,27 @@ export async function POST(request: NextRequest) {
         stripeSubscriptionId: credit.stripeSubscriptionId,
       } as any);
 
+      // Mark concrete inventory as booked (best-effort; do not block booking if it fails).
+      try {
+        const supabase = getSupabaseAdmin();
+        const { error } = await supabase
+          .from('availability_slots')
+          .update({ is_booked: true })
+          .eq('provider_id', providerId)
+          .eq('service_type', 'college_counseling')
+          .eq('start_time', startEnd.start)
+          .eq('end_time', startEnd.end)
+          .eq('is_booked', false);
+        if (error) throw error;
+      } catch (e) {
+        console.warn('[AVAILABILITY_SLOT_BOOK_MARK_FAILED]', {
+          providerId,
+          start: startEnd.start,
+          end: startEnd.end,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
       // Best-effort Zoom meeting creation
       if (isZoomConfigured()) {
         try {
