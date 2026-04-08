@@ -55,11 +55,16 @@ export async function POST(request: NextRequest) {
 
     const providerId = session.userId;
 
-    // Save bank account metadata (only stores bankName, last4, accountType - no sensitive data)
+    // Required debug log (requested)
+    console.log('Saving bank account:', providerId);
+
+    // Save bank account (Supabase-backed; metadata returned is masked)
     const bankAccount = await setBankAccount(providerId, {
       bankName: bankName.trim(),
-      accountNumber: accountNumber.trim(), // Used to extract last4, not stored
-      accountType: accountType,
+      accountName: accountHolderName.trim(),
+      accountNumber: accountNumber.trim(),
+      routingNumber: routingNumber.trim(),
+      accountType,
     });
 
     // ALSO persist full payout details to the provider profile so admin payout processing

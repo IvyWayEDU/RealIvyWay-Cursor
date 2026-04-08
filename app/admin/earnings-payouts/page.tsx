@@ -7,15 +7,7 @@ import { listPendingPayoutRequests, type PayoutRequest } from '@/lib/payouts/pay
 import { getProviders } from '@/lib/providers/storage';
 import type { User } from '@/lib/auth/types';
 import type { ProviderProfile } from '@/lib/models/types';
-
-type BankAccountRow = {
-  providerId: string;
-  bankName: string;
-  last4: string;
-  accountType: string;
-  connectedAt: string;
-  status: string;
-};
+import { listBankAccounts, type BankAccount } from '@/lib/payouts/bank-account-storage';
 
 type Balances = Record<string, { balanceCents: number; updatedAt: string }>;
 
@@ -45,32 +37,6 @@ function normalizePayoutMethod(raw: unknown): 'wise' | 'paypal' | 'zelle' | 'ban
   if (m === 'zelle') return 'zelle';
   if (m === 'bank' || m === 'bank_transfer' || m === 'bank transfer' || m === 'wire' || m === 'ach') return 'bank';
   return null;
-}
-
-function isBankAccountRow(value: unknown): value is BankAccountRow {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.providerId === 'string' &&
-    typeof value.bankName === 'string' &&
-    typeof value.last4 === 'string' &&
-    typeof value.accountType === 'string' &&
-    typeof value.connectedAt === 'string' &&
-    typeof value.status === 'string'
-  );
-}
-
-async function readBankAccounts(): Promise<BankAccountRow[]> {
-  if (process.env.NODE_ENV === 'production') return [];
-  try {
-    const p = path.join(process.cwd(), 'data', 'bank-accounts.json');
-    const fsp = await import('fs/promises');
-    const raw = await fsp.readFile(p, 'utf-8');
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isBankAccountRow);
-  } catch {
-    return [];
-  }
 }
 
 async function readProviderEarningsBalances(): Promise<Balances> {
@@ -152,7 +118,7 @@ export default async function AdminEarningsPayoutsPage() {
     getUsers(),
     getSessions(),
     readCredits(),
-    readBankAccounts(),
+    listBankAccounts(),
     readProviderEarningsBalances(),
     listPendingPayoutRequests(),
     getProviders(),
@@ -160,7 +126,7 @@ export default async function AdminEarningsPayoutsPage() {
 
   const userById = new Map<string, User>(users.map((u) => [u.id, u]));
   const providerByUserId = new Map<string, ProviderProfile>(providers.map((p) => [p.userId, p]));
-  const bankByProviderId = new Map<string, BankAccountRow>();
+  const bankByProviderId = new Map<string, BankAccount>();
   for (const b of bankAccounts) {
     if (b?.status === 'active') bankByProviderId.set(b.providerId, b);
   }

@@ -3,53 +3,18 @@ import { auth } from '@/lib/auth/middleware';
 import { handleApiError } from '@/lib/errorHandler';
 import { getUsers } from '@/lib/auth/storage';
 import { getProviders } from '@/lib/providers/storage';
+import { findProviderIdsByBankAccountLast4 } from '@/lib/payouts/bank-account-storage';
 import {
   getPayoutRequestById,
   listProviderPayoutRequests,
   type PayoutRequest,
 } from '@/lib/payouts/payout-requests.server';
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
-import path from 'path';
 
 export const runtime = 'nodejs';
 
-type BankAccountRow = {
-  providerId: string;
-  bankName: string;
-  last4: string;
-  accountType: string;
-  connectedAt: string;
-  status: string;
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isBankAccountRow(value: unknown): value is BankAccountRow {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.providerId === 'string' &&
-    typeof value.bankName === 'string' &&
-    typeof value.last4 === 'string' &&
-    typeof value.accountType === 'string' &&
-    typeof value.connectedAt === 'string' &&
-    typeof value.status === 'string'
-  );
-}
-
-async function readBankAccounts(): Promise<BankAccountRow[]> {
-  if (process.env.NODE_ENV === 'production') return [];
-  try {
-    const p = path.join(process.cwd(), 'data', 'bank-accounts.json');
-    const fsp = await import('fs/promises');
-    const raw = await fsp.readFile(p, 'utf-8');
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isBankAccountRow);
-  } catch {
-    return [];
-  }
 }
 
 function cleanString(v: unknown): string {
@@ -119,10 +84,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [users, providers, bankAccounts] = await Promise.all([
+    const [users, providers] = await Promise.all([
       getUsers(),
       getProviders(),
-      bankLast4Digits ? readBankAccounts() : Promise.resolve([]),
     ]);
 
     const providerByUserId = new Map<string, any>((providers || []).map((p: any) => [String(p.userId || ''), p]));
@@ -160,11 +124,9 @@ export async function GET(request: NextRequest) {
         if (l4 && l4 === bankQ) providerIds.add(userId);
       }
 
-      // Match against connected bank metadata (non-sensitive) last4.
-      for (const b of bankAccounts || []) {
-        if (String(b.status || '').toLowerCase() !== 'active') continue;
-        if (String(b.last4 || '').trim() === bankQ) providerIds.add(String(b.providerId || '').trim());
-      }
+      // Match against bank accounts table (Supabase)
+      const ids = await findProviderIdsByBankAccountLast4(bankQ);
+      for (const id of ids) providerIds.add(id);
 
       // Match against payout request snapshot account number last4 (admin-only snapshot).
       // Note: we only have an indexed way to do this by scanning payout-requests, so we keep it bounded.

@@ -1,15 +1,12 @@
 'use server';
 
-import path from 'path';
+import 'server-only';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const BANK_ACCOUNTS_FILE = path.join(DATA_DIR, 'bank-accounts.json');
-
-const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
+import { randomUUID } from 'crypto';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 /**
  * Bank account metadata for a provider
- * Only stores non-sensitive metadata - no full account numbers, routing numbers, or account holder names
  */
 export interface BankAccount {
   providerId: string;
@@ -20,98 +17,139 @@ export interface BankAccount {
   status: 'active' | 'disconnected'; // Account status
 }
 
-// Ensure data directory exists
-async function ensureDataDir() {
-  if (FS_DISABLED_IN_PROD) return;
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.mkdir(DATA_DIR, { recursive: true });
-  } catch {
-    return;
-  }
+type BankAccountDbRow = {
+  id: string;
+  provider_id: string;
+  account_name: string;
+  account_number: string;
+  routing_number: string;
+  bank_name: string;
+  account_type: 'checking' | 'savings' | null;
+  status: 'active' | 'disconnected' | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const BANK_ACCOUNTS_TABLE = 'bank_accounts';
+
+function toLast4(accountNumber: unknown): string {
+  if (typeof accountNumber !== 'string') return '****';
+  const v = accountNumber.trim();
+  if (v.length >= 4) return v.slice(-4);
+  return '****';
 }
 
-// Read bank accounts from file
-async function getBankAccounts(): Promise<BankAccount[]> {
-  if (FS_DISABLED_IN_PROD) return [];
-  await ensureDataDir();
-
-  try {
-    const fsp = await import('fs/promises');
-    const data = await fsp.readFile(BANK_ACCOUNTS_FILE, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    return [];
-  }
-}
-
-// Write bank accounts to file
-async function saveBankAccounts(accounts: BankAccount[]): Promise<void> {
-  if (FS_DISABLED_IN_PROD) return;
-  await ensureDataDir();
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.writeFile(BANK_ACCOUNTS_FILE, JSON.stringify(accounts, null, 2), 'utf-8');
-  } catch {
-    return;
-  }
+function normalizeDbRowToPublic(row: BankAccountDbRow): BankAccount {
+  const connectedAt = row?.created_at || new Date().toISOString();
+  const accountType = row?.account_type === 'savings' ? 'savings' : 'checking';
+  const status = row?.status === 'disconnected' ? 'disconnected' : 'active';
+  return {
+    providerId: row.provider_id,
+    bankName: row.bank_name,
+    last4: toLast4(row.account_number),
+    accountType,
+    connectedAt,
+    status,
+  };
 }
 
 /**
  * Set bank account for a provider
- * Only stores metadata - extracts last4 from account number, does not store sensitive data
- * 
+ *
  * @param providerId - The provider ID
- * @param accountData - Bank account data (will extract last4, discard sensitive fields)
- * @returns Bank account metadata
+ * @param accountData - Bank account data (stored in Supabase)
+ * @returns Bank account metadata (masked)
  */
 export async function setBankAccount(
   providerId: string,
   accountData: {
     bankName: string;
-    accountNumber: string; // Full account number (will extract last4 only)
-    accountType: 'checking' | 'savings';
+    accountName: string;
+    accountNumber: string;
+    routingNumber: string;
+    accountType?: 'checking' | 'savings';
   }
 ): Promise<BankAccount> {
-  const now = new Date().toISOString();
-  const accounts = await getBankAccounts();
-  
-  // Extract last 4 digits from account number
-  const last4 = accountData.accountNumber.length >= 4 
-    ? accountData.accountNumber.slice(-4)
-    : '****';
-  
-  // Find existing account
-  const existingIndex = accounts.findIndex(acc => acc.providerId === providerId);
-  
-  const bankAccount: BankAccount = {
-    providerId,
-    bankName: accountData.bankName.trim(),
-    last4,
-    accountType: accountData.accountType,
-    connectedAt: existingIndex >= 0 ? accounts[existingIndex].connectedAt : now,
-    status: 'active',
-  };
-  
-  if (existingIndex >= 0) {
-    // Update existing account
-    accounts[existingIndex] = bankAccount;
-  } else {
-    // Add new account
-    accounts.push(bankAccount);
+  const pid = String(providerId || '').trim();
+  if (!pid) throw new Error('providerId is required');
+
+  const bank_name = String(accountData.bankName || '').trim();
+  const account_name = String(accountData.accountName || '').trim();
+  const account_number = String(accountData.accountNumber || '').trim();
+  const routing_number = String(accountData.routingNumber || '').trim();
+  const account_type = accountData.accountType === 'savings' ? 'savings' : 'checking';
+
+  // Required debug log (requested)
+  console.log('Saving bank account:', pid);
+
+  const supabase = getSupabaseAdmin();
+
+  // Enforce "only one bank account per provider" by treating provider_id as a unique key.
+  const { data: existing, error: existingErr } = await supabase
+    .from(BANK_ACCOUNTS_TABLE)
+    .select('*')
+    .eq('provider_id', pid)
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+
+  if (existing) {
+    const { data: updated, error: updateErr } = await supabase
+      .from(BANK_ACCOUNTS_TABLE)
+      .update({
+        account_name,
+        account_number,
+        routing_number,
+        bank_name,
+        account_type,
+        status: 'active',
+      } as any)
+      .eq('provider_id', pid)
+      .select('*')
+      .single();
+    if (updateErr) throw updateErr;
+    return normalizeDbRowToPublic(updated as BankAccountDbRow);
   }
-  
-  await saveBankAccounts(accounts);
-  return bankAccount;
+
+  const id = randomUUID();
+  const { data: inserted, error: insertErr } = await supabase
+    .from(BANK_ACCOUNTS_TABLE)
+    .insert({
+      id,
+      provider_id: pid,
+      account_name,
+      account_number,
+      routing_number,
+      bank_name,
+      account_type,
+      status: 'active',
+    } as any)
+    .select('*')
+    .single();
+  if (insertErr) throw insertErr;
+  return normalizeDbRowToPublic(inserted as BankAccountDbRow);
 }
 
 /**
  * Get bank account for a provider
- * Returns metadata only (no sensitive data)
  */
 export async function getBankAccount(providerId: string): Promise<BankAccount | null> {
-  const accounts = await getBankAccounts();
-  return accounts.find(acc => acc.providerId === providerId && acc.status === 'active') || null;
+  const pid = String(providerId || '').trim();
+  if (!pid) return null;
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from(BANK_ACCOUNTS_TABLE)
+    .select('*')
+    .eq('provider_id', pid)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  const row = data as BankAccountDbRow;
+  const normalized = normalizeDbRowToPublic(row);
+  return normalized.status === 'active' ? normalized : null;
 }
 
 /**
@@ -126,17 +164,50 @@ export async function getBankAccountForDisplay(providerId: string): Promise<Bank
  * Marks account as disconnected rather than deleting it
  */
 export async function deleteBankAccount(providerId: string): Promise<boolean> {
-  const accounts = await getBankAccounts();
-  const index = accounts.findIndex(acc => acc.providerId === providerId);
-  
-  if (index >= 0) {
-    accounts[index] = {
-      ...accounts[index],
-      status: 'disconnected',
-    };
-    await saveBankAccounts(accounts);
-    return true;
-  }
-  
-  return false;
+  const pid = String(providerId || '').trim();
+  if (!pid) return false;
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from(BANK_ACCOUNTS_TABLE)
+    .update({ status: 'disconnected' } as any)
+    .eq('provider_id', pid)
+    .select('provider_id')
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+/**
+ * Admin helper: list bank accounts for masking / investigation.
+ * Returns masked metadata only.
+ */
+export async function listBankAccounts(): Promise<BankAccount[]> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from(BANK_ACCOUNTS_TABLE)
+    .select('*')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((row: any) => normalizeDbRowToPublic(row as BankAccountDbRow));
+}
+
+export async function findProviderIdsByBankAccountLast4(last4: string): Promise<string[]> {
+  const q = String(last4 || '').replace(/\D/g, '').slice(-4);
+  if (!q) return [];
+  const supabase = getSupabaseAdmin();
+
+  // Best-effort: use ends-with match; DB may store account numbers without whitespace.
+  const { data, error } = await supabase
+    .from(BANK_ACCOUNTS_TABLE)
+    .select('provider_id, account_number, status')
+    .like('account_number', `%${q}`)
+    .limit(50);
+  if (error) throw error;
+
+  return (data ?? [])
+    .filter((r: any) => String(r?.status || 'active').toLowerCase() === 'active')
+    .filter((r: any) => toLast4(r?.account_number) === q)
+    .map((r: any) => String(r?.provider_id || '').trim())
+    .filter(Boolean);
 }
