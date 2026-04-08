@@ -95,7 +95,12 @@ export default function AvailabilitySection() {
 
     const load = async () => {
       try {
-        const apiServiceType = selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType;
+        const apiServiceType =
+          selectedServiceType === 'test_prep'
+            ? 'tutoring'
+            : selectedServiceType === 'virtual_tour'
+              ? 'college_counseling'
+              : selectedServiceType;
         const params = new URLSearchParams({ serviceType: apiServiceType });
         const res = await fetch(`/api/availability?${params.toString()}`);
         const data = await res.json();
@@ -254,12 +259,19 @@ export default function AvailabilitySection() {
         return { dayOfWeek, enabled: !!source.enabled, timeRanges };
       });
 
+      const serviceTypes = enabledServices.length > 0 ? enabledServices : [selectedServiceType];
       const res = await fetch('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           providerId,
-          serviceType: selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType,
+          serviceType:
+            selectedServiceType === 'test_prep'
+              ? 'tutoring'
+              : selectedServiceType === 'virtual_tour'
+                ? 'college_counseling'
+                : selectedServiceType,
+          serviceTypes,
           timezone: 'America/New_York',
           days,
         }),

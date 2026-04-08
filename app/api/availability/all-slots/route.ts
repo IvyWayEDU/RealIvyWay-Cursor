@@ -207,6 +207,16 @@ export async function GET(req: NextRequest) {
             ? String((data as any).displayName).trim()
             : 'Provider';
 
+        const profile_image_url =
+          typeof (data as any)?.profile_image_url === 'string' && String((data as any).profile_image_url).trim()
+            ? String((data as any).profile_image_url).trim()
+            : null;
+
+        const avatar =
+          typeof (data as any)?.avatar === 'string' && String((data as any).avatar).trim()
+            ? String((data as any).avatar).trim()
+            : null;
+
         const providerSchoolName =
           schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
 
@@ -215,6 +225,8 @@ export async function GET(req: NextRequest) {
           providerId: id,
           providerName,
           providerSchoolName,
+          profile_image_url,
+          avatar,
           schoolIds,
           schoolNames,
           services,
@@ -226,6 +238,8 @@ export async function GET(req: NextRequest) {
       providerId: string;
       providerName: string;
       providerSchoolName: string | null;
+      profile_image_url: string | null;
+      avatar: string | null;
       schoolIds: string[];
       schoolNames: string[];
       services: string[];
@@ -356,6 +370,8 @@ export async function GET(req: NextRequest) {
                 providerId: p.providerId,
                 providerName: p.providerName,
                 providerSchoolName: p.providerSchoolName,
+                profile_image_url: p.profile_image_url,
+                avatar: p.avatar,
                 matchesRequestedSchool,
               };
             })

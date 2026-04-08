@@ -185,7 +185,12 @@ export default function AvailabilityClient() {
     const loadAvailability = async () => {
       setLoading(true);
       try {
-        const apiServiceType = selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType;
+        const apiServiceType =
+          selectedServiceType === 'test_prep'
+            ? 'tutoring'
+            : selectedServiceType === 'virtual_tour'
+              ? 'college_counseling'
+              : selectedServiceType;
         const params = new URLSearchParams({ serviceType: apiServiceType });
         const response = await fetch(`/api/availability?${params.toString()}`);
         const data = (await response.json()) as { availability: AvailabilityApiEntry | null; error?: string };
@@ -347,9 +352,16 @@ export default function AvailabilityClient() {
     setSaveMessage(null);
 
     try {
+      const serviceTypes = enabledServices.length > 0 ? enabledServices : [selectedServiceType];
       const requestBody = {
         timezone: 'America/New_York',
-        serviceType: selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType,
+        serviceType:
+          selectedServiceType === 'test_prep'
+            ? 'tutoring'
+            : selectedServiceType === 'virtual_tour'
+              ? 'college_counseling'
+              : selectedServiceType,
+        serviceTypes,
         days: availability,
       };
 
@@ -419,10 +431,17 @@ export default function AvailabilityClient() {
     setSaveMessage(null);
 
     try {
+      const serviceTypes = enabledServices.length > 0 ? enabledServices : [selectedServiceType];
       const requestBody = {
         intent: 'clear',
         timezone: 'America/New_York',
-        serviceType: selectedServiceType === 'test_prep' ? 'tutoring' : selectedServiceType,
+        serviceType:
+          selectedServiceType === 'test_prep'
+            ? 'tutoring'
+            : selectedServiceType === 'virtual_tour'
+              ? 'college_counseling'
+              : selectedServiceType,
+        serviceTypes,
       };
 
       const response = await fetch('/api/availability', {

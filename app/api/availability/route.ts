@@ -6,6 +6,28 @@ import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { updateProviderAvailability } from '@/lib/providers/storage';
 
+function toCanonicalSlotServiceType(raw: string): string {
+  const canonical = normalizeServiceType(String(raw || '').trim());
+  // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
+  if (canonical === 'virtual_tour') return 'college_counseling';
+  if (canonical === 'test_prep') return 'tutoring';
+  return canonical;
+}
+
+function uniqueNonEmptyStrings(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of input) {
+    const s = String(v || '').trim();
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
 function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone,
@@ -44,14 +66,7 @@ async function regenerateAvailabilitySlots(params: {
 }): Promise<void> {
   const providerId = String(params.providerId || '').trim();
   const timezone = String(params.timezone || '').trim() || 'America/New_York';
-  const canonicalServiceType = normalizeServiceType(String(params.serviceType || '').trim());
-  // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
-  const slotServiceType =
-    canonicalServiceType === 'virtual_tour'
-      ? 'college_counseling'
-      : canonicalServiceType === 'test_prep'
-        ? 'tutoring'
-        : canonicalServiceType;
+  const slotServiceType = toCanonicalSlotServiceType(String(params.serviceType || '').trim());
 
   if (!providerId) throw new Error('providerId is required to regenerate slots');
 
@@ -183,7 +198,13 @@ export async function GET(request: NextRequest) {
         : [];
 
     if (serviceType) {
-      const entry = availabilityArray.find((a: any) => String(a?.serviceType || '').trim() === serviceType) || null;
+      let lookup = String(serviceType || '').trim();
+      try {
+        lookup = toCanonicalSlotServiceType(lookup);
+      } catch {
+        // If normalize fails, fall back to raw serviceType lookup.
+      }
+      const entry = availabilityArray.find((a: any) => String(a?.serviceType || '').trim() === lookup) || null;
       return NextResponse.json({ availability: entry });
     }
 
@@ -216,6 +237,7 @@ export async function POST(request: NextRequest) {
     const providerId = session.roles.includes('admin') && requestedProviderId ? requestedProviderId : session.userId;
     const timezone = typeof body?.timezone === 'string' && body.timezone.trim() ? body.timezone.trim() : 'America/New_York';
     const serviceType = typeof body?.serviceType === 'string' ? body.serviceType.trim() : '';
+    const serviceTypes = uniqueNonEmptyStrings(body?.serviceTypes);
     const intent = typeof body?.intent === 'string' ? body.intent.trim() : 'save';
     const days = body?.days as DayAvailability[] | undefined;
     
@@ -226,11 +248,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!serviceType) {
+    if (!serviceType && serviceTypes.length === 0) {
       return NextResponse.json(
-        { error: 'serviceType is required' },
+        { error: 'serviceType (or serviceTypes[]) is required' },
         { status: 400 }
       );
+    }
+
+    const targetSlotServiceTypes = Array.from(
+      new Set(
+        (serviceTypes.length > 0 ? serviceTypes : [serviceType])
+          .map((st) => {
+            try {
+              return toCanonicalSlotServiceType(String(st || '').trim());
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean) as string[]
+      )
+    );
+
+    if (targetSlotServiceTypes.length === 0) {
+      return NextResponse.json({ error: 'No valid service types provided' }, { status: 400 });
     }
     
     // Check access: provider can only set their own, admin can set any
@@ -244,30 +284,37 @@ export async function POST(request: NextRequest) {
     // Clear flow (explicit action)
     if (intent === 'clear') {
       const updatedAt = new Date().toISOString();
-      await updateProviderAvailability(providerId, { serviceType, timezone, updatedAt, days: [], blocks: [] });
-      // Replace slot inventory: remove future unbooked slots for this provider/serviceType.
+      for (const slotServiceType of targetSlotServiceTypes) {
+        await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone, updatedAt, days: [], blocks: [] });
+      }
+
+      // Replace slot inventory: remove future unbooked slots for this provider/serviceType(s).
       try {
         const supabase = getSupabaseAdmin();
-        const canonical = normalizeServiceType(serviceType);
-        const slotServiceType = canonical === 'virtual_tour' ? 'college_counseling' : canonical === 'test_prep' ? 'tutoring' : canonical;
-        const { error: delErr } = await supabase
-          .from('availability_slots')
-          .delete()
-          .eq('provider_id', providerId)
-          .eq('service_type', slotServiceType)
-          .eq('is_booked', false)
-          .gt('start_time', new Date().toISOString());
-        if (delErr) throw delErr;
+        const nowIso = new Date().toISOString();
+        for (const slotServiceType of targetSlotServiceTypes) {
+          const { error: delErr } = await supabase
+            .from('availability_slots')
+            .delete()
+            .eq('provider_id', providerId)
+            .eq('service_type', slotServiceType)
+            .eq('is_booked', false)
+            .gt('start_time', nowIso);
+          if (delErr) throw delErr;
+        }
       } catch (e) {
         console.error('[AVAILABILITY_SLOTS_CLEAR_FAILED]', {
           providerId,
-          serviceType,
+          serviceTypes: targetSlotServiceTypes,
           error: e instanceof Error ? e.message : String(e),
         });
         throw e;
       }
-      console.log('[AVAILABILITY_WRITE]', { providerId, serviceType, daysCount: 0 });
-      return NextResponse.json({ availability: { providerId, serviceType, timezone, updatedAt, days: [], blocks: [] } }, { status: 200 });
+      console.log('[AVAILABILITY_WRITE]', { providerId, serviceTypes: targetSlotServiceTypes, daysCount: 0 });
+      return NextResponse.json(
+        { availability: { providerId, serviceType: targetSlotServiceTypes[0], timezone, updatedAt, days: [], blocks: [] } },
+        { status: 200 }
+      );
     }
     
     // Validate input (save)
@@ -346,14 +393,18 @@ export async function POST(request: NextRequest) {
       });
 
     const updatedAt = new Date().toISOString();
-    await updateProviderAvailability(providerId, { serviceType, timezone, updatedAt, days, blocks });
-    console.log('[AVAILABILITY_WRITE]', { providerId, serviceType, daysCount: days.length });
+    for (const slotServiceType of targetSlotServiceTypes) {
+      await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone, updatedAt, days, blocks });
+    }
+    console.log('[AVAILABILITY_WRITE]', { providerId, serviceTypes: targetSlotServiceTypes, daysCount: days.length });
 
     // Concrete slot inventory (next 4 weeks) is stored in Supabase `availability_slots`.
-    await regenerateAvailabilitySlots({ providerId, serviceType, timezone, blocks });
+    for (const slotServiceType of targetSlotServiceTypes) {
+      await regenerateAvailabilitySlots({ providerId, serviceType: slotServiceType, timezone, blocks });
+    }
 
     return NextResponse.json(
-      { availability: { providerId, serviceType, timezone, updatedAt, days, blocks } },
+      { availability: { providerId, serviceType: targetSlotServiceTypes[0], timezone, updatedAt, days, blocks } },
       { status: 201 }
     );
   } catch (error) {

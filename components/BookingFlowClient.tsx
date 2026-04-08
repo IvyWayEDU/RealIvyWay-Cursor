@@ -1672,6 +1672,8 @@ function Step4ChooseTimeSlot({
       providerId: string;
       providerName: string;
       providerSchoolName: string | null;
+      profile_image_url: string | null;
+      avatar: string | null;
       matchesRequestedSchool: boolean;
     }>
   >([]);
@@ -1899,6 +1901,9 @@ function Step4ChooseTimeSlot({
               providerName: typeof p?.providerName === 'string' && p.providerName.trim() ? p.providerName.trim() : 'Provider',
               providerSchoolName:
                 typeof p?.providerSchoolName === 'string' && p.providerSchoolName.trim() ? p.providerSchoolName.trim() : null,
+              profile_image_url:
+                typeof p?.profile_image_url === 'string' && p.profile_image_url.trim() ? p.profile_image_url.trim() : null,
+              avatar: typeof p?.avatar === 'string' && p.avatar.trim() ? p.avatar.trim() : null,
               matchesRequestedSchool: p?.matchesRequestedSchool === true,
             }))
             .filter((p) => !!p.providerId);
@@ -2062,27 +2067,46 @@ function Step4ChooseTimeSlot({
               ) : null}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {counselingProviders.map((p) => (
-                  <div key={p.providerId} className="rounded-lg border border-gray-200 bg-white p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-gray-900 truncate">{p.providerName}</div>
-                        {p.providerSchoolName ? (
-                          <div className="mt-0.5 text-xs text-gray-500 truncate">{p.providerSchoolName}</div>
-                        ) : null}
+                {counselingProviders.map((p) => {
+                  const avatarSrc = p.profile_image_url || p.avatar || '/default-avatar.svg';
+                  return (
+                    <div
+                      key={p.providerId}
+                      className="rounded-lg border border-gray-200 bg-white shadow-sm py-3 px-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={avatarSrc}
+                            alt={`${p.providerName} profile photo`}
+                            className="h-10 w-10 rounded-full object-cover flex-shrink-0"
+                            loading="lazy"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-900 leading-tight break-words">
+                              {p.providerName}
+                            </div>
+                            {p.providerSchoolName ? (
+                              <div className="mt-0.5 text-xs text-gray-500 leading-tight break-words">
+                                {p.providerSchoolName}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold border flex-shrink-0 ${
+                            p.matchesRequestedSchool
+                              ? 'bg-green-50 text-green-800 border-green-200'
+                              : 'bg-gray-50 text-gray-700 border-gray-200'
+                          }`}
+                        >
+                          {p.matchesRequestedSchool ? 'Attends this school' : 'General College Counselor'}
+                        </span>
                       </div>
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold border ${
-                          p.matchesRequestedSchool
-                            ? 'bg-green-50 text-green-800 border-green-200'
-                            : 'bg-gray-50 text-gray-700 border-gray-200'
-                        }`}
-                      >
-                        {p.matchesRequestedSchool ? 'Attends this school' : 'General College Counselor'}
-                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : null}
