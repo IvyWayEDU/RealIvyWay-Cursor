@@ -8,12 +8,14 @@ interface Step2BCollegeSchoolProps {
   schoolId: string | null;
   schoolName: string | null;
   onUpdate: (schoolId: string | null, schoolName: string | null) => void;
+  onSkip?: () => void;
 }
 
 export default function Step2BCollegeSchool({
   schoolId,
   schoolName,
   onUpdate,
+  onSkip,
 }: Step2BCollegeSchoolProps) {
   const [searchQuery, setSearchQuery] = useState(schoolName || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -137,6 +139,7 @@ export default function Step2BCollegeSchool({
     setSelectedSchool(null);
     setShowSuggestions(false);
     onUpdate(null, null);
+    if (onSkip) onSkip();
   };
 
   return (

@@ -112,15 +112,15 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
   };
 
   // Save progress after each step
-  const saveProgress = async () => {
+  const saveProgress = async (data: typeof onboardingData = onboardingData) => {
     try {
       await saveOnboardingProgress({
-        services: onboardingData.services,
-        subjects: onboardingData.subjects,
-        schoolId: onboardingData.schoolId,
-        schoolName: onboardingData.schoolName,
-        offersVirtualTours: onboardingData.offersVirtualTours,
-        profileImageUrl: onboardingData.profileImageUrl,
+        services: data.services,
+        subjects: data.subjects,
+        schoolId: data.schoolId,
+        schoolName: data.schoolName,
+        offersVirtualTours: data.offersVirtualTours,
+        profileImageUrl: data.profileImageUrl,
       });
     } catch (error) {
       console.error('Error saving progress:', error);
@@ -137,22 +137,24 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
     return () => clearTimeout(timer);
   }, [onboardingData]);
 
-  const handleNext = async () => {
+  const handleNext = async (overrides?: Partial<typeof onboardingData>) => {
     setError(null);
+    let data: typeof onboardingData = overrides ? ({ ...onboardingData, ...overrides } as any) : onboardingData;
+    if (overrides) updateData(overrides);
 
     // Validate current step
     if (currentStep === 'service-selection') {
-      if (onboardingData.services.length === 0) {
+      if (data.services.length === 0) {
         setError('Please select at least one service to continue.');
         return;
       }
     } else if (currentStep === 'subjects') {
-      if (onboardingData.subjects.length === 0) {
+      if (data.subjects.length === 0) {
         setError('Please select at least one subject to continue.');
         return;
       }
     } else if (currentStep === 'virtual-tours') {
-      if (onboardingData.offersVirtualTours === null) {
+      if (data.offersVirtualTours === null) {
         setError('Please select an option to continue.');
         return;
       }
@@ -164,17 +166,17 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
         const res = await fetch('/api/onboarding/provider-school', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schoolName: onboardingData.schoolName }),
+          body: JSON.stringify({ schoolName: data.schoolName }),
         });
         if (!res.ok) {
           const j = await res.json().catch(() => ({}));
           throw new Error(j?.error || 'Failed to save school');
         }
         const j = (await res.json()) as any;
-        updateData({
-          schoolId: typeof j?.schoolId === 'string' ? j.schoolId : null,
-          schoolName: typeof j?.schoolName === 'string' ? j.schoolName : null,
-        });
+        const nextSchoolId = typeof j?.schoolId === 'string' ? j.schoolId : null;
+        const nextSchoolName = typeof j?.schoolName === 'string' ? j.schoolName : null;
+        updateData({ schoolId: nextSchoolId, schoolName: nextSchoolName });
+        data = { ...data, schoolId: nextSchoolId, schoolName: nextSchoolName };
       } catch (e) {
         console.error('[onboarding] failed to submit school', e);
         setError(e instanceof Error ? e.message : 'Failed to save school');
@@ -183,7 +185,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
     }
 
     // Save progress
-    await saveProgress();
+    await saveProgress(data);
 
     // Move to next step
     const nextStep = getNextStep();
@@ -324,6 +326,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
               schoolId={onboardingData.schoolId}
               schoolName={onboardingData.schoolName}
               onUpdate={(schoolId, schoolName) => updateData({ schoolId, schoolName })}
+              onSkip={() => handleNext({ schoolId: null, schoolName: null })}
             />
           )}
 
@@ -357,7 +360,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
           {currentStep !== 'photo' ? (
             <button
               type="button"
-              onClick={handleNext}
+              onClick={() => handleNext()}
               disabled={isSubmitting}
               className="px-4 py-2 text-sm font-medium text-white bg-[#0088CB] rounded-md hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
             >
