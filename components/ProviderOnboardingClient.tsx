@@ -158,6 +158,30 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
       }
     }
 
+    // School step submission: resolve/insert into `schools`, then persist provider.school_id (or NULL if skipped).
+    if (currentStep === 'school') {
+      try {
+        const res = await fetch('/api/onboarding/provider-school', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schoolName: onboardingData.schoolName }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error || 'Failed to save school');
+        }
+        const j = (await res.json()) as any;
+        updateData({
+          schoolId: typeof j?.schoolId === 'string' ? j.schoolId : null,
+          schoolName: typeof j?.schoolName === 'string' ? j.schoolName : null,
+        });
+      } catch (e) {
+        console.error('[onboarding] failed to submit school', e);
+        setError(e instanceof Error ? e.message : 'Failed to save school');
+        return;
+      }
+    }
+
     // Save progress
     await saveProgress();
 
@@ -200,6 +224,26 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
         setError('Please answer the virtual tours question.');
         setIsSubmitting(false);
         return;
+      }
+
+      // Ensure school is persisted before completing onboarding (covers users who jump around steps).
+      if (needsSchool) {
+        const res = await fetch('/api/onboarding/provider-school', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schoolName: onboardingData.schoolName }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          setError(j?.error || 'Failed to save school');
+          setIsSubmitting(false);
+          return;
+        }
+        const j = (await res.json()) as any;
+        updateData({
+          schoolId: typeof j?.schoolId === 'string' ? j.schoolId : null,
+          schoolName: typeof j?.schoolName === 'string' ? j.schoolName : null,
+        });
       }
 
       // Save final progress

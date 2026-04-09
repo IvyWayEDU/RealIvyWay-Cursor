@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { SCHOOLS, School, searchSchools } from '@/data/schools';
-import { normalizeSchoolName } from '@/lib/models/normalizeSchoolName';
+
+type DbSchool = { id: string; name: string };
 
 interface Step2BCollegeSchoolProps {
   schoolId: string | null;
@@ -17,11 +17,32 @@ export default function Step2BCollegeSchool({
 }: Step2BCollegeSchoolProps) {
   const [searchQuery, setSearchQuery] = useState(schoolName || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [selectedSchool, setSelectedSchool] = useState<School | null>(
-    schoolId ? SCHOOLS.find(s => s.id === schoolId) || null : null
-  );
+  const [selectedSchool, setSelectedSchool] = useState<DbSchool | null>(null);
+  const [schools, setSchools] = useState<DbSchool[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
+
+  // Load schools from DB for suggestions dropdown
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/schools', { method: 'GET' });
+        if (!res.ok) return;
+        const json = (await res.json()) as any;
+        const list: DbSchool[] = Array.isArray(json?.schools) ? json.schools : [];
+        const cleaned = list
+          .map((s) => ({ id: String(s?.id ?? '').trim(), name: String(s?.name ?? '').trim() }))
+          .filter((s) => s.id && s.name);
+        if (!cancelled) setSchools(cleaned);
+      } catch {
+        // Non-blocking: free typing still works without suggestions.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Update search query when selected school changes
   useEffect(() => {
@@ -29,6 +50,22 @@ export default function Step2BCollegeSchool({
       setSearchQuery(selectedSchool.name);
     }
   }, [selectedSchool]);
+
+  // If parent passes an id/name (e.g. coming back to step), reflect it locally.
+  useEffect(() => {
+    const sid = typeof schoolId === 'string' ? schoolId.trim() : '';
+    const sname = typeof schoolName === 'string' ? schoolName.trim() : '';
+    if (!sid && !sname) {
+      setSelectedSchool(null);
+      setSearchQuery('');
+      return;
+    }
+    if (sname) setSearchQuery(sname);
+    if (sid) {
+      const match = schools.find((s) => s.id === sid) || null;
+      setSelectedSchool(match);
+    }
+  }, [schoolId, schoolName, schools]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -47,9 +84,13 @@ export default function Step2BCollegeSchool({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredSchools = searchQuery.trim()
-    ? searchSchools(searchQuery)
-    : [];
+  const filteredSchools = (() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return schools
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .slice(0, 25);
+  })();
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -65,7 +106,7 @@ export default function Step2BCollegeSchool({
     onUpdate(null, trimmed ? trimmed : null);
   };
 
-  const handleSelectSchool = (school: School) => {
+  const handleSelectSchool = (school: DbSchool) => {
     setSelectedSchool(school);
     setSearchQuery(school.name);
     setShowSuggestions(false);
@@ -87,22 +128,8 @@ export default function Step2BCollegeSchool({
       return;
     }
 
-    // If they didn't pick a dropdown item, normalize the free-text value.
-    if (!selectedSchool) {
-      const normalized = normalizeSchoolName(trimmed);
-      setSearchQuery(normalized);
-
-      // If their normalized name exactly matches a known school, auto-link to its ID
-      // (still suggestion-only; free text remains valid regardless).
-      const matched =
-        SCHOOLS.find((s) => s.name.toLowerCase() === normalized.toLowerCase()) || null;
-      if (matched) {
-        setSelectedSchool(matched);
-        onUpdate(matched.id, matched.name);
-      } else {
-        onUpdate(null, normalized);
-      }
-    }
+    // Free-typed values are allowed; do not require selecting a dropdown item.
+    if (!selectedSchool) onUpdate(null, trimmed);
   };
 
   const handleSkip = () => {
