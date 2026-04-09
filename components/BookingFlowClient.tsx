@@ -493,6 +493,7 @@ export default function BookingFlowClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(1);
+  const [flowError, setFlowError] = useState<string | null>(null);
   const appliedQueryPrefillRef = useRef<string>('');
   // Prevent initial localStorage persistence from clobbering query-driven "Book Again" prefills.
   const didInitRef = useRef<boolean>(false);
@@ -721,7 +722,17 @@ export default function BookingFlowClient() {
   };
 
   const handleNext = () => {
+    // Guardrails: protect against edge cases where a user proceeds without required selection.
+    if (currentStep === 4) {
+      const requiredSessions = getRequiredSessionsCount(bookingState.plan);
+      if ((bookingState.selectedSessions?.length ?? 0) < requiredSessions) {
+        setFlowError('Please select an available time before continuing.');
+        return;
+      }
+    }
+
     if (canProceed()) {
+      setFlowError(null);
       if (currentStep === totalSteps) {
         // Step 5 complete - navigate to summary
         // Save state one more time before navigation
@@ -741,11 +752,13 @@ export default function BookingFlowClient() {
 
   const handleBack = () => {
     if (currentStep > 1) {
+      setFlowError(null);
       setCurrentStep(currentStep - 1);
     }
   };
 
   const updateBookingState = (updates: Partial<BookingState>) => {
+    setFlowError(null);
     setBookingState((prev) => ({ ...prev, ...updates }));
   };
 
@@ -831,6 +844,11 @@ export default function BookingFlowClient() {
 
       {/* Step Content */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+        {flowError ? (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
+            <p className="text-sm text-red-800">{flowError}</p>
+          </div>
+        ) : null}
         {renderStepContent()}
       </div>
 
@@ -1531,9 +1549,12 @@ function Step4ChooseTimeSlot({
   const [availableSlots, setAvailableSlots] = useState<
     Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string }>
   >([]);
-  const [noSchoolMatch, setNoSchoolMatch] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
+  const [loadingNextAvailable, setLoadingNextAvailable] = useState(false);
+  const [nextAvailableSlots, setNextAvailableSlots] = useState<
+    Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; displayDate: string }>
+  >([]);
 
   const today = new Date();
   const year = currentMonth.getFullYear();
@@ -1601,9 +1622,22 @@ function Step4ChooseTimeSlot({
     const slotDate = new Date(slot.startTimeUTC);
     if (isNaN(slotDate.getTime())) return;
 
+    // Single-session plans: clicking ANY time replaces the selection (no toggle-off, no "unselect first").
+    if (requiredSessions === 1) {
+      const newSession: SelectedSession = {
+        providerId: null,
+        startTimeUTC: slot.startTimeUTC,
+        endTimeUTC: slot.endTimeUTC,
+        date: slotDate,
+        displayTime: slot.displayTime,
+        displayString: formatDateString(slotDate, slot.displayTime),
+      };
+      updateBookingState({ selectedSessions: [newSession], provider: null });
+      return;
+    }
+
     const existingIndex = bookingState.selectedSessions.findIndex(
-      (s) =>
-        s.startTimeUTC === slot.startTimeUTC && s.endTimeUTC === slot.endTimeUTC
+      (s) => s.startTimeUTC === slot.startTimeUTC && s.endTimeUTC === slot.endTimeUTC
     );
 
     if (existingIndex !== -1) {
@@ -1613,21 +1647,22 @@ function Step4ChooseTimeSlot({
         .map((s) => ({ ...s, providerId: null }));
       // Any time changes require re-confirming provider.
       updateBookingState({ selectedSessions: updatedSessions, provider: null });
-    } else {
-      // Add if not at limit and not already selected
-      if (selectedCount < requiredSessions) {
-        const newSession: SelectedSession = {
-          providerId: null,
-          startTimeUTC: slot.startTimeUTC,
-          endTimeUTC: slot.endTimeUTC,
-          date: slotDate,
-          displayTime: slot.displayTime,
-          displayString: formatDateString(slotDate, slot.displayTime),
-        };
-        const updatedSessions = [...bookingState.selectedSessions, newSession].map((s) => ({ ...s, providerId: null }));
-        // Any time changes require re-confirming provider.
-        updateBookingState({ selectedSessions: updatedSessions, provider: null });
-      }
+      return;
+    }
+
+    // Add if not at limit and not already selected
+    if (selectedCount < requiredSessions) {
+      const newSession: SelectedSession = {
+        providerId: null,
+        startTimeUTC: slot.startTimeUTC,
+        endTimeUTC: slot.endTimeUTC,
+        date: slotDate,
+        displayTime: slot.displayTime,
+        displayString: formatDateString(slotDate, slot.displayTime),
+      };
+      const updatedSessions = [...bookingState.selectedSessions, newSession].map((s) => ({ ...s, providerId: null }));
+      // Any time changes require re-confirming provider.
+      updateBookingState({ selectedSessions: updatedSessions, provider: null });
     }
   };
 
@@ -1680,11 +1715,14 @@ function Step4ChooseTimeSlot({
   useEffect(() => {
     if (!selectedDate) {
       setAvailableSlots([]);
-      setNoSchoolMatch(false);
       return;
     }
 
+    let cancelled = false;
+
     console.log("Selected date:", selectedDate);
+    setNextAvailableSlots([]);
+    setLoadingNextAvailable(false);
 
     // Build API request
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
@@ -1718,6 +1756,75 @@ function Step4ChooseTimeSlot({
       params.set('durationMinutes', '60');
     }
 
+    const baseParams = new URLSearchParams(params);
+    baseParams.delete('date');
+
+    const buildDateParam = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    const findNextAvailableSlots = async () => {
+      // Only run when the selected date itself has no availability.
+      if (!cancelled) setLoadingNextAvailable(true);
+      try {
+        const maxLookaheadDays = 30;
+        const tz = 'America/New_York';
+        const timeFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        });
+        const dateFormatter = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+        });
+
+        for (let i = 1; i <= maxLookaheadDays; i++) {
+          const d = new Date(selectedDate);
+          d.setDate(d.getDate() + i);
+
+          const p = new URLSearchParams(baseParams);
+          p.set('date', buildDateParam(d));
+
+          const res = await fetch(`/api/availability/all-slots?${p.toString()}`);
+          if (!res.ok) continue;
+          const data = await res.json();
+
+          const slots = Array.isArray(data?.slots) ? data.slots : [];
+          if (slots.length === 0) continue;
+
+          const mapped: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; displayDate: string }> =
+            slots
+              .map((slot: any) => {
+                const startTimeUTC = String(slot?.startTimeUTC || '').trim();
+                const endTimeUTC = String(slot?.endTimeUTC || '').trim();
+                if (!startTimeUTC || !endTimeUTC) return null;
+                const startDate = new Date(startTimeUTC);
+                if (isNaN(startDate.getTime())) return null;
+                return {
+                  startTimeUTC,
+                  endTimeUTC,
+                  displayTime: timeFormatter.format(startDate),
+                  displayDate: dateFormatter.format(startDate),
+                };
+              })
+              .filter(Boolean)
+              .slice(0, 9) as any;
+
+          if (!cancelled) setNextAvailableSlots(mapped);
+          return;
+        }
+
+        if (!cancelled) setNextAvailableSlots([]);
+      } catch {
+        if (!cancelled) setNextAvailableSlots([]);
+      } finally {
+        if (!cancelled) setLoadingNextAvailable(false);
+      }
+    };
+
     // Fetch slots from API
     setLoadingSlots(true);
     setSlotsError(null);
@@ -1731,7 +1838,6 @@ function Step4ChooseTimeSlot({
       .then(data => {
         const slots = Array.isArray(data?.slots) ? data.slots : [];
         console.log("Slots returned:", slots);
-        setNoSchoolMatch(Boolean(data?.noSchoolMatch));
 
         // Convert API slots to display format (time-first).
         const rawSlots: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string }> = (data.slots || [])
@@ -1751,17 +1857,26 @@ function Step4ChooseTimeSlot({
           })
           .filter((s: any) => typeof s.startTimeUTC === 'string' && typeof s.endTimeUTC === 'string');
 
-        setAvailableSlots(rawSlots);
+        if (!cancelled) setAvailableSlots(rawSlots);
+        if (rawSlots.length === 0) {
+          findNextAvailableSlots().catch(() => {});
+        }
       })
       .catch(err => {
         console.error('Error fetching slots:', err);
-        setSlotsError('Unable to load available time slots. Please try again.');
-        setAvailableSlots([]);
-        setNoSchoolMatch(false);
+        if (!cancelled) {
+          setSlotsError('Unable to load available time slots. Please try again.');
+          setAvailableSlots([]);
+          setNextAvailableSlots([]);
+        }
       })
       .finally(() => {
-        setLoadingSlots(false);
+        if (!cancelled) setLoadingSlots(false);
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     selectedDate,
     bookingState.service,
@@ -1897,13 +2012,6 @@ function Step4ChooseTimeSlot({
           <h3 className="text-lg font-semibold text-gray-900">
             Available times for {monthNames[month]} {selectedDate.getDate()}, {year}
           </h3>
-          {noSchoolMatch ? (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-              <p className="text-sm font-medium text-blue-900">
-                We currently don’t have a provider from this school. You can still book a session with one of our available counselors.
-              </p>
-            </div>
-          ) : null}
 
           {loadingSlots ? (
             <div className="text-center py-8">
@@ -1916,13 +2024,14 @@ function Step4ChooseTimeSlot({
             </div>
           ) : availableSlots.length === 0 ? (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="text-sm text-amber-800">No available time slots for this date. Please select another date.</p>
+              <p className="text-sm text-amber-800">No availability on this date.</p>
+              <p className="mt-1 text-xs text-amber-700">Please select another date to continue.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {availableSlots.map((slot) => {
                 const isSelectedTime = isSlotSelected(slot.startTimeUTC, slot.endTimeUTC);
-                const isDisabled = selectedCount >= requiredSessions && !isSelectedTime;
+                const isDisabled = requiredSessions > 1 && selectedCount >= requiredSessions && !isSelectedTime;
 
                 return (
                   <button
@@ -1953,6 +2062,30 @@ function Step4ChooseTimeSlot({
               })}
             </div>
           )}
+
+          {/* Next available fallback */}
+          {!loadingSlots && !slotsError && availableSlots.length === 0 ? (
+            <div className="pt-2">
+              <div className="text-sm font-semibold text-gray-900">Next available times:</div>
+              {loadingNextAvailable ? (
+                <div className="mt-2 text-sm text-gray-600">Finding the next available times…</div>
+              ) : nextAvailableSlots.length === 0 ? (
+                <div className="mt-2 text-sm text-gray-600">No upcoming availability found.</div>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {nextAvailableSlots.map((s) => (
+                    <li
+                      key={`${s.startTimeUTC}|${s.endTimeUTC}`}
+                      className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3"
+                    >
+                      <div className="text-sm font-medium text-gray-900">{s.displayDate}</div>
+                      <div className="text-sm text-gray-700">{s.displayTime}</div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -2022,6 +2155,7 @@ function Step5SelectProvider({
   >([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [providersError, setProvidersError] = useState<string | null>(null);
+  const [noSchoolMatch, setNoSchoolMatch] = useState(false);
   const selectedProviderId = bookingState.provider;
 
   useEffect(() => {
@@ -2029,6 +2163,7 @@ function Step5SelectProvider({
 
     const load = async () => {
       setProvidersError(null);
+      setNoSchoolMatch(false);
       setEligibleProviders([]);
 
       setLoadingProviders(true);
@@ -2114,6 +2249,7 @@ function Step5SelectProvider({
         });
 
         if (!cancelled) {
+          setNoSchoolMatch(noSchoolMatch);
           if (providersOut.length === 0) {
             setProvidersError('No providers are available for all selected times. Please go back and adjust your times.');
             return;
@@ -2153,6 +2289,14 @@ function Step5SelectProvider({
         </p>
       </div>
 
+      {bookingState.service === 'counseling' && noSchoolMatch ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <p className="text-sm font-medium text-blue-900">
+            We currently don’t have a provider from this school. You can still book a session with one of our available counselors.
+          </p>
+        </div>
+      ) : null}
+
       {loadingProviders ? (
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[#0088CB]"></div>
@@ -2178,7 +2322,6 @@ function Step5SelectProvider({
                 onClick={() => {
                   updateBookingState({
                     provider: p.providerId,
-                    selectedSessions: (bookingState.selectedSessions || []).map((s) => ({ ...s, providerId: p.providerId })),
                   });
                 }}
                 className={`w-full text-left p-5 rounded-lg border-2 transition-all focus:outline-none focus:ring-2 focus:ring-[#0088CB]/40 ${
