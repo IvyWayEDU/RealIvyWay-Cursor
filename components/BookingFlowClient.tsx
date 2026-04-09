@@ -1434,7 +1434,7 @@ function Step3ChooseSubjectOrSchool({
             <p className="text-sm text-gray-500">
               {isConfirmed
                 ? 'School confirmed. Click "Change" to select a different school.'
-                : 'Type any school name. Selecting from the dropdown (if available) improves matching.'}
+                : 'Enter your school or choose from suggestions.'}
             </p>
           </div>
 
@@ -1463,15 +1463,6 @@ function Step3ChooseSubjectOrSchool({
                   </button>
                 );
               })}
-            </div>
-          )}
-          
-          {/* No results message */}
-          {!isConfirmed && showSuggestions && searchQuery.trim() && filteredSchools.length === 0 && (
-            <div className="mt-2 p-4 bg-amber-50 border border-amber-200 rounded-md">
-              <p className="text-sm text-amber-900">
-                No matches in our school list for &quot;{searchQuery}&quot; — you can still continue with this school.
-              </p>
             </div>
           )}
 

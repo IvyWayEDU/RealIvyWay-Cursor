@@ -383,36 +383,7 @@ export const profileUpdateSchema = z
       });
     }
 
-    // Updated provider schema rules:
-    // - services: enum array (validated by providerServicesSchema)
-    // - school + schoolId required when services includes college_counseling OR virtual_tour
-    if (Array.isArray(data.services)) {
-      const needsSchool = data.services.includes('college_counseling') || data.services.includes('virtual_tour');
-      if (needsSchool) {
-        const resolvedSchoolId =
-          (typeof data.schoolId === 'string' && data.schoolId.trim() ? data.schoolId.trim() : '') ||
-          (Array.isArray(data.schoolIds) && data.schoolIds.length > 0 ? String(data.schoolIds[0] || '').trim() : '');
-        const resolvedSchool =
-          (typeof data.school === 'string' && data.school.trim() ? data.school.trim() : '') ||
-          (typeof data.schoolName === 'string' && data.schoolName.trim() ? data.schoolName.trim() : '') ||
-          (Array.isArray(data.schoolNames) && data.schoolNames.length > 0 ? String(data.schoolNames[0] || '').trim() : '');
-
-        if (!resolvedSchoolId) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['schoolId'],
-            message: 'schoolId is required when services includes college_counseling or virtual_tour',
-          });
-        }
-        if (!resolvedSchool) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ['school'],
-            message: 'school is required when services includes college_counseling or virtual_tour',
-          });
-        }
-      }
-    }
+    // School selection is optional.
   });
 
 export const bankAccountSchema = z.object({

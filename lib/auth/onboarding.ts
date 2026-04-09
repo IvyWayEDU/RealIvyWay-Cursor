@@ -5,6 +5,7 @@ import { getUserById, updateUser } from './storage';
 import { User } from './types';
 import { SCHOOLS, findSchoolByName } from '@/data/schools';
 import { normalizeSubjectId } from '@/lib/models/subjects';
+import { normalizeSchoolName } from '@/lib/models/normalizeSchoolName';
 
 export interface OnboardingData {
   profilePhotoUrl?: string;
@@ -82,6 +83,61 @@ export async function saveOnboardingProgress(
     // Normalize schoolIds if provided to ensure consistent matching
     const normalizedData = { ...data };
     
+    const hasExplicitSchoolUpdate =
+      Object.prototype.hasOwnProperty.call(normalizedData, 'schoolId') ||
+      Object.prototype.hasOwnProperty.call(normalizedData, 'schoolName') ||
+      Object.prototype.hasOwnProperty.call(normalizedData, 'school');
+
+    const rawSchoolName =
+      typeof (normalizedData as any).schoolName === 'string'
+        ? String((normalizedData as any).schoolName).trim()
+        : typeof (normalizedData as any).school === 'string'
+          ? String((normalizedData as any).school).trim()
+          : '';
+    const rawSchoolId =
+      typeof (normalizedData as any).schoolId === 'string' ? String((normalizedData as any).schoolId).trim() : '';
+
+    // If school was explicitly cleared/skipped, clear all related fields so merged updates don't keep stale values.
+    if (hasExplicitSchoolUpdate && !rawSchoolName && !rawSchoolId) {
+      (normalizedData as any).schoolId = null;
+      (normalizedData as any).schoolName = null;
+      (normalizedData as any).schoolIds = [];
+      (normalizedData as any).schoolNames = [];
+      (normalizedData as any).school_id = null;
+      (normalizedData as any).school_name = null;
+      (normalizedData as any).school = null;
+      (normalizedData as any).school_raw = null;
+      (normalizedData as any).school_normalized = null;
+    }
+
+    // If the user typed a free-text school (no canonical ID), accept it and normalize the display name.
+    // If the user selected from the dropdown (has a canonical ID), keep the provided casing as-is.
+    // We persist free-text to legacy `school` so completion logic can derive schoolIds/school_name consistently.
+    if (rawSchoolName) {
+      const incomingSchoolId =
+        rawSchoolId;
+
+      if (!incomingSchoolId) {
+        const normalizedName = normalizeSchoolName(rawSchoolName);
+        (normalizedData as any).school_raw = rawSchoolName;
+        (normalizedData as any).school_normalized = normalizedName;
+
+        (normalizedData as any).schoolId = null;
+        (normalizedData as any).schoolName = normalizedName;
+        (normalizedData as any).school = normalizedName;
+
+        // Clear any prior canonical arrays/fields so we don't keep stale IDs.
+        (normalizedData as any).schoolIds = [];
+        (normalizedData as any).schoolNames = [];
+        (normalizedData as any).school_id = null;
+        (normalizedData as any).school_name = null;
+      } else {
+        (normalizedData as any).schoolId = incomingSchoolId;
+        (normalizedData as any).school_raw = rawSchoolName;
+        (normalizedData as any).school_normalized = rawSchoolName;
+      }
+    }
+
     // Handle single schoolId/schoolName (from ProviderOnboardingClient)
     if (normalizedData.schoolId && normalizedData.schoolName) {
       normalizedData.schoolIds = [normalizedData.schoolId];
@@ -219,10 +275,7 @@ export async function completeOnboarding(): Promise<{ success: boolean; error?: 
       schoolNames = convertedSchools.map(s => s.name);
     }
 
-    // Validate counselors have schools
-    if (hasCounseling && schoolIds.length === 0 && !(user as any).school) {
-      return { success: false, error: 'School name is required for college counseling.' };
-    }
+    // School selection is optional; do not block onboarding completion.
 
     // Validate tutors have subjects
     if (hasTutoring && (!user.subjects || user.subjects.length === 0)) {

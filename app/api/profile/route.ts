@@ -7,6 +7,7 @@ import { handleApiError } from '@/lib/errorHandler';
 import { profileUpdateSchema } from '@/lib/validation/schemas';
 import { SCHOOLS, findSchoolByName } from '@/data/schools';
 import { normalizeSubjectId } from '@/lib/models/subjects';
+import { normalizeSchoolName } from '@/lib/models/normalizeSchoolName';
 
 export async function POST(request: NextRequest) {
   try {
@@ -76,6 +77,11 @@ export async function POST(request: NextRequest) {
           : typeof body.schoolName === 'string' && body.schoolName.trim()
             ? body.schoolName.trim()
             : existingPrimarySchoolName;
+
+      // If no canonical ID is provided, treat the school name as free-text and normalize it for display/storage.
+      if ((!nextPrimarySchoolId || !String(nextPrimarySchoolId).trim()) && nextPrimarySchoolName) {
+        nextPrimarySchoolName = normalizeSchoolName(nextPrimarySchoolName);
+      }
 
       if (typeof nextPrimarySchoolId === 'string' && nextPrimarySchoolId) {
         // Prefer canonical snake_case IDs from `data/schools.ts`.
@@ -208,10 +214,7 @@ export async function POST(request: NextRequest) {
         )
       );
 
-      const hasCounseling = servicesCanonical.includes('college_counseling');
-      const hasVirtualTours = servicesCanonical.includes('virtual_tour');
-
-      // School is required for counseling OR virtual tours.
+      // Resolve school identity if provided (optional).
       const nextSchoolId: string | null =
         (typeof updateData.school_id === 'string' && updateData.school_id.trim() ? updateData.school_id.trim() : null) ??
         (typeof (updateData as any).schoolId === 'string' && (updateData as any).schoolId.trim() ? (updateData as any).schoolId.trim() : null) ??
@@ -227,12 +230,7 @@ export async function POST(request: NextRequest) {
         (typeof (user as any)?.school_name === 'string' && (user as any).school_name.trim() ? (user as any).school_name.trim() : null) ??
         (Array.isArray((user as any)?.schoolNames) && (user as any).schoolNames.length > 0 ? String((user as any).schoolNames[0] || '').trim() : null);
 
-      if ((hasCounseling || hasVirtualTours) && (!nextSchoolId || !nextSchoolName)) {
-        return NextResponse.json(
-          { error: 'school and schoolId are required when services includes college_counseling or virtual_tour.' },
-          { status: 400 }
-        );
-      }
+      // School selection is optional; do not block profile updates.
 
       // Keep offersVirtualTours derived from services.
       updateData.services = servicesCanonical;

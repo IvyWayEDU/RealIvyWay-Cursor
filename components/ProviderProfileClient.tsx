@@ -317,10 +317,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
       const nextNeedsSchool = normalizedServices.includes('college_counseling') || normalizedServices.includes('virtual_tour');
       const schoolSelected = !!(schoolId && schoolId.trim()) && !!(schoolName && schoolName.trim());
 
-      if (nextNeedsSchool && !schoolSelected) {
-        throw new Error('School is required for college counseling or virtual tours.');
-      }
-
       const updateData: any = {
         name,
         email,
@@ -328,7 +324,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         profilePhotoUrl,
         services: normalizedServices,
         offersVirtualTours: normalizedServices.includes('virtual_tour'),
-        // Single-school model (required for counseling OR virtual tours)
+        // Single-school model (optional)
         school: schoolSelected ? schoolName : undefined,
         schoolId: schoolSelected ? schoolId : undefined,
         subjects,

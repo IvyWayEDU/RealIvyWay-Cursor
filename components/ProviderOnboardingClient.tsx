@@ -26,8 +26,13 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
   const [onboardingData, setOnboardingData] = useState({
     services: (initialUser as any)?.services || [],
     subjects: initialUser?.subjects || [],
-    schoolId: (initialUser as any)?.schoolId || (initialUser as any)?.schoolIds?.[0] || null,
-    schoolName: (initialUser as any)?.schoolName || (initialUser as any)?.schoolNames?.[0] || (initialUser as any)?.school || null,
+    schoolId: (initialUser as any)?.schoolId || (initialUser as any)?.school_id || (initialUser as any)?.schoolIds?.[0] || null,
+    schoolName:
+      (initialUser as any)?.schoolName ||
+      (initialUser as any)?.school_name ||
+      (initialUser as any)?.schoolNames?.[0] ||
+      (initialUser as any)?.school ||
+      null,
     offersVirtualTours: (initialUser as any)?.offersVirtualTours ?? null,
     profileImageUrl: (initialUser as any)?.profileImageUrl || null,
   });
@@ -146,11 +151,6 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
         setError('Please select at least one subject to continue.');
         return;
       }
-    } else if (currentStep === 'school') {
-      if (!onboardingData.schoolId || !onboardingData.schoolName) {
-        setError('Please select a school from the dropdown to continue.');
-        return;
-      }
     } else if (currentStep === 'virtual-tours') {
       if (onboardingData.offersVirtualTours === null) {
         setError('Please select an option to continue.');
@@ -192,12 +192,6 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
 
       if (needsSubjects && onboardingData.subjects.length === 0) {
         setError('Subjects are required for tutoring.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (needsSchool && (!onboardingData.schoolId || !onboardingData.schoolName)) {
-        setError('School selection is required for college counseling.');
         setIsSubmitting(false);
         return;
       }
