@@ -1,7 +1,7 @@
  import { NextRequest, NextResponse } from 'next/server';
  import { getServerSession } from '@/lib/auth/getServerSession';
  import { handleApiError } from '@/lib/errorHandler';
- import { resolveOrCreateSchoolByName } from '@/lib/schools/resolveSchool.server';
+import { resolveOrCreateSchoolByName } from '@/lib/schools/resolveSchool';
  import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
  import { updateUser } from '@/lib/auth/storage';
  import { upsertProviderDataByUserId } from '@/lib/providers/storage';
