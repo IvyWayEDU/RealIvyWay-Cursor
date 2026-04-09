@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { User } from '@/lib/auth/types';
-import { SCHOOLS, School, searchSchools } from '@/data/schools';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 
 interface ProviderProfileClientProps {
@@ -40,6 +39,8 @@ const normalizeProviderServiceTypeForSave = (input: unknown): string => {
   return underscored;
 };
 
+type DbSchool = { id: string; name: string };
+
 export default function ProviderProfileClient({ initialUser }: ProviderProfileClientProps) {
   const [name, setName] = useState(initialUser.name || '');
   const [email, setEmail] = useState(initialUser.email || '');
@@ -73,6 +74,19 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         ? String((initialUser as any).schoolNames[0] || '')
         : '') || ''
   );
+  const [schoolQuery, setSchoolQuery] = useState<string>(
+    (typeof (initialUser as any).school_name === 'string' && (initialUser as any).school_name.trim()
+      ? (initialUser as any).school_name.trim()
+      : Array.isArray((initialUser as any).schoolNames) && (initialUser as any).schoolNames.length > 0
+        ? String((initialUser as any).schoolNames[0] || '')
+        : (typeof (initialUser as any).school === 'string' && (initialUser as any).school.trim()
+          ? (initialUser as any).school.trim()
+          : '')) || ''
+  );
+  const [schools, setSchools] = useState<DbSchool[]>([]);
+  const [selectedSchool, setSelectedSchool] = useState<DbSchool | null>(null);
+  const schoolInputRef = useRef<HTMLInputElement>(null);
+  const schoolSuggestionsRef = useRef<HTMLDivElement>(null);
   const [subjects, setSubjects] = useState<string[]>(
     Array.isArray((initialUser as any).subjects)
       ? Array.from(
@@ -86,7 +100,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   );
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [schoolSearchTerm, setSchoolSearchTerm] = useState('');
   const [showSchoolSuggestions, setShowSchoolSuggestions] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -104,7 +117,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
 
   const hasService = (key: string) => services.includes(key);
   const isTutor = hasService('tutoring');
-  const needsSchool = hasService('college_counseling') || hasService('virtual_tour');
   const hasTestPrepSubject = Array.isArray(subjects) && subjects.includes('test_prep');
   const academicSubjects = Array.isArray(subjects) ? subjects.filter((s) => s !== 'test_prep') : [];
 
@@ -116,18 +128,72 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   }, [isTutor]);
 
   useEffect(() => {
-    if (!needsSchool) {
-      setSchoolId('');
-      setSchoolName('');
-      setSchoolSearchTerm('');
-      setShowSchoolSuggestions(false);
-    }
-  }, [needsSchool]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/schools', { method: 'GET' });
+        if (!res.ok) return;
+        const json = (await res.json()) as any;
+        const list: DbSchool[] = Array.isArray(json?.schools) ? json.schools : [];
+        const cleaned = list
+          .map((s) => ({ id: String(s?.id ?? '').trim(), name: String(s?.name ?? '').trim() }))
+          .filter((s) => s.id && s.name);
+        if (!cancelled) setSchools(cleaned);
+      } catch {
+        // Non-blocking: free typing still works without suggestions.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Get filtered schools from the shared catalog
-  const filteredSchools = schoolSearchTerm.trim()
-    ? searchSchools(schoolSearchTerm).filter(school => school.id !== schoolId)
-    : SCHOOLS.filter(school => school.id !== schoolId);
+  // Keep local "selected" state in sync with persisted values.
+  useEffect(() => {
+    const sid = typeof schoolId === 'string' ? schoolId.trim() : '';
+    const sname = typeof schoolName === 'string' ? schoolName.trim() : '';
+    if (!sid && !sname) {
+      setSelectedSchool(null);
+      return;
+    }
+    if (sid) {
+      const match = schools.find((s) => s.id === sid) || null;
+      setSelectedSchool(match);
+      // Backfill display name for legacy records that stored only the FK.
+      if (match && !sname) {
+        setSchoolName(match.name);
+        setSchoolQuery((prev) => (prev && prev.trim() ? prev : match.name));
+      }
+    } else {
+      setSelectedSchool(null);
+    }
+  }, [schoolId, schoolName, schools]);
+
+  // Close school suggestions when clicking outside.
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        schoolSuggestionsRef.current &&
+        !schoolSuggestionsRef.current.contains(event.target as Node) &&
+        schoolInputRef.current &&
+        !schoolInputRef.current.contains(event.target as Node)
+      ) {
+        setShowSchoolSuggestions(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredSchools = (() => {
+    const q = schoolQuery.trim().toLowerCase();
+    if (!q) return [];
+    return schools
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .filter((s) => s.id !== schoolId)
+      .slice(0, 25);
+  })();
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -314,8 +380,26 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
 
       // Validate service rules (client-side fast feedback; server also enforces).
       const normalizedServices = Array.from(new Set((services || []).map(normalizeProviderServiceTypeForSave).filter(Boolean)));
-      const nextNeedsSchool = normalizedServices.includes('college_counseling') || normalizedServices.includes('virtual_tour');
-      const schoolSelected = !!(schoolId && schoolId.trim()) && !!(schoolName && schoolName.trim());
+
+      // Persist provider school identity using onboarding logic (DB-backed, supports free typing + clearing).
+      const trimmedSchoolName = schoolQuery.trim();
+      const schoolRes = await fetch('/api/onboarding/provider-school', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schoolName: trimmedSchoolName }),
+      });
+      if (!schoolRes.ok) {
+        const j = await schoolRes.json().catch(() => ({}));
+        throw new Error(j?.error || 'Failed to save school');
+      }
+      const schoolJson = (await schoolRes.json()) as any;
+      const nextSchoolId = typeof schoolJson?.schoolId === 'string' ? schoolJson.schoolId : '';
+      const nextSchoolName = typeof schoolJson?.schoolName === 'string' ? schoolJson.schoolName : '';
+      setSchoolId(nextSchoolId);
+      setSchoolName(nextSchoolName);
+      setSchoolQuery(nextSchoolName || '');
+      setSelectedSchool(nextSchoolId ? schools.find((s) => s.id === nextSchoolId) || null : null);
+      setShowSchoolSuggestions(false);
 
       const updateData: any = {
         name,
@@ -324,9 +408,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         profilePhotoUrl,
         services: normalizedServices,
         offersVirtualTours: normalizedServices.includes('virtual_tour'),
-        // Single-school model (optional)
-        school: schoolSelected ? schoolName : undefined,
-        schoolId: schoolSelected ? schoolId : undefined,
         subjects,
       };
 
@@ -395,17 +476,19 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
     }
   };
 
-  const handleSelectSchool = (school: School) => {
+  const handleSelectSchool = (school: DbSchool) => {
+    setSelectedSchool(school);
     setSchoolId(school.id);
     setSchoolName(school.name);
-    setSchoolSearchTerm('');
+    setSchoolQuery(school.name);
     setShowSchoolSuggestions(false);
   };
 
   const clearSchool = () => {
+    setSelectedSchool(null);
     setSchoolId('');
     setSchoolName('');
-    setSchoolSearchTerm('');
+    setSchoolQuery('');
     setShowSchoolSuggestions(false);
   };
 
@@ -684,6 +767,97 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
               </div>
             )}
           </div>
+
+          {/* College / University (optional, always available) */}
+          <div>
+            <div className="flex items-center justify-between">
+              <label htmlFor="school" className="block text-sm font-medium text-gray-700">
+                College / University
+              </label>
+              {(schoolQuery.trim() || schoolId || schoolName) && (
+                <button
+                  type="button"
+                  onClick={clearSchool}
+                  className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div className="relative mt-1">
+              <input
+                ref={schoolInputRef}
+                type="text"
+                id="school"
+                value={schoolQuery}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSchoolQuery(v);
+                  setShowSchoolSuggestions(true);
+                  setSelectedSchool(null);
+                  const trimmed = v.trim();
+                  setSchoolId('');
+                  setSchoolName(trimmed);
+                }}
+                onFocus={() => {
+                  if (schoolQuery.trim() || filteredSchools.length > 0) setShowSchoolSuggestions(true);
+                }}
+                onBlur={() => {
+                  const trimmed = schoolQuery.trim();
+                  if (!trimmed) {
+                    setSelectedSchool(null);
+                    setSchoolId('');
+                    setSchoolName('');
+                    setSchoolQuery('');
+                    return;
+                  }
+                  // Free-typed values are allowed; no need to pick a dropdown item.
+                  if (!selectedSchool) {
+                    setSchoolId('');
+                    setSchoolName(trimmed);
+                    setSchoolQuery(trimmed);
+                  }
+                }}
+                placeholder="Start typing to search or enter your school"
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] sm:text-sm px-4 py-2"
+              />
+              {showSchoolSuggestions && filteredSchools.length > 0 && (
+                <div
+                  ref={schoolSuggestionsRef}
+                  className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto"
+                >
+                  {filteredSchools.map((school) => (
+                    <button
+                      key={school.id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        // Prevent blur-before-click on the input.
+                        e.preventDefault();
+                      }}
+                      onClick={() => handleSelectSchool(school)}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
+                    >
+                      {school.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!!schoolQuery.trim() && !selectedSchool && (
+              <p className="mt-2 text-xs text-gray-500">
+                Using: <span className="font-medium">{schoolQuery.trim()}</span>
+              </p>
+            )}
+            {!!selectedSchool && (
+              <p className="mt-2 text-xs text-gray-500">
+                Selected: <span className="font-medium">{selectedSchool.name}</span>
+              </p>
+            )}
+            {!schoolQuery.trim() && (
+              <p className="mt-2 text-xs text-gray-500">Optional. You can add or update this anytime.</p>
+            )}
+          </div>
         </div>
 
         {/* Services */}
@@ -728,63 +902,6 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
             </label>
           </div>
         </div>
-
-        {/* School selector (required for counseling + virtual tours) */}
-        {needsSchool && (
-          <div className="space-y-4">
-            <label className="block text-sm font-medium text-gray-700">
-              College / University
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                value={schoolSearchTerm}
-                onChange={(e) => {
-                  setSchoolSearchTerm(e.target.value);
-                  setShowSchoolSuggestions(true);
-                }}
-                onFocus={() => setShowSchoolSuggestions(true)}
-                placeholder="Search for a school (e.g., Harvard, Stanford)"
-                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
-              />
-              {showSchoolSuggestions && filteredSchools.length > 0 && (
-                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
-                  {filteredSchools.map((school) => (
-                    <button
-                      key={school.id}
-                      type="button"
-                      onClick={() => handleSelectSchool(school)}
-                      className="w-full text-left px-4 py-2 hover:bg-gray-100 focus:bg-gray-100 focus:outline-none"
-                    >
-                      {school.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {schoolId && schoolName && (
-              <div className="flex flex-wrap gap-2">
-                <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white">
-                  {schoolName}
-                  <button
-                    type="button"
-                    onClick={clearSchool}
-                    className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[#0077B3] focus:outline-none"
-                    aria-label="Remove selected school"
-                  >
-                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                      <path
-                        fillRule="evenodd"
-                        d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </button>
-                </span>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Subjects (if Tutoring) */}
         {isTutor && (
