@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
-import { normalizeServiceType } from '@/lib/availability/engine';
+import { bindDateKeyAndMinutesToUtcDate, normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { normalizeSubjectId } from '@/lib/models/subjects';
@@ -29,6 +29,20 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value || '2000';
+  const month = parts.find((p) => p.type === 'month')?.value || '01';
+  const day = parts.find((p) => p.type === 'day')?.value || '01';
+  return `${year}-${month}-${day}`;
 }
 
 function normalizeStringArray(input: unknown): string[] {
@@ -132,22 +146,27 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Date filtering fix: enforce DATE(start_time) = date (UTC date).
-    // Enforce filtering within the selected UTC day boundaries.
-    // IMPORTANT: do not mix local-time setters (setHours) with UTC setters (setUTCHours).
-    const selectedDate = new Date(date);
-    const startOfDay = new Date(selectedDate);
-    startOfDay.setUTCHours(0, 0, 0, 0);
+    // Strict date filtering:
+    // The booking UI selects dates/times in America/New_York, so we must interpret the YYYY-MM-DD
+    // as a *zoned day* (not a UTC day) to avoid cross-midnight leakage.
+    const bookingTimeZone = 'America/New_York';
+    const startOfDay = bindDateKeyAndMinutesToUtcDate(date, 0, bookingTimeZone);
+    const endOfDay = new Date(bindDateKeyAndMinutesToUtcDate(date, 24 * 60, bookingTimeZone).getTime() - 1);
 
-    const endOfDay = new Date(selectedDate);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-
-    console.log("[TIME_FILTER]", {
-      selectedDate,
-      startOfDay,
-      endOfDay
+    console.log('[TIME_FILTER]', {
+      dateKey: date,
+      bookingTimeZone,
+      startOfDayUTC: startOfDay.toISOString(),
+      endOfDayUTC: endOfDay.toISOString(),
     });
 
+    // IMPORTANT:
+    // Query a slightly wider UTC range, then filter by zoned dateKey in code.
+    // This prevents "evening slots" from being dropped due to UTC day boundaries or DST edge cases.
+    const queryStartISO = new Date(startOfDay.getTime() - 6 * 60 * 60 * 1000).toISOString();
+    const queryEndISO = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000).toISOString();
+
+    // This remains the canonical "selected day" window for debug + reserved-slot filtering.
     const rangeStartISO = startOfDay.toISOString();
     const rangeEndISO = endOfDay.toISOString();
 
@@ -486,8 +505,8 @@ export async function GET(req: NextRequest) {
         .eq('provider_id', explicitProviderId)
         .eq('is_booked', false)
         .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
-        .gte('start_time', rangeStartISO)
-        .lte('start_time', rangeEndISO)
+        .gte('start_time', queryStartISO)
+        .lte('start_time', queryEndISO)
         .gt('start_time', cutoffISO)
         .order('start_time', { ascending: true });
       if (error) throw error;
@@ -500,8 +519,8 @@ export async function GET(req: NextRequest) {
           .in('provider_id', batch)
           .eq('is_booked', false)
           .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
-          .gte('start_time', rangeStartISO)
-          .lte('start_time', rangeEndISO)
+          .gte('start_time', queryStartISO)
+          .lte('start_time', queryEndISO)
           .gt('start_time', cutoffISO)
           .order('start_time', { ascending: true });
         if (error) throw error;
@@ -518,8 +537,8 @@ export async function GET(req: NextRequest) {
 
     const bookedWindows = await getBookedSessionWindowsForProviders({
       providerIds,
-      rangeStartISO,
-      rangeEndISO,
+      rangeStartISO: queryStartISO,
+      rangeEndISO: queryEndISO,
       defaultDurationMinutesWhenMissingEnd: 60,
     });
     const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
@@ -535,6 +554,11 @@ export async function GET(req: NextRequest) {
         const startTimeUTC = new Date((r as any)?.start_time).toISOString();
         const endTimeUTC = new Date((r as any)?.end_time).toISOString();
         if (!providerId) return null;
+
+        // Ensure the slot belongs to the selected date in the booking timezone.
+        // (Do NOT rely on UTC date boundaries.)
+        const slotDateKey = formatDateKeyInTimeZone(new Date(startTimeUTC), bookingTimeZone);
+        if (slotDateKey !== date) return null;
 
         const key = `${providerId}|${startTimeUTC}|${endTimeUTC}`;
         if (reservedSet.has(key)) return null;
@@ -557,6 +581,16 @@ export async function GET(req: NextRequest) {
       if (!uniqByTime.has(key)) uniqByTime.set(key, { startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC });
     }
     const slots = Array.from(uniqByTime.values());
+
+    const slotsSorted = [...slots].sort((a, b) => new Date(a.startTimeUTC).getTime() - new Date(b.startTimeUTC).getTime());
+    console.log('[SLOT_RANGE_DEBUG]', {
+      providerId: explicitProviderId || null,
+      serviceType: normalizedServiceType,
+      selectedDate: date,
+      firstSlot: slotsSorted[0] || null,
+      lastSlot: slotsSorted[slotsSorted.length - 1] || null,
+      slotCount: slotsSorted.length,
+    });
 
     // Keep `providers` for backward compatibility, but booking UI no longer uses it.
     return NextResponse.json({ slots, providers: [], noSchoolMatch }, { status: 200, headers: rateHeaders });

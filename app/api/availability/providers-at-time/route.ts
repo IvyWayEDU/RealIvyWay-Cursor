@@ -19,6 +19,31 @@ const QuerySchema = z.object({
   schoolName: z.string().optional(),
 });
 
+function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value || '2000';
+  const month = parts.find((p) => p.type === 'month')?.value || '01';
+  const day = parts.find((p) => p.type === 'day')?.value || '01';
+  return `${year}-${month}-${day}`;
+}
+
+function formatTimeHHMMInTimeZone(date: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  // Example output: "09:00"
+  return formatter.format(date);
+}
+
 function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return input.map((v) => String(v || '').trim()).filter(Boolean);
@@ -60,6 +85,10 @@ export async function GET(req: NextRequest) {
     if (isNaN(startD.getTime())) {
       return NextResponse.json({ error: 'Invalid startTimeUTC (must be ISO timestamp)' }, { status: 400 });
     }
+
+    const bookingTimeZone = 'America/New_York';
+    const selectedDate = formatDateKeyInTimeZone(startD, bookingTimeZone);
+    const selectedTime = formatTimeHHMMInTimeZone(startD, bookingTimeZone);
 
     const normalizedServiceType = normalizeServiceType(serviceType);
     // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
@@ -111,6 +140,12 @@ export async function GET(req: NextRequest) {
 
     const providerIdsFromSlots = Array.from(new Set(candidateSlotRows.map((r) => r.providerId)));
     if (providerIdsFromSlots.length === 0) {
+      console.log('[DATE_FILTER_DEBUG]', {
+        selectedDate,
+        selectedTime,
+        matchingSlotCount: 0,
+        providerIds: [],
+      });
       console.log('[BOOKING_FLOW]', {
         selectedService: normalizedServiceType,
         selectedTime: startD.toISOString(),
@@ -148,6 +183,12 @@ export async function GET(req: NextRequest) {
     });
 
     if (providerIdsStillFree.length === 0) {
+      console.log('[DATE_FILTER_DEBUG]', {
+        selectedDate,
+        selectedTime,
+        matchingSlotCount: 0,
+        providerIds: [],
+      });
       console.log('[BOOKING_FLOW]', {
         selectedService: normalizedServiceType,
         selectedTime: startD.toISOString(),
@@ -394,6 +435,13 @@ export async function GET(req: NextRequest) {
     }
 
     const providerIds = providerCandidates.map((p) => p.providerId);
+
+    console.log('[DATE_FILTER_DEBUG]', {
+      selectedDate,
+      selectedTime,
+      matchingSlotCount: providerIdsStillFree.length,
+      providerIds,
+    });
 
     console.log('[BOOKING_FLOW]', {
       selectedService: normalizedServiceType,

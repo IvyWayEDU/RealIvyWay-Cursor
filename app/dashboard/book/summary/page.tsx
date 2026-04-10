@@ -41,6 +41,7 @@ interface BookingState {
   plan: Plan;
   subject: Subject;
   topic: Topic;
+  selectedLanguage?: string;
   school: School;
   schoolId?: string | null;
   schoolName?: string | null;

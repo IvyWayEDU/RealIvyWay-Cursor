@@ -81,6 +81,7 @@ interface BookingState {
   plan: Plan;
   subject: Subject;
   topic: Topic;
+  selectedLanguage: string;
   school: SelectedSchool;
   // Explicit school identity for counseling flows (more reliable than relying solely on nested `school`)
   schoolId: string | null;
@@ -503,6 +504,7 @@ export default function BookingFlowClient() {
     plan: null,
     subject: null,
     topic: null,
+    selectedLanguage: '',
     school: null,
     schoolId: null,
     schoolName: null,
@@ -562,6 +564,15 @@ export default function BookingFlowClient() {
             (schoolId && schoolName ? ({ id: schoolId, name: schoolName } as School) : null))
         : null;
 
+    const prefillTopic = topicParam && topicParam.trim() ? topicParam.trim() : null;
+    const prefillLanguage =
+      normalizedService === 'tutoring' &&
+      normalizedSubject &&
+      normalizeSubjectId(normalizedSubject) === 'languages' &&
+      prefillTopic
+        ? prefillTopic
+        : '';
+
     setBookingState((prev) => ({
       ...prev,
       service: normalizedService,
@@ -571,8 +582,9 @@ export default function BookingFlowClient() {
         normalizedService === 'tutoring' || normalizedService === 'test-prep' ? (normalizedSubject ?? null) : null,
       topic:
         normalizedService === 'tutoring' || normalizedService === 'test-prep'
-          ? (topicParam && topicParam.trim() ? topicParam.trim() : null)
+          ? prefillTopic
           : null,
+      selectedLanguage: prefillLanguage,
       school:
         normalizedService === 'counseling' || normalizedService === 'virtual-tour' ? (resolvedSchool ?? null) : null,
       schoolId:
@@ -647,6 +659,13 @@ export default function BookingFlowClient() {
           parsed.schoolId = (typeof finalSchool?.id === 'string' ? finalSchool.id : '') || (parsedSchoolId || null);
           parsed.schoolName =
             (typeof finalSchool?.name === 'string' ? finalSchool.name : '') || (parsedSchoolName || null);
+
+          // Backfill selectedLanguage for older stored booking states (Languages subject).
+          const parsedSelectedLanguage = typeof parsed?.selectedLanguage === 'string' ? parsed.selectedLanguage : '';
+          const parsedSubject = typeof parsed?.subject === 'string' ? parsed.subject : '';
+          const parsedTopic = typeof parsed?.topic === 'string' ? parsed.topic : '';
+          const isLanguages = parsedSubject && normalizeSubjectId(parsedSubject) === 'languages';
+          parsed.selectedLanguage = parsedSelectedLanguage || (isLanguages ? parsedTopic : '');
 
           setBookingState(parsed);
         }
@@ -723,6 +742,24 @@ export default function BookingFlowClient() {
   };
 
   const handleNext = () => {
+    // Step 3 (Languages): trim once before validation/proceeding.
+    if (
+      currentStep === 3 &&
+      bookingState.service === 'tutoring' &&
+      bookingState.subject &&
+      normalizeSubjectId(bookingState.subject) === 'languages'
+    ) {
+      const raw = typeof bookingState.selectedLanguage === 'string' ? bookingState.selectedLanguage : '';
+      const trimmed = raw.trim();
+      if (trimmed !== raw || (bookingState.topic || '') !== (trimmed || '')) {
+        setBookingState((prev) => ({
+          ...prev,
+          selectedLanguage: trimmed,
+          topic: trimmed ? trimmed : null,
+        }));
+      }
+    }
+
     // Guardrails: protect against edge cases where a user proceeds without required selection.
     if (currentStep === 4) {
       const requiredSessions = getRequiredSessionsCount(bookingState.plan);
@@ -909,6 +946,7 @@ function Step1ChooseService({
                 plan: null,
                 subject: null,
                 topic: null,
+                selectedLanguage: '',
                 school: null,
                 schoolId: null,
                 schoolName: null,
@@ -1227,7 +1265,7 @@ function Step3ChooseSubjectOrSchool({
 
   const handleSubjectChange = (subject: string | null) => {
     // When subject changes, clear the topic
-    updateBookingState({ subject, topic: null });
+    updateBookingState({ subject, topic: null, selectedLanguage: '' });
   };
 
   // Save school to recent selections (store school ID)
@@ -1344,56 +1382,48 @@ function Step3ChooseSubjectOrSchool({
               {isLanguageTutoring ? (
                 <>
                   <label className="block text-sm font-medium text-gray-700">Which language do you want to learn?</label>
-                  {(() => {
-                    const current = String(bookingState.topic || '').trim();
-                    const normalizedCurrent = normalizeLanguageTutoringLabel(current);
-                    const presetMatch =
-                      LANGUAGE_TUTORING_OPTIONS.find((opt) => normalizeLanguageTutoringLabel(opt) === normalizedCurrent) || null;
-                    const selectValue = presetMatch ? presetMatch : current ? '__other__' : '';
-                    return (
-                      <div className="space-y-2">
-                        <select
-                          value={selectValue}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (!v) {
-                              updateBookingState({ topic: null });
-                              return;
-                            }
-                            if (v === '__other__') {
-                              // Keep existing custom topic if present; otherwise require input.
-                              updateBookingState({ topic: presetMatch ? null : (current.trim() ? current.trim() : null) });
-                              return;
-                            }
-                            updateBookingState({ topic: v });
-                          }}
-                          className="w-full px-4 py-3 border rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none border-gray-300"
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {LANGUAGE_TUTORING_OPTIONS.map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => updateBookingState({ selectedLanguage: opt, topic: opt })}
+                          className={`rounded-full border px-3 py-1 text-sm font-semibold transition-colors ${
+                            normalizeLanguageTutoringLabel(bookingState.selectedLanguage) === normalizeLanguageTutoringLabel(opt)
+                              ? 'border-[#0088CB] bg-blue-50 text-[#0088CB]'
+                              : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                          }`}
                         >
-                          <option value="">Select a language...</option>
-                          {LANGUAGE_TUTORING_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
-                          ))}
-                          <option value="__other__">Other</option>
-                        </select>
-                        {selectValue === '__other__' ? (
-                          <input
-                            type="text"
-                            value={presetMatch ? '' : current}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              updateBookingState({ topic: v.trim() ? v.trim() : null });
-                            }}
-                            placeholder="Enter the language (e.g. Swahili)"
-                            required
-                            className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
-                          />
-                        ) : null}
-                        <p className="text-sm text-gray-500">Required.</p>
-                      </div>
-                    );
-                  })()}
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={bookingState.selectedLanguage || ''}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        const trimmed = raw.trim();
+                        updateBookingState({
+                          selectedLanguage: raw,
+                          topic: trimmed ? trimmed : null,
+                        });
+                      }}
+                      onBlur={() => {
+                        const raw = String(bookingState.selectedLanguage || '');
+                        const trimmed = raw.trim();
+                        updateBookingState({
+                          selectedLanguage: trimmed,
+                          topic: trimmed ? trimmed : null,
+                        });
+                      }}
+                      placeholder="Type any language (e.g. Swahili)"
+                      required
+                      className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
+                    />
+                    <p className="text-sm text-gray-500">Required — type anything.</p>
+                  </div>
                 </>
               ) : (
                 <>
@@ -1799,8 +1829,9 @@ function Step4ChooseTimeSlot({
     if (bookingState.subject) {
       const canonical = normalizeSubjectId(bookingState.subject);
       params.set('subject', canonical || bookingState.subject);
-      if ((canonical || bookingState.subject) === 'languages' && bookingState.topic) {
-        params.set('language', bookingState.topic);
+      if ((canonical || bookingState.subject) === 'languages') {
+        const lang = String(bookingState.selectedLanguage || bookingState.topic || '').trim();
+        if (lang) params.set('language', lang);
       }
     }
     if (schoolId) params.set('schoolId', schoolId);
@@ -2260,7 +2291,10 @@ function Step5SelectProvider({
 
           const params = new URLSearchParams({ startTimeUTC, serviceType });
           if (subject) params.set('subject', subject);
-          if (subject === 'languages' && bookingState.topic) params.set('language', bookingState.topic);
+          if (subject === 'languages') {
+            const lang = String(bookingState.selectedLanguage || bookingState.topic || '').trim();
+            if (lang) params.set('language', lang);
+          }
           const sid = String(schoolId || '').trim();
           const sname = String(schoolName || '').trim();
           if (sid) params.set('schoolId', sid);
