@@ -8,11 +8,13 @@ import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
+import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 
 const QuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
   serviceType: z.string(),
   subject: z.string().optional(),
+  language: z.string().optional(),
   schoolId: z.string().optional(),
   schoolName: z.string().optional(),
   durationMinutes: z.string().optional(),
@@ -69,6 +71,7 @@ export async function GET(req: NextRequest) {
       date: url.searchParams.get('date'),
       serviceType: url.searchParams.get('serviceType'),
       subject: url.searchParams.get('subject') || undefined,
+      language: url.searchParams.get('language') || undefined,
       schoolId: url.searchParams.get('schoolId') || undefined,
       schoolName: url.searchParams.get('schoolName') || undefined,
       durationMinutes: url.searchParams.get('durationMinutes') || undefined,
@@ -80,7 +83,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: parsed.error.issues?.[0]?.message || 'Invalid query' }, { status: 400 });
     }
 
-    const { date, serviceType, subject, schoolId, schoolName, providerId, debugOnlyProviderFilter } = parsed.data;
+    const { date, serviceType, subject, language, schoolId, schoolName, providerId, debugOnlyProviderFilter } = parsed.data;
 
     const normalizedServiceType = normalizeServiceType(serviceType);
     // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
@@ -198,6 +201,7 @@ export async function GET(req: NextRequest) {
 
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
+    const requestedLanguageRaw = String(language || '').trim();
 
     // Optional: load provider subjects from a dedicated column when present.
     // Kept in a separate query so older schemas (without providers.subjects) don't 500.
@@ -230,6 +234,7 @@ export async function GET(req: NextRequest) {
     // Fallback: some environments store provider subjects only on the related `users.data.subjects`.
     // Pull those too (best-effort) so availability matching doesn't depend on providers.data being up to date.
     const subjectsByUserId = new Map<string, string[]>();
+    const languagesByUserId = new Map<string, string[]>();
     try {
       const userIds = Array.from(
         new Set(
@@ -245,6 +250,7 @@ export async function GET(req: NextRequest) {
           const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
           const data = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : {};
           const subj = Array.isArray((data as any)?.subjects) ? (data as any).subjects : [];
+          const langs = Array.isArray((data as any)?.languages) ? (data as any).languages : [];
           if (!id) continue;
           subjectsByUserId.set(
             id,
@@ -255,6 +261,10 @@ export async function GET(req: NextRequest) {
                   .filter((s: any): s is string => !!s)
               )
             )
+          );
+          languagesByUserId.set(
+            id,
+            Array.from(new Set(langs.map((s: any) => String(s ?? '').trim()).filter(Boolean)))
           );
         }
       }
@@ -312,6 +322,17 @@ export async function GET(req: NextRequest) {
           )
         );
 
+        const providerLanguages = Array.from(
+          new Set(
+            [
+              ...(userId ? languagesByUserId.get(userId) || [] : []),
+              ...normalizeStringArray((data as any)?.languages),
+            ]
+              .map((s) => String(s ?? '').trim())
+              .filter(Boolean)
+          )
+        );
+
         const providerName =
           typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
             ? String((data as any).displayName).trim()
@@ -342,6 +363,7 @@ export async function GET(req: NextRequest) {
           services,
           offersVirtualTours,
           subjects: Array.isArray(canonicalSubjects) ? canonicalSubjects : [],
+          languages: providerLanguages,
         };
       })
       .filter(Boolean) as Array<{
@@ -355,6 +377,7 @@ export async function GET(req: NextRequest) {
       services: string[];
       offersVirtualTours: boolean;
       subjects: string[];
+      languages: string[];
     }>;
 
     const matchesSchoolStrict = (p: (typeof providersAll)[number]) => {
@@ -429,7 +452,20 @@ export async function GET(req: NextRequest) {
         : providerCandidates;
 
     const explicitProviderId = String(providerId || '').trim();
-    const providerIds = explicitProviderId ? [explicitProviderId] : uniqStrings(matchingProviders.map((p) => p.providerId));
+    const shouldApplyLanguageFilter =
+      !explicitProviderId &&
+      normalizedServiceType === 'tutoring' &&
+      normalizedSelectedSubjects.some((s) => String(s || '').trim().toLowerCase() === 'languages');
+
+    const languageFilteredProviders = shouldApplyLanguageFilter
+      ? requestedLanguageRaw
+        ? matchingProviders.filter((p) => Array.isArray((p as any).languages) && (p as any).languages.some((l: any) => languageTutoringMatches(String(l ?? ''), requestedLanguageRaw)))
+        : []
+      : matchingProviders;
+
+    const providerIds = explicitProviderId
+      ? [explicitProviderId]
+      : uniqStrings(languageFilteredProviders.map((p) => p.providerId));
 
     if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && normalizedSelectedSubjects.length > 0) {
       console.log('[SUBJECT_FILTER]', { subjects: normalizedSelectedSubjects, providerIds });

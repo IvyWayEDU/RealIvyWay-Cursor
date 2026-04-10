@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { SCHOOLS, School, searchSchools } from '@/data/schools';
 import { PRICING_CATALOG, formatUsdFromCents } from '@/lib/pricing/catalog';
 import { normalizeSubjectId } from '@/lib/models/subjects';
+import { LANGUAGE_TUTORING_OPTIONS, normalizeLanguageTutoringLabel } from '@/lib/models/languageTutoring';
 
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
 type Plan = string | null;
@@ -1118,6 +1119,8 @@ function Step3ChooseSubjectOrSchool({
   const isTutoring = bookingState.service === 'tutoring';
   const isTestPrep = bookingState.service === 'test-prep';
   const isVirtualTour = bookingState.service === 'virtual-tour';
+  const isLanguageTutoring =
+    isTutoring && !!bookingState.subject && normalizeSubjectId(bookingState.subject) === 'languages';
   const availableTopics = bookingState.subject && isTutoring ? TUTORING_TOPICS[bookingState.subject] || [] : [];
 
   // Provider availability flags (standardized across ALL services).
@@ -1338,31 +1341,89 @@ function Step3ChooseSubjectOrSchool({
           {/* Topic Input (free text) - Tutoring + Test Prep, and only after subject is selected */}
           {(isTutoring || isTestPrep) && bookingState.subject && (
             <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700">What topic do you need help with?</label>
-              <input
-                type="text"
-                value={bookingState.topic || ''}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  updateBookingState({ topic: v.trim() ? v.trim() : null });
-                }}
-                placeholder={
-                  isTestPrep
-                    ? 'e.g. SAT Reading, ACT Science, AP Biology FRQs'
-                    : 'e.g. Quadratic equations, Photosynthesis, Essay writing'
-                }
-                list={isTutoring ? 'ivyway-topic-suggestions' : undefined}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
-              />
-              {isTutoring && availableTopics.length > 0 && (
-                <datalist id="ivyway-topic-suggestions">
-                  {availableTopics.map((t) => (
-                    <option key={t} value={t} />
-                  ))}
-                </datalist>
+              {isLanguageTutoring ? (
+                <>
+                  <label className="block text-sm font-medium text-gray-700">Which language do you want to learn?</label>
+                  {(() => {
+                    const current = String(bookingState.topic || '').trim();
+                    const normalizedCurrent = normalizeLanguageTutoringLabel(current);
+                    const presetMatch =
+                      LANGUAGE_TUTORING_OPTIONS.find((opt) => normalizeLanguageTutoringLabel(opt) === normalizedCurrent) || null;
+                    const selectValue = presetMatch ? presetMatch : current ? '__other__' : '';
+                    return (
+                      <div className="space-y-2">
+                        <select
+                          value={selectValue}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) {
+                              updateBookingState({ topic: null });
+                              return;
+                            }
+                            if (v === '__other__') {
+                              // Keep existing custom topic if present; otherwise require input.
+                              updateBookingState({ topic: presetMatch ? null : (current.trim() ? current.trim() : null) });
+                              return;
+                            }
+                            updateBookingState({ topic: v });
+                          }}
+                          className="w-full px-4 py-3 border rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none border-gray-300"
+                        >
+                          <option value="">Select a language...</option>
+                          {LANGUAGE_TUTORING_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                          <option value="__other__">Other</option>
+                        </select>
+                        {selectValue === '__other__' ? (
+                          <input
+                            type="text"
+                            value={presetMatch ? '' : current}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              updateBookingState({ topic: v.trim() ? v.trim() : null });
+                            }}
+                            placeholder="Enter the language (e.g. Swahili)"
+                            required
+                            className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
+                          />
+                        ) : null}
+                        <p className="text-sm text-gray-500">Required.</p>
+                      </div>
+                    );
+                  })()}
+                </>
+              ) : (
+                <>
+                  <label className="block text-sm font-medium text-gray-700">What topic do you need help with?</label>
+                  <input
+                    type="text"
+                    value={bookingState.topic || ''}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      updateBookingState({ topic: v.trim() ? v.trim() : null });
+                    }}
+                    placeholder={
+                      isTestPrep
+                        ? 'e.g. SAT Reading, ACT Science, AP Biology FRQs'
+                        : 'e.g. Quadratic equations, Photosynthesis, Essay writing'
+                    }
+                    list={isTutoring ? 'ivyway-topic-suggestions' : undefined}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] outline-none"
+                  />
+                  {isTutoring && availableTopics.length > 0 && (
+                    <datalist id="ivyway-topic-suggestions">
+                      {availableTopics.map((t) => (
+                        <option key={t} value={t} />
+                      ))}
+                    </datalist>
+                  )}
+                  <p className="text-sm text-gray-500">Required — type anything.</p>
+                </>
               )}
-              <p className="text-sm text-gray-500">Required — type anything.</p>
             </div>
           )}
 
@@ -1738,6 +1799,9 @@ function Step4ChooseTimeSlot({
     if (bookingState.subject) {
       const canonical = normalizeSubjectId(bookingState.subject);
       params.set('subject', canonical || bookingState.subject);
+      if ((canonical || bookingState.subject) === 'languages' && bookingState.topic) {
+        params.set('language', bookingState.topic);
+      }
     }
     if (schoolId) params.set('schoolId', schoolId);
     if (schoolName) params.set('schoolName', schoolName);
@@ -1872,6 +1936,7 @@ function Step4ChooseTimeSlot({
     selectedDate,
     bookingState.service,
     bookingState.subject,
+    bookingState.topic,
     bookingState.school,
     bookingState.schoolId,
     bookingState.schoolName,
@@ -2195,6 +2260,7 @@ function Step5SelectProvider({
 
           const params = new URLSearchParams({ startTimeUTC, serviceType });
           if (subject) params.set('subject', subject);
+          if (subject === 'languages' && bookingState.topic) params.set('language', bookingState.topic);
           const sid = String(schoolId || '').trim();
           const sname = String(schoolName || '').trim();
           if (sid) params.set('schoolId', sid);
@@ -2247,7 +2313,7 @@ function Step5SelectProvider({
           }
           setEligibleProviders(providersOut);
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) setProvidersError('Unable to load providers. Please try again.');
       } finally {
         if (!cancelled) setLoadingProviders(false);
@@ -2262,6 +2328,7 @@ function Step5SelectProvider({
     bookingState.selectedSessions,
     bookingState.service,
     bookingState.subject,
+    bookingState.topic,
     bookingState.school,
     bookingState.schoolId,
     bookingState.schoolName,

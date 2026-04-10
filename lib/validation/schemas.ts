@@ -355,6 +355,13 @@ export const profileUpdateSchema = z
         .max(50)
         .optional()
     ),
+    languages: z.preprocess(
+      (v) => (v === null ? undefined : v),
+      z
+        .array(z.preprocess((vv) => (typeof vv === 'string' ? vv.trim() : vv), z.string().min(1).max(80)))
+        .max(50)
+        .optional()
+    ),
     offersVirtualTours: z.boolean().optional(),
     services: providerServicesSchema,
     // Provider availability can be stored in providers.data.availability.

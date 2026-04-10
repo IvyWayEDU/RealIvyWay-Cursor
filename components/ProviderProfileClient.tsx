@@ -4,13 +4,14 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { User } from '@/lib/auth/types';
 import { normalizeSubjectId } from '@/lib/models/subjects';
+import { LANGUAGE_TUTORING_OPTIONS, normalizeLanguageTutoringLabel } from '@/lib/models/languageTutoring';
 
 interface ProviderProfileClientProps {
   initialUser: User;
 }
 
 // Academic subjects only (Test Prep is selected via Services UX, but stored as subject "test_prep").
-const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages'] as const;
+const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages', 'computer_science'] as const;
 type SubjectKey = (typeof COMMON_SUBJECT_KEYS)[number];
 
 const SUBJECT_LABELS: Record<string, string> = {
@@ -19,6 +20,7 @@ const SUBJECT_LABELS: Record<string, string> = {
   science: 'Science',
   history: 'History',
   languages: 'Languages',
+  computer_science: 'Computer Science',
   test_prep: 'Test Prep',
 };
 
@@ -98,6 +100,19 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         )
       : []
   );
+  const initialLanguagesRaw: unknown = (initialUser as any).languages ?? (initialUser as any).tutoringLanguages ?? [];
+  const [languages, setLanguages] = useState<string[]>(
+    Array.isArray(initialLanguagesRaw)
+      ? Array.from(
+          new Set(
+            (initialLanguagesRaw as any[])
+              .map((v) => String(v ?? '').trim())
+              .filter(Boolean)
+          )
+        )
+      : []
+  );
+  const [otherLanguage, setOtherLanguage] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showSchoolSuggestions, setShowSchoolSuggestions] = useState(false);
@@ -119,6 +134,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const isTutor = hasService('tutoring');
   const hasTestPrepSubject = Array.isArray(subjects) && subjects.includes('test_prep');
   const academicSubjects = Array.isArray(subjects) ? subjects.filter((s) => s !== 'test_prep') : [];
+  const hasLanguagesSubject = Array.isArray(subjects) && subjects.includes('languages');
 
   // Keep dependent fields consistent with enabled services.
   useEffect(() => {
@@ -126,6 +142,14 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
       setSubjects([]);
     }
   }, [isTutor]);
+
+  // If Languages subject is removed, clear language list (prevents stale matches).
+  useEffect(() => {
+    if (!hasLanguagesSubject) {
+      setLanguages([]);
+      setOtherLanguage('');
+    }
+  }, [hasLanguagesSubject]);
 
   useEffect(() => {
     let cancelled = false;
@@ -409,6 +433,8 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         services: normalizedServices,
         offersVirtualTours: normalizedServices.includes('virtual_tour'),
         subjects,
+        // Only persist when Languages is selected; otherwise clear to prevent booking mismatches.
+        languages: hasLanguagesSubject ? languages : [],
       };
 
       // Allow callers (e.g. photo upload) to override specific fields without duplicating save logic.
@@ -502,6 +528,49 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const handleRemoveSubject = (subject: string) => {
     const newSubjects = subjects.filter(s => s !== subject);
     setSubjects(newSubjects);
+  };
+
+  const toggleLanguage = (label: string, checked: boolean) => {
+    const cleaned = String(label || '').trim();
+    if (!cleaned) return;
+    setLanguages((prev) => {
+      const existing = Array.isArray(prev) ? prev : [];
+      const next = new Map<string, string>();
+      for (const v of existing) {
+        const t = String(v ?? '').trim();
+        if (!t) continue;
+        next.set(normalizeLanguageTutoringLabel(t), t);
+      }
+      if (checked) {
+        next.set(normalizeLanguageTutoringLabel(cleaned), cleaned);
+      } else {
+        next.delete(normalizeLanguageTutoringLabel(cleaned));
+      }
+      return Array.from(next.values());
+    });
+  };
+
+  const addOtherLanguage = () => {
+    const raw = otherLanguage.trim();
+    if (!raw) return;
+    const parts = raw
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    setLanguages((prev) => {
+      const next = new Map<string, string>();
+      for (const v of prev || []) {
+        const t = String(v ?? '').trim();
+        if (!t) continue;
+        next.set(normalizeLanguageTutoringLabel(t), t);
+      }
+      for (const p of parts) {
+        next.set(normalizeLanguageTutoringLabel(p), p);
+      }
+      return Array.from(next.values());
+    });
+    setOtherLanguage('');
   };
 
   return (
@@ -943,6 +1012,83 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                         type="button"
                         onClick={() => handleRemoveSubject(subject)}
                         className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[#0077B3] focus:outline-none"
+                      >
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Languages (only if "Languages" subject selected) */}
+        {isTutor && hasLanguagesSubject && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Languages you teach</label>
+              <p className="mt-1 text-xs text-gray-500">
+                Students select a specific language. Choose the languages you can tutor so you’ll appear in the right results.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {LANGUAGE_TUTORING_OPTIONS.map((lang) => {
+                const selected = (languages || []).some((l) => normalizeLanguageTutoringLabel(l) === normalizeLanguageTutoringLabel(lang));
+                return (
+                  <label key={lang} className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={(e) => toggleLanguage(lang, e.target.checked)}
+                      className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300 rounded"
+                    />
+                    <span className="text-sm text-gray-700">{lang}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={otherLanguage}
+                onChange={(e) => setOtherLanguage(e.target.value)}
+                placeholder="Other language (optional). You can add multiple separated by commas."
+                className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] sm:text-sm px-4 py-2"
+              />
+              <button
+                type="button"
+                onClick={addOtherLanguage}
+                disabled={!otherLanguage.trim()}
+                className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Add
+              </button>
+            </div>
+
+            {languages.length > 0 && (
+              <div>
+                <p className="text-xs text-gray-500 mb-2">Selected languages:</p>
+                <div className="flex flex-wrap gap-2">
+                  {languages.map((lang) => (
+                    <span
+                      key={lang}
+                      className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white"
+                    >
+                      {lang}
+                      <button
+                        type="button"
+                        onClick={() => toggleLanguage(lang, false)}
+                        className="ml-2 inline-flex items-center justify-center w-4 h-4 rounded-full hover:bg-[#0077B3] focus:outline-none"
+                        aria-label={`Remove ${lang}`}
                       >
                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                           <path

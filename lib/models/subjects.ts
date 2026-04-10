@@ -24,6 +24,7 @@ export type CanonicalSubjectKey =
   | 'science'
   | 'history'
   | 'languages'
+  | 'computer_science'
   | 'test_prep'
   | 'other';
 
@@ -82,6 +83,14 @@ const SUBJECT_TO_CANONICAL: Record<string, CanonicalSubjectKey> = {
   'foreign languages': 'languages',
   'foreign language': 'languages',
   'language': 'languages',
+
+  // Computer Science variations
+  // Provider onboarding/profile: "Computer Science"
+  // Booking flow: "Computer Science"
+  // Both should map to: "computer_science"
+  'computer science': 'computer_science',
+  'computer sciences': 'computer_science',
+  'cs': 'computer_science',
   
   // Test prep variations
   // Provider onboarding: "Test Prep"
@@ -213,7 +222,7 @@ export function getCanonicalSubjectKey(subject: string): CanonicalSubjectKey {
  * Get all canonical subject keys
  */
 export function getAllCanonicalSubjects(): CanonicalSubjectKey[] {
-  return ['english', 'math', 'science', 'history', 'languages', 'test_prep', 'other'];
+  return ['english', 'math', 'science', 'history', 'languages', 'computer_science', 'test_prep', 'other'];
 }
 
 /**

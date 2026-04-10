@@ -134,6 +134,11 @@ export interface ProviderProfile {
   yearsOfExperience?: number;
   specialties?: string[];
   subjects?: string[];
+  /**
+   * Languages taught when `subjects` includes "languages".
+   * Stored as strings for flexibility (preset list + custom).
+   */
+  languages?: string[];
   gradeLevels?: string[];
 
   // Ratings / Reviews (optional)

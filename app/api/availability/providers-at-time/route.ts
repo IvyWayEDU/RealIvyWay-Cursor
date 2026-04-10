@@ -8,11 +8,13 @@ import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { subjectsMatch } from '@/lib/models/subjects';
 import { normalizeSubjectId } from '@/lib/models/subjects';
+import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 
 const QuerySchema = z.object({
   startTimeUTC: z.string().min(1),
   serviceType: z.string().min(1),
   subject: z.string().optional(),
+  language: z.string().optional(),
   schoolId: z.string().optional(),
   schoolName: z.string().optional(),
 });
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest) {
       startTimeUTC: url.searchParams.get('startTimeUTC'),
       serviceType: url.searchParams.get('serviceType'),
       subject: url.searchParams.get('subject') || undefined,
+      language: url.searchParams.get('language') || undefined,
       schoolId: url.searchParams.get('schoolId') || undefined,
       schoolName: url.searchParams.get('schoolName') || undefined,
     });
@@ -51,7 +54,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: parsed.error.issues?.[0]?.message || 'Invalid query' }, { status: 400 });
     }
 
-    const { startTimeUTC, serviceType, subject, schoolId, schoolName } = parsed.data;
+    const { startTimeUTC, serviceType, subject, language, schoolId, schoolName } = parsed.data;
 
     const startD = new Date(startTimeUTC);
     if (isNaN(startD.getTime())) {
@@ -179,6 +182,7 @@ export async function GET(req: NextRequest) {
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
     const requestedSubjectRaw = String(subject || '').trim();
+    const requestedLanguageRaw = String(language || '').trim();
     const requestedSubjectKey =
       normalizedServiceType === 'test_prep'
         ? 'test_prep'
@@ -188,6 +192,7 @@ export async function GET(req: NextRequest) {
 
     // Best-effort: load subjects from users.data.subjects when providers.data.subjects isn't populated.
     const subjectsByUserId = new Map<string, string[]>();
+    const languagesByUserId = new Map<string, string[]>();
     try {
       const userIds = Array.from(
         new Set(
@@ -203,6 +208,7 @@ export async function GET(req: NextRequest) {
           const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
           const data = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : {};
           const subj = Array.isArray((data as any)?.subjects) ? (data as any).subjects : [];
+          const langs = Array.isArray((data as any)?.languages) ? (data as any).languages : [];
           if (!id) continue;
           subjectsByUserId.set(
             id,
@@ -213,6 +219,10 @@ export async function GET(req: NextRequest) {
                   .filter((s: any): s is string => !!s)
               )
             )
+          );
+          languagesByUserId.set(
+            id,
+            Array.from(new Set(langs.map((s: any) => String(s ?? '').trim()).filter(Boolean)))
           );
         }
       }
@@ -269,6 +279,17 @@ export async function GET(req: NextRequest) {
           )
         );
 
+        const providerLanguages = Array.from(
+          new Set(
+            [
+              ...(userId ? languagesByUserId.get(userId) || [] : []),
+              ...normalizeStringArray((data as any)?.languages),
+            ]
+              .map((s) => String(s ?? '').trim())
+              .filter(Boolean)
+          )
+        );
+
         const providerName =
           typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
             ? String((data as any).displayName).trim()
@@ -298,6 +319,7 @@ export async function GET(req: NextRequest) {
           services,
           offersVirtualTours,
           subjects: Array.isArray(subjects) ? subjects : [],
+          languages: providerLanguages,
         };
       })
       .filter(Boolean) as Array<{
@@ -311,6 +333,7 @@ export async function GET(req: NextRequest) {
       services: string[];
       offersVirtualTours: boolean;
       subjects: string[];
+      languages: string[];
     }>;
 
     const matchesServiceType = (p: (typeof providersAll)[number]) => {
@@ -334,7 +357,16 @@ export async function GET(req: NextRequest) {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
       if (!Array.isArray(p.subjects) || p.subjects.length === 0) return false;
-      return p.subjects.some((ps) => subjectsMatch(ps, requestedSubjectKey));
+      if (!p.subjects.some((ps) => subjectsMatch(ps, requestedSubjectKey))) return false;
+
+      // Language tutoring: require a concrete language match (providers without languages are excluded).
+      if (requestedSubjectKey === 'languages') {
+        if (!requestedLanguageRaw) return false;
+        if (!Array.isArray(p.languages) || p.languages.length === 0) return false;
+        return p.languages.some((lang) => languageTutoringMatches(String(lang ?? ''), requestedLanguageRaw));
+      }
+
+      return true;
     };
 
     const matchesSchoolStrict = (p: (typeof providersAll)[number]) => {

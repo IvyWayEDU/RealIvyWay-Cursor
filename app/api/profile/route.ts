@@ -183,6 +183,17 @@ export async function POST(request: NextRequest) {
       updateData.subjects = canonicalSubjects;
     }
 
+    // Update provider languages (only meaningful for subject=languages, but stored as a general provider attribute).
+    if (body.languages !== undefined) {
+      if (!isProviderOrAdmin) {
+        return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
+      }
+      const nextLanguages = Array.isArray(body.languages)
+        ? Array.from(new Set(body.languages.map((s) => String(s ?? '').trim()).filter(Boolean)))
+        : [];
+      updateData.languages = nextLanguages;
+    }
+
     // Update email (only if provided and different)
     if (body.email !== undefined && body.email !== user.email) {
       // Email changes require verification - this should be handled via /api/profile/verify
@@ -245,6 +256,12 @@ export async function POST(request: NextRequest) {
 
       const providerSubjects = Array.isArray(updateData.subjects) ? updateData.subjects : Array.isArray((user as any)?.subjects) ? (user as any).subjects : [];
 
+      const existingLanguages =
+        Array.isArray((existingProvider as any)?.languages) ? (existingProvider as any).languages : Array.isArray((user as any)?.languages) ? (user as any).languages : [];
+      const nextLanguages = Object.prototype.hasOwnProperty.call(rawBody, 'languages')
+        ? (Array.isArray((updateData as any).languages) ? (updateData as any).languages : Array.isArray(body.languages) ? body.languages : [])
+        : existingLanguages;
+
       const providerData = {
         services: servicesCanonical,
         school: nextSchoolName ?? null,
@@ -253,6 +270,7 @@ export async function POST(request: NextRequest) {
         offersVirtualTours: servicesCanonical.includes('virtual_tour'),
         // Provider-level subjects used for availability filtering (canonical keys only).
         subjects: providerSubjects,
+        languages: Array.isArray(nextLanguages) ? nextLanguages : [],
       };
 
       await upsertProviderDataByUserId(session.userId, providerData as any);
