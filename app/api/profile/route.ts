@@ -8,6 +8,126 @@ import { profileUpdateSchema } from '@/lib/validation/schemas';
 import { SCHOOLS, findSchoolByName } from '@/data/schools';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { normalizeSchoolName } from '@/lib/models/normalizeSchoolName';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+
+function normalizeProviderServiceType(raw: unknown): string {
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase().replace(/-/g, '_') : '';
+  if (!v) return '';
+  if (v === 'test_prep' || v === 'testprep') return 'test_prep';
+  if (v === 'counseling') return 'college_counseling';
+  if (v === 'virtual_tours' || v === 'virtualtours' || v === 'virtualtour') return 'virtual_tour';
+  return v;
+}
+
+function mapProviderServiceToSlotServiceType(raw: unknown): 'tutoring' | 'college_counseling' | null {
+  const v = normalizeProviderServiceType(raw);
+  if (!v) return null;
+  if (v === 'tutoring' || v === 'test_prep') return 'tutoring';
+  if (v === 'college_counseling' || v === 'virtual_tour') return 'college_counseling';
+  return null;
+}
+
+async function backfillAvailabilitySlotsForAddedServices(params: {
+  providerId: string;
+  addedServices: string[];
+  addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'>;
+}): Promise<{ slotsCopiedCount: number }> {
+  const providerId = String(params.providerId || '').trim();
+  const addedServices = Array.isArray(params.addedServices) ? params.addedServices : [];
+  const addedSlotServiceTypes = Array.from(new Set(params.addedSlotServiceTypes || []));
+
+  if (!providerId) return { slotsCopiedCount: 0 };
+  if (addedServices.length === 0) return { slotsCopiedCount: 0 };
+  if (addedSlotServiceTypes.length === 0) {
+    console.log('[SERVICE_BACKFILL]', { providerId, addedServices, slotsCopiedCount: 0 });
+    return { slotsCopiedCount: 0 };
+  }
+
+  const supabase = getSupabaseAdmin();
+
+  // Source existing schedule from ANY existing slots for this provider.
+  const { data: sourceRows, error: sourceErr } = await supabase
+    .from('availability_slots')
+    .select('start_time, end_time')
+    .eq('provider_id', providerId)
+    .limit(10_000);
+  if (sourceErr) throw sourceErr;
+
+  const sourceWindows = (sourceRows ?? [])
+    .map((r: any) => {
+      const startIso = new Date(r?.start_time).toISOString();
+      const endIso = new Date(r?.end_time).toISOString();
+      if (!startIso || !endIso) return null;
+      const startMs = new Date(startIso).getTime();
+      const endMs = new Date(endIso).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
+      return { start_time: startIso, end_time: endIso };
+    })
+    .filter(Boolean) as Array<{ start_time: string; end_time: string }>;
+
+  if (sourceWindows.length === 0) {
+    console.log('[SERVICE_BACKFILL]', { providerId, addedServices, slotsCopiedCount: 0 });
+    return { slotsCopiedCount: 0 };
+  }
+
+  const uniqueWindowMap = new Map<string, { start_time: string; end_time: string }>();
+  for (const w of sourceWindows) {
+    const k = `${w.start_time}|${w.end_time}`;
+    if (!uniqueWindowMap.has(k)) uniqueWindowMap.set(k, w);
+  }
+  const windows = Array.from(uniqueWindowMap.values());
+
+  let slotsCopiedCount = 0;
+
+  for (const slotServiceType of addedSlotServiceTypes) {
+    // Explicit duplicate prevention: if (provider_id, start_time, service_type) exists -> skip.
+    const { data: existingRows, error: existingErr } = await supabase
+      .from('availability_slots')
+      .select('start_time')
+      .eq('provider_id', providerId)
+      .eq('service_type', slotServiceType)
+      .limit(10_000);
+    if (existingErr) throw existingErr;
+
+    const existingStartTimes = new Set(
+      (existingRows ?? [])
+        .map((r: any) => {
+          try {
+            return new Date(r?.start_time).toISOString();
+          } catch {
+            return '';
+          }
+        })
+        .filter(Boolean)
+    );
+
+    const toInsert: Array<{ provider_id: string; service_type: string; start_time: string; end_time: string; is_booked: boolean }> =
+      [];
+    for (const w of windows) {
+      if (existingStartTimes.has(w.start_time)) continue;
+      existingStartTimes.add(w.start_time);
+      toInsert.push({
+        provider_id: providerId,
+        service_type: slotServiceType,
+        start_time: w.start_time,
+        end_time: w.end_time,
+        is_booked: false,
+      });
+    }
+
+    const chunkSize = 500;
+    for (let i = 0; i < toInsert.length; i += chunkSize) {
+      const chunk = toInsert.slice(i, i + chunkSize);
+      if (chunk.length === 0) continue;
+      const { error: insErr } = await supabase.from('availability_slots').insert(chunk as any);
+      if (insErr) throw insErr;
+      slotsCopiedCount += chunk.length;
+    }
+  }
+
+  console.log('[SERVICE_BACKFILL]', { providerId, addedServices, slotsCopiedCount });
+  return { slotsCopiedCount };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,6 +167,7 @@ export async function POST(request: NextRequest) {
 
     // Prepare update data
     const updateData: any = {};
+    let serviceBackfillPlan: null | { addedServices: string[]; addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'> } = null;
 
     if (body.name !== undefined) {
       updateData.name = body.name;
@@ -225,6 +346,33 @@ export async function POST(request: NextRequest) {
         )
       );
 
+      const previousServicesCanonical = Array.from(
+        new Set(
+          (Array.isArray((user as any)?.services) ? (user as any).services : [])
+            .map((s: any) => String(s ?? '').trim().toLowerCase().replace(/-/g, '_'))
+            .map((s: string) => (s === 'test_prep' || s === 'testprep' ? 'tutoring' : s))
+            .filter(Boolean)
+        )
+      );
+
+      const prevSet = new Set(previousServicesCanonical);
+      const addedServices = servicesCanonical.filter((s) => !prevSet.has(s));
+      if (addedServices.length > 0) {
+        const prevSlotTypes = new Set(
+          previousServicesCanonical.map(mapProviderServiceToSlotServiceType).filter(Boolean) as Array<
+            'tutoring' | 'college_counseling'
+          >
+        );
+        const nextSlotTypes = new Set(
+          servicesCanonical.map(mapProviderServiceToSlotServiceType).filter(Boolean) as Array<'tutoring' | 'college_counseling'>
+        );
+        const addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'> = [];
+        for (const st of nextSlotTypes) {
+          if (!prevSlotTypes.has(st)) addedSlotServiceTypes.push(st);
+        }
+        serviceBackfillPlan = { addedServices, addedSlotServiceTypes };
+      }
+
       // Resolve school identity if provided (optional).
       const nextSchoolId: string | null =
         (typeof updateData.school_id === 'string' && updateData.school_id.trim() ? updateData.school_id.trim() : null) ??
@@ -285,6 +433,22 @@ export async function POST(request: NextRequest) {
         { error: 'Failed to update user' },
         { status: 500 }
       );
+    }
+
+    if (serviceBackfillPlan && serviceBackfillPlan.addedServices.length > 0 && serviceBackfillPlan.addedSlotServiceTypes.length > 0) {
+      try {
+        await backfillAvailabilitySlotsForAddedServices({
+          providerId: session.userId,
+          addedServices: serviceBackfillPlan.addedServices,
+          addedSlotServiceTypes: serviceBackfillPlan.addedSlotServiceTypes,
+        });
+      } catch (e) {
+        console.warn('[SERVICE_BACKFILL_FAILED]', {
+          providerId: session.userId,
+          addedServices: serviceBackfillPlan.addedServices,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
 
     return NextResponse.json({ success: true, user: updatedUser });
