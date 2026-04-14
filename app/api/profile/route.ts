@@ -29,19 +29,13 @@ function mapProviderServiceToSlotServiceType(raw: unknown): 'tutoring' | 'colleg
 
 async function backfillAvailabilitySlotsForAddedServices(params: {
   providerId: string;
-  addedServices: string[];
   addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'>;
-}): Promise<{ slotsCopiedCount: number }> {
+}): Promise<{ insertedCount: number }> {
   const providerId = String(params.providerId || '').trim();
-  const addedServices = Array.isArray(params.addedServices) ? params.addedServices : [];
   const addedSlotServiceTypes = Array.from(new Set(params.addedSlotServiceTypes || []));
 
-  if (!providerId) return { slotsCopiedCount: 0 };
-  if (addedServices.length === 0) return { slotsCopiedCount: 0 };
-  if (addedSlotServiceTypes.length === 0) {
-    console.log('[SERVICE_BACKFILL]', { providerId, addedServices, slotsCopiedCount: 0 });
-    return { slotsCopiedCount: 0 };
-  }
+  if (!providerId) return { insertedCount: 0 };
+  if (addedSlotServiceTypes.length === 0) return { insertedCount: 0 };
 
   const supabase = getSupabaseAdmin();
 
@@ -52,6 +46,8 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
     .eq('provider_id', providerId)
     .limit(10_000);
   if (sourceErr) throw sourceErr;
+
+  console.log("[BACKFILL_SLOTS_FOUND]", (sourceRows ?? []).length);
 
   const sourceWindows = (sourceRows ?? [])
     .map((r: any) => {
@@ -65,10 +61,8 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
     })
     .filter(Boolean) as Array<{ start_time: string; end_time: string }>;
 
-  if (sourceWindows.length === 0) {
-    console.log('[SERVICE_BACKFILL]', { providerId, addedServices, slotsCopiedCount: 0 });
-    return { slotsCopiedCount: 0 };
-  }
+  // If there is no existing schedule to copy, exit early.
+  if (sourceWindows.length === 0) return { insertedCount: 0 };
 
   const uniqueWindowMap = new Map<string, { start_time: string; end_time: string }>();
   for (const w of sourceWindows) {
@@ -77,7 +71,7 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
   }
   const windows = Array.from(uniqueWindowMap.values());
 
-  let slotsCopiedCount = 0;
+  let insertedCount = 0;
 
   for (const slotServiceType of addedSlotServiceTypes) {
     // Explicit duplicate prevention: if (provider_id, start_time, service_type) exists -> skip.
@@ -121,12 +115,11 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
       if (chunk.length === 0) continue;
       const { error: insErr } = await supabase.from('availability_slots').insert(chunk as any);
       if (insErr) throw insErr;
-      slotsCopiedCount += chunk.length;
+      insertedCount += chunk.length;
     }
   }
 
-  console.log('[SERVICE_BACKFILL]', { providerId, addedServices, slotsCopiedCount });
-  return { slotsCopiedCount };
+  return { insertedCount };
 }
 
 export async function POST(request: NextRequest) {
@@ -167,7 +160,13 @@ export async function POST(request: NextRequest) {
 
     // Prepare update data
     const updateData: any = {};
-    let serviceBackfillPlan: null | { addedServices: string[]; addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'> } = null;
+    let serviceBackfillPlan: null | {
+      previousServices: string[];
+      newServices: string[];
+      addedServices: string[];
+      addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'>;
+    } = null;
+    let previousServices: string[] = [];
 
     if (body.name !== undefined) {
       updateData.name = body.name;
@@ -242,6 +241,12 @@ export async function POST(request: NextRequest) {
       if (!isProviderOrAdmin) {
         return NextResponse.json({ error: 'Forbidden: Provider role required' }, { status: 403 });
       }
+
+      // Fetch existing services from DB BEFORE updating (source-of-truth for diff).
+      const previousServicesRaw: unknown = (user as any)?.services ?? (user as any)?.profile?.services ?? [];
+      previousServices = Array.isArray(previousServicesRaw)
+        ? previousServicesRaw.map(normalizeProviderServiceType).filter(Boolean)
+        : [];
 
       const existingServicesRaw: unknown = (user as any)?.services ?? (user as any)?.profile?.services ?? [];
       const existingServices = Array.isArray(existingServicesRaw)
@@ -348,7 +353,7 @@ export async function POST(request: NextRequest) {
 
       const previousServicesCanonical = Array.from(
         new Set(
-          (Array.isArray((user as any)?.services) ? (user as any).services : [])
+          (Array.isArray(previousServices) ? previousServices : [])
             .map((s: any) => String(s ?? '').trim().toLowerCase().replace(/-/g, '_'))
             .map((s: string) => (s === 'test_prep' || s === 'testprep' ? 'tutoring' : s))
             .filter(Boolean)
@@ -356,21 +361,23 @@ export async function POST(request: NextRequest) {
       );
 
       const prevSet = new Set(previousServicesCanonical);
-      const addedServices = servicesCanonical.filter((s) => !prevSet.has(s));
-      if (addedServices.length > 0) {
-        const prevSlotTypes = new Set(
-          previousServicesCanonical.map(mapProviderServiceToSlotServiceType).filter(Boolean) as Array<
-            'tutoring' | 'college_counseling'
-          >
-        );
-        const nextSlotTypes = new Set(
-          servicesCanonical.map(mapProviderServiceToSlotServiceType).filter(Boolean) as Array<'tutoring' | 'college_counseling'>
-        );
-        const addedSlotServiceTypes: Array<'tutoring' | 'college_counseling'> = [];
-        for (const st of nextSlotTypes) {
-          if (!prevSlotTypes.has(st)) addedSlotServiceTypes.push(st);
-        }
-        serviceBackfillPlan = { addedServices, addedSlotServiceTypes };
+      const newServices = servicesCanonical;
+      const addedServices = newServices.filter((s) => !prevSet.has(s));
+      const addedSlotServiceTypes = Array.from(
+        new Set(
+          addedServices
+            .map(mapProviderServiceToSlotServiceType)
+            .filter(Boolean) as Array<'tutoring' | 'college_counseling'>
+        )
+      );
+
+      if (addedServices.length > 0 && addedSlotServiceTypes.length > 0) {
+        serviceBackfillPlan = {
+          previousServices: previousServicesCanonical,
+          newServices,
+          addedServices,
+          addedSlotServiceTypes,
+        };
       }
 
       // Resolve school identity if provided (optional).
@@ -437,11 +444,20 @@ export async function POST(request: NextRequest) {
 
     if (serviceBackfillPlan && serviceBackfillPlan.addedServices.length > 0 && serviceBackfillPlan.addedSlotServiceTypes.length > 0) {
       try {
-        await backfillAvailabilitySlotsForAddedServices({
-          providerId: session.userId,
+        const providerId = session.userId;
+        console.log("[BACKFILL_TRIGGERED]", {
+          providerId,
+          previousServices: serviceBackfillPlan.previousServices,
+          newServices: serviceBackfillPlan.newServices,
           addedServices: serviceBackfillPlan.addedServices,
+        });
+
+        const { insertedCount } = await backfillAvailabilitySlotsForAddedServices({
+          providerId,
           addedSlotServiceTypes: serviceBackfillPlan.addedSlotServiceTypes,
         });
+
+        console.log("[BACKFILL_INSERT_COUNT]", insertedCount);
       } catch (e) {
         console.warn('[SERVICE_BACKFILL_FAILED]', {
           providerId: session.userId,
