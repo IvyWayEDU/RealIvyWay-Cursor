@@ -216,6 +216,77 @@ export default function BookingSummaryPage() {
     setError(null);
 
     try {
+      // FRONTEND validation: prevent students from double-booking overlapping sessions.
+      // Backend enforcement also exists; this is a faster UX guardrail.
+      const toIso = (v: any): string | null => {
+        const d = v instanceof Date ? v : new Date(v);
+        return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+      };
+      const buildStartEnd = (dateIso: string, timeLabel: string): { start: string; end: string } | null => {
+        const date = new Date(dateIso);
+        if (isNaN(date.getTime())) return null;
+        const [time, period] = String(timeLabel).split(' ');
+        const [hh, mm] = time.split(':');
+        let hour24 = parseInt(hh, 10);
+        const minute = parseInt(mm || '0', 10);
+        if (period === 'PM' && hour24 !== 12) hour24 += 12;
+        if (period === 'AM' && hour24 === 12) hour24 = 0;
+        date.setHours(hour24, minute, 0, 0);
+        const start = date.toISOString();
+        const end = new Date(date.getTime() + 60 * 60 * 1000).toISOString();
+        return { start, end };
+      };
+
+      const selectedRanges: Array<{ start: string; end: string }> = (bookingState.selectedSessions || [])
+        .map((s: any) => {
+          const start = toIso(s?.startTimeUTC) || (s?.date ? buildStartEnd(String(s.date), String(s?.displayTime || s?.time || ''))?.start : null);
+          const end = toIso(s?.endTimeUTC) || (s?.date ? buildStartEnd(String(s.date), String(s?.displayTime || s?.time || ''))?.end : null);
+          if (!start || !end) return null;
+          if (new Date(end).getTime() <= new Date(start).getTime()) return null;
+          return { start, end };
+        })
+        .filter(Boolean) as any;
+
+      if (selectedRanges.length > 0) {
+        const upcomingRes = await fetch('/api/sessions/upcoming?role=student', { cache: 'no-store' });
+        if (upcomingRes.ok) {
+          const upcomingJson: any = await upcomingRes.json().catch(() => null);
+          const sessions: any[] = Array.isArray(upcomingJson?.sessions) ? upcomingJson.sessions : [];
+
+          const getSessionStartEnd = (sess: any): { start: string; end: string } | null => {
+            const start =
+              toIso(sess?.datetime) || toIso(sess?.startTime) || toIso(sess?.scheduledStartTime) || toIso(sess?.scheduledStart);
+            const end =
+              toIso(sess?.end_datetime) ||
+              toIso(sess?.endTime) ||
+              toIso(sess?.scheduledEndTime) ||
+              toIso(sess?.scheduledEnd) ||
+              (start ? new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString() : null);
+            if (!start || !end) return null;
+            if (new Date(end).getTime() <= new Date(start).getTime()) return null;
+            return { start, end };
+          };
+
+          const overlaps = (a: { start: string; end: string }, b: { start: string; end: string }) =>
+            new Date(a.start).getTime() < new Date(b.end).getTime() && new Date(a.end).getTime() > new Date(b.start).getTime();
+
+          const hasConflict = selectedRanges.some((nr) =>
+            sessions
+              .filter((s) => String(s?.status || '') !== 'cancelled')
+              .some((s) => {
+                const se = getSessionStartEnd(s);
+                return se ? overlaps(nr, se) : false;
+              })
+          );
+
+          if (hasConflict) {
+            setError('You already have a session scheduled at this time. Please choose a different time.');
+            setIsProcessing(false);
+            return;
+          }
+        }
+      }
+
       const planInfo = getPlanInfo();
       const pricingKey = typeof (planInfo as any)?.pricing_key === 'string' ? String((planInfo as any).pricing_key).trim() : '';
       const first = bookingState.selectedSessions?.[0];

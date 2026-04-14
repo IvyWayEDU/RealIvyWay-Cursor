@@ -32,6 +32,51 @@ function schoolsMatch(school1: SelectedSchool, school2: SelectedSchool): boolean
   return school1.id === school2.id;
 }
 
+function normalizeSchoolText(raw: string): string {
+  const base = String(raw || '')
+    .toLowerCase()
+    .trim()
+    // normalize apostrophes/quotes
+    .replace(/['’`"]/g, '')
+    // normalize ampersands
+    .replace(/&/g, 'and')
+    // drop punctuation that commonly differs between data sources
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return base;
+}
+
+function schoolKeyForMatch(raw: string): string {
+  const base = normalizeSchoolText(raw);
+  if (!base) return '';
+
+  // Lightweight aliasing for common abbreviations / nicknames.
+  // This intentionally stays small + deterministic to avoid surprising matches.
+  const aliasToSchoolId: Record<string, string> = {
+    'penn state': 'pennsylvania_state_university',
+    psu: 'pennsylvania_state_university',
+    mit: 'massachusetts_institute_of_technology',
+    'uc berkeley': 'university_of_california_berkeley',
+    berkeley: 'university_of_california_berkeley',
+    ucla: 'university_of_california_los_angeles',
+  };
+
+  const aliasedId = aliasToSchoolId[base];
+  if (aliasedId) return aliasedId;
+
+  // Prefer canonical ID when we can resolve it.
+  const canonical = SCHOOLS.find((s) => {
+    if (normalizeSchoolText(s.name) === base) return true;
+    const idAsWords = String(s.id || '').replace(/_/g, ' ');
+    if (normalizeSchoolText(idAsWords) === base) return true;
+    if (normalizeSchoolText(s.id) === base) return true;
+    return false;
+  });
+  return canonical?.id ?? base;
+}
+
 // Check if there are any providers available for a given school
 // For virtual tours: Only providers tagged with the school (strict matching by schoolId, no fallback)
 // For counseling: Providers tagged with the school OR general counselors (fallback allowed)
@@ -2242,15 +2287,35 @@ function Step5SelectProvider({
   >([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [providersError, setProvidersError] = useState<string | null>(null);
-  const [noSchoolMatch, setNoSchoolMatch] = useState(false);
   const selectedProviderId = bookingState.provider;
+
+  const selectedSchool = String(bookingState.school?.name || bookingState.schoolName || '').trim();
+  const selectedSchoolKey = schoolKeyForMatch(selectedSchool);
+  const hasMatchingSchoolProvider =
+    !!selectedSchool &&
+    eligibleProviders.some((p) => schoolKeyForMatch(String(p.schoolName || '')) === selectedSchoolKey);
+  const shouldShowSchoolWarning =
+    bookingState.service === 'counseling' &&
+    !!selectedSchool &&
+    !loadingProviders &&
+    !providersError &&
+    eligibleProviders.length > 0 &&
+    !hasMatchingSchoolProvider;
+
+  useEffect(() => {
+    if (bookingState.service !== 'counseling') return;
+    console.log('[SCHOOL_MATCH_DEBUG]', {
+      selectedSchool,
+      providerSchools: eligibleProviders.map((p) => p.schoolName),
+      hasMatchingSchoolProvider,
+    });
+  }, [bookingState.service, selectedSchool, eligibleProviders, hasMatchingSchoolProvider]);
 
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
       setProvidersError(null);
-      setNoSchoolMatch(false);
       setEligibleProviders([]);
 
       setLoadingProviders(true);
@@ -2282,7 +2347,6 @@ function Step5SelectProvider({
         const schoolName = bookingState.school?.name || bookingState.schoolName || '';
         const subject = bookingState.subject ? normalizeSubjectId(bookingState.subject) || bookingState.subject : '';
 
-        let noSchoolMatch = false;
         let intersection: Map<string, (typeof eligibleProviders)[number]> | null = null;
 
         for (const s of selectedSlots) {
@@ -2303,8 +2367,6 @@ function Step5SelectProvider({
           const res = await fetch(`/api/availability/providers-at-time?${params.toString()}`, { cache: 'no-store' });
           if (!res.ok) throw new Error('Failed to load providers');
           const json = await res.json();
-
-          if (json?.noSchoolMatch === true) noSchoolMatch = true;
 
           const providers: any[] = Array.isArray(json?.providers) ? json.providers : [];
           const current = new Map<string, (typeof eligibleProviders)[number]>();
@@ -2336,11 +2398,9 @@ function Step5SelectProvider({
           selectedService: serviceType,
           selectedTime: selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((s) => s.startTimeUTC),
           providerIds,
-          noSchoolMatch,
         });
 
         if (!cancelled) {
-          setNoSchoolMatch(noSchoolMatch);
           if (providersOut.length === 0) {
             setProvidersError('No providers are available for all selected times. Please go back and adjust your times.');
             return;
@@ -2381,7 +2441,7 @@ function Step5SelectProvider({
         </p>
       </div>
 
-      {bookingState.service === 'counseling' && noSchoolMatch ? (
+      {shouldShowSchoolWarning ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
           <p className="text-sm font-medium text-blue-900">
             We currently don’t have a provider from this school. You can still book a session with one of our available counselors.

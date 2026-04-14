@@ -19,6 +19,7 @@ import {
 } from '@/lib/stripe/checkoutBookingStore.server';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { assertNoStudentDoubleBooking, DOUBLE_BOOKING_MESSAGE, DoubleBookingError } from '@/lib/sessions/doubleBooking.server';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -392,6 +393,25 @@ export async function POST(request: NextRequest) {
         { error: 'This time slot is already booked' },
         { status: 409 }
       );
+    }
+
+    // Prevent students from double-booking overlapping sessions (across ALL services).
+    try {
+      for (const p of sessionPayloads as any[]) {
+        const scheduledStart = String(p?.scheduledStart || '').trim();
+        const scheduledEnd = String(p?.scheduledEnd || '').trim();
+        if (!scheduledStart || !scheduledEnd) continue;
+        await assertNoStudentDoubleBooking({
+          studentId,
+          newStart: scheduledStart,
+          newEnd: scheduledEnd,
+        });
+      }
+    } catch (e) {
+      if (e instanceof DoubleBookingError) {
+        return NextResponse.json({ error: DOUBLE_BOOKING_MESSAGE }, { status: 400 });
+      }
+      throw e;
     }
 
     // Atomically reserve slot(s) BEFORE creating Stripe checkout.

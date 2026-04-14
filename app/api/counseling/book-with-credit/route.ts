@@ -12,6 +12,7 @@ import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { sendBookingConfirmationEmailsForSession } from '@/lib/email/transactional';
+import { assertNoStudentDoubleBooking, DOUBLE_BOOKING_MESSAGE, DoubleBookingError } from '@/lib/sessions/doubleBooking.server';
 
 /**
  * POST /api/counseling/book-with-credit
@@ -111,6 +112,20 @@ export async function POST(request: NextRequest) {
     const durationMinutes = Math.round((new Date(startEnd.end).getTime() - new Date(startEnd.start).getTime()) / (1000 * 60));
     if (durationMinutes !== 60) {
       return NextResponse.json({ error: 'Counseling sessions must be 60 minutes' }, { status: 400 });
+    }
+
+    // Prevent student double-booking (across ALL services) before reserving/consuming credits.
+    try {
+      await assertNoStudentDoubleBooking({
+        studentId,
+        newStart: startEnd.start,
+        newEnd: startEnd.end,
+      });
+    } catch (e) {
+      if (e instanceof DoubleBookingError) {
+        return NextResponse.json({ error: DOUBLE_BOOKING_MESSAGE }, { status: 400 });
+      }
+      throw e;
     }
 
     // Require an available credit before reserving slot.

@@ -5,6 +5,7 @@ import { getSessionEndTimeMs, isSessionCompleted, isSessionUpcoming } from '@/li
 import { resolveSessionStatusByTime } from '@/lib/sessions/status-resolver';
 import { getEarningsServiceLabel } from '@/lib/earnings/serviceLabel';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { assertNoStudentDoubleBooking } from '@/lib/sessions/doubleBooking.server';
 
 function toIsoStringOrNull(v: unknown): string | null {
   if (v == null) return null;
@@ -908,6 +909,13 @@ export async function createSession(session: Omit<Session, 'createdAt' | 'update
   if (!startIso || !endIso) {
     throw new Error('Strict session creation rejected: missing start/end time');
   }
+
+  // Prevent a student from booking overlapping sessions (across ALL services).
+  await assertNoStudentDoubleBooking({
+    studentId: String((base as any).studentId),
+    newStart: startIso,
+    newEnd: endIso,
+  });
 
   const supabase = getSupabaseAdmin();
   const { data: dupRows, error: dupErr } = await supabase

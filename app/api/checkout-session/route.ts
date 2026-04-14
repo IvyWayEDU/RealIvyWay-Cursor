@@ -12,6 +12,7 @@ import { handleApiError } from '@/lib/errorHandler';
 import { createZoomMeeting, isZoomConfigured } from '@/lib/zoom/api';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { sendBookingConfirmationEmailsForSession } from '@/lib/email/transactional';
+import { DOUBLE_BOOKING_MESSAGE, DoubleBookingError } from '@/lib/sessions/doubleBooking.server';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -570,6 +571,10 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error retrieving Stripe Checkout Session:', error);
+
+    if (error instanceof DoubleBookingError) {
+      return NextResponse.json({ error: DOUBLE_BOOKING_MESSAGE }, { status: 400 });
+    }
     
     // If it's a Stripe error, log additional details
     if (error && typeof error === 'object' && 'type' in error) {
