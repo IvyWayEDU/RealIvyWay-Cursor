@@ -66,6 +66,34 @@ function overlapsAnyWindow(
   return false;
 }
 
+function canonicalSubjectToEligibilityLabel(subject: string): string {
+  const canonical = normalizeSubjectId(String(subject ?? '').trim()) || String(subject ?? '').trim();
+  if (canonical === 'math') return 'Math';
+  if (canonical === 'english') return 'English';
+  if (canonical === 'computer_science') return 'Computer Science';
+  if (canonical === 'languages') return 'Languages';
+  if (canonical === 'test_prep') return 'Test Prep';
+  return canonical;
+}
+
+function subjectsToEligibilityLabels(subjects: unknown): string[] {
+  const raw = Array.isArray(subjects) ? subjects : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of raw) {
+    const canonical = normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')) || String(s ?? '').trim();
+    if (!canonical) continue;
+    const display = canonicalSubjectToEligibilityLabel(canonical);
+    for (const v of [display, canonical]) {
+      const vv = String(v || '').trim();
+      if (!vv || seen.has(vv)) continue;
+      seen.add(vv);
+      out.push(vv);
+    }
+  }
+  return out;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const authResult = await requireAuth();
@@ -384,15 +412,36 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const providerIds = providerCandidates.map((p) => p.providerId);
+    // SUBJECT FIX: compute eligible providers BEFORE any availability query.
+    const selectedSubject = requestedSubjectKey
+      ? canonicalSubjectToEligibilityLabel(requestedSubjectKey)
+      : requestedSubjectRaw
+        ? canonicalSubjectToEligibilityLabel(requestedSubjectRaw)
+        : '';
+    const providers = providerCandidates.map((p) => ({
+      id: p.providerId,
+      subjects: subjectsToEligibilityLabels((p as any).subjects),
+    }));
+    const eligibleProviderIds = selectedSubject
+      ? providers
+          .filter((p) => {
+            if (selectedSubject === 'Math') return p.subjects.includes('Math') || p.subjects.includes('math');
+            if (selectedSubject === 'English') return p.subjects.includes('English') || p.subjects.includes('english');
+            if (selectedSubject === 'Computer Science')
+              return p.subjects.includes('Computer Science') || p.subjects.includes('computer_science');
+            if (selectedSubject === 'Languages') return true; // handled separately
+            if (selectedSubject === 'Test Prep') return p.subjects.includes('Test Prep') || p.subjects.includes('test_prep');
+            return false;
+          })
+          .map((p) => p.id)
+      : providers.map((p) => p.id);
+
+    const eligibleProviderIdSet = new Set(eligibleProviderIds);
+    const providerIds = eligibleProviderIds;
 
     // Now apply availability-at-time constraint ONLY within eligible provider IDs.
     if (providerIds.length === 0) {
-      console.log('[SUBJECT_PROVIDER_DEBUG]', {
-        selectedSubject: requestedSubjectKey || requestedSubjectRaw || null,
-        eligibleProviderIds: [],
-        shownProviderIds: [],
-      });
+      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
     }
 
@@ -437,11 +486,7 @@ export async function GET(req: NextRequest) {
 
     const providerIdsFromSlots = Array.from(new Set(candidateSlotRows.map((r) => r.providerId)));
     if (providerIdsFromSlots.length === 0) {
-      console.log('[SUBJECT_PROVIDER_DEBUG]', {
-        selectedSubject: requestedSubjectKey || requestedSubjectRaw || null,
-        eligibleProviderIds: providerIds,
-        shownProviderIds: [],
-      });
+      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
     }
 
@@ -474,13 +519,9 @@ export async function GET(req: NextRequest) {
 
     const shownProviderIds = providerCandidates
       .map((p) => p.providerId)
-      .filter((pid) => providerIdsStillFree.includes(pid));
+      .filter((pid) => providerIdsStillFree.includes(pid) && eligibleProviderIdSet.has(pid));
 
-    console.log('[SUBJECT_PROVIDER_DEBUG]', {
-      selectedSubject: requestedSubjectKey || requestedSubjectRaw || null,
-      eligibleProviderIds: providerIds,
-      shownProviderIds,
-    });
+    console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: shownProviderIds });
 
     console.log('[DATE_FILTER_DEBUG]', {
       selectedDate,

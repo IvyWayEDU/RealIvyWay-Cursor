@@ -1,25 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
-import { bindDateKeyAndMinutesToUtcDate, normalizeServiceType } from '@/lib/availability/engine';
+import { normalizeServiceType } from '@/lib/availability/engine';
 import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
+import { normalizeSubjectId } from '@/lib/models/subjects';
 
 type SlotOut = { start: string; end: string; providerId: string };
 
-function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = formatter.formatToParts(date);
-  const year = parts.find((p) => p.type === 'year')?.value || '2000';
-  const month = parts.find((p) => p.type === 'month')?.value || '01';
-  const day = parts.find((p) => p.type === 'day')?.value || '01';
-  return `${year}-${month}-${day}`;
+function normalizeStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return input.map((v) => String(v || '').trim()).filter(Boolean);
+}
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+function canonicalSubjectToEligibilityLabel(subject: string): string {
+  const canonical = normalizeSubjectId(String(subject ?? '').trim()) || String(subject ?? '').trim();
+  if (canonical === 'math') return 'Math';
+  if (canonical === 'english') return 'English';
+  if (canonical === 'computer_science') return 'Computer Science';
+  if (canonical === 'languages') return 'Languages';
+  if (canonical === 'test_prep') return 'Test Prep';
+  return canonical;
+}
+
+function subjectsToEligibilityLabels(subjects: unknown): string[] {
+  const raw = Array.isArray(subjects) ? subjects : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of raw) {
+    const canonical = normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')) || String(s ?? '').trim();
+    if (!canonical) continue;
+    const display = canonicalSubjectToEligibilityLabel(canonical);
+    for (const v of [display, canonical]) {
+      const vv = String(v || '').trim();
+      if (!vv || seen.has(vv)) continue;
+      seen.add(vv);
+      out.push(vv);
+    }
+  }
+  return out;
+}
+
+function parseIsoDateYYYYMMDDToUtcDate(dateKey: string): Date {
+  const [yRaw, mRaw, dRaw] = String(dateKey || '').trim().split('-');
+  const y = Number(yRaw);
+  const m = Number(mRaw);
+  const d = Number(dRaw);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return new Date('invalid');
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
 }
 
 export async function GET(request: NextRequest) {
@@ -121,20 +156,16 @@ export async function GET(request: NextRequest) {
     );
 
     // Strict date filtering:
-    // The booking UI selects dates/times in America/New_York, so interpret YYYY-MM-DD as a zoned day.
-    const bookingTimeZone = 'America/New_York';
-    const startOfDay = bindDateKeyAndMinutesToUtcDate(date, 0, bookingTimeZone);
-    const endOfDay = new Date(bindDateKeyAndMinutesToUtcDate(date, 24 * 60, bookingTimeZone).getTime() - 1);
+    // Interpret the selected YYYY-MM-DD as a UTC day and query ONLY by UTC bounds.
+    // Do not use local time comparisons or timezone-based re-filtering.
+    const selectedDate = date;
+    const startOfDay = parseIsoDateYYYYMMDDToUtcDate(selectedDate);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const endOfDay = parseIsoDateYYYYMMDDToUtcDate(selectedDate);
+    endOfDay.setUTCHours(23, 59, 59, 999);
 
-    console.log('[TIME_FILTER]', {
-      dateKey: date,
-      bookingTimeZone,
-      startOfDayUTC: startOfDay.toISOString(),
-      endOfDayUTC: endOfDay.toISOString(),
-    });
-
-    const queryStartISO = new Date(startOfDay.getTime() - 6 * 60 * 60 * 1000).toISOString();
-    const queryEndISO = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000).toISOString();
+    const queryStartISO = startOfDay.toISOString();
+    const queryEndISO = endOfDay.toISOString();
 
     const leadTimeHours = normalized === 'virtual_tour' ? 2 : 0;
     const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
@@ -142,20 +173,80 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     console.log("[AVAILABILITY_FETCH]", { serviceType, providerId });
 
-    let query = supabase
-      .from('availability_slots')
-      .select('provider_id, start_time, end_time')
-      .eq('is_booked', false)
-      .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
-      .gte('start_time', queryStartISO)
-      .lte('start_time', queryEndISO);
-
-    if (providerId) {
-      query = query.eq('provider_id', providerId);
+    // SUBJECT FIX: compute eligible providers BEFORE any availability query.
+    const selectedSubject = subject ? canonicalSubjectToEligibilityLabel(subject) : '';
+    const subjectsByProviderId = new Map<string, string[]>();
+    try {
+      const { data: subjectRows, error: subjectErr } = await supabase
+        .from('providers')
+        .select('id, subjects')
+        .order('id', { ascending: true });
+      if (subjectErr) throw subjectErr;
+      for (const r of subjectRows ?? []) {
+        const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+        const subj = (r as any)?.subjects;
+        if (!id || !Array.isArray(subj)) continue;
+        subjectsByProviderId.set(id, subj.map((s: any) => String(s ?? '').trim()).filter(Boolean));
+      }
+    } catch {
+      // ignore
     }
 
-    const { data: rows, error } = await query.order('start_time', { ascending: true });
-    if (error) throw error;
+    const { data: providerRows, error: provErr } = await supabase.from('providers').select('id, data').order('id', { ascending: true });
+    if (provErr) throw provErr;
+
+    const providers = (providerRows ?? [])
+      .map((r: any) => {
+        const id = typeof r?.id === 'string' ? String(r.id).trim() : '';
+        const data = r?.data && typeof r.data === 'object' ? r.data : {};
+        if (!id) return null;
+        const subjectsRaw = [
+          ...(subjectsByProviderId.get(id) || []),
+          ...normalizeStringArray((data as any)?.subjects),
+          ...normalizeStringArray((data as any)?.specialties),
+        ];
+        const canonicalSubjects = subjectsRaw.map((s) => normalizeSubjectId(s)).filter(Boolean) as string[];
+        return { id, subjects: subjectsToEligibilityLabels(canonicalSubjects) };
+      })
+      .filter(Boolean) as Array<{ id: string; subjects: string[] }>;
+
+    const eligibleProviderIds = selectedSubject
+      ? providers
+          .filter((p) => {
+            if (selectedSubject === 'Math') return p.subjects.includes('Math') || p.subjects.includes('math');
+            if (selectedSubject === 'English') return p.subjects.includes('English') || p.subjects.includes('english');
+            if (selectedSubject === 'Computer Science')
+              return p.subjects.includes('Computer Science') || p.subjects.includes('computer_science');
+            if (selectedSubject === 'Languages') return true; // handled separately
+            if (selectedSubject === 'Test Prep') return p.subjects.includes('Test Prep') || p.subjects.includes('test_prep');
+            return false;
+          })
+          .map((p) => p.id)
+      : providers.map((p) => p.id);
+
+    const eligibleProviderIdSet = new Set(eligibleProviderIds);
+    const idsToQueryRaw = providerId ? [String(providerId).trim()] : eligibleProviderIds;
+    const idsToQuery = idsToQueryRaw.filter((id) => eligibleProviderIdSet.has(id));
+
+    if (idsToQuery.length === 0) {
+      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
+      return NextResponse.json({ slots: [] });
+    }
+
+    const rows: any[] = [];
+    for (const batch of chunkArray(idsToQuery, 200)) {
+      const { data, error } = await supabase
+        .from('availability_slots')
+        .select('provider_id, start_time, end_time')
+        .in('provider_id', batch)
+        .eq('is_booked', false)
+        .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
+        .gte('start_time', queryStartISO)
+        .lte('start_time', queryEndISO)
+        .order('start_time', { ascending: true });
+      if (error) throw error;
+      for (const r of data ?? []) rows.push(r as any);
+    }
 
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
@@ -167,8 +258,8 @@ export async function GET(request: NextRequest) {
     const providerIds = Array.from(
       new Set((rows ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
     );
-    const sessionQueryStartISO = new Date(startOfDay.getTime() - 6 * 60 * 60 * 1000).toISOString();
-    const sessionQueryEndISO = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000).toISOString();
+    const sessionQueryStartISO = queryStartISO;
+    const sessionQueryEndISO = queryEndISO;
     const bookedWindows = await getBookedSessionWindowsForProviders({
       providerIds,
       rangeStartISO: sessionQueryStartISO,
@@ -188,8 +279,6 @@ export async function GET(request: NextRequest) {
         const start = new Date(r?.start_time).toISOString();
         const end = new Date(r?.end_time).toISOString();
         if (!providerId) return null;
-        const slotDateKey = formatDateKeyInTimeZone(new Date(start), bookingTimeZone);
-        if (slotDateKey !== date) return null;
         const startMs = new Date(start).getTime();
         const endMs = new Date(end).getTime();
         if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return null;
@@ -210,6 +299,8 @@ export async function GET(request: NextRequest) {
       .filter(Boolean) as SlotOut[];
 
     const slotsSorted = [...slots].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    const shownProviders = Array.from(new Set(slotsSorted.map((s) => s.providerId))).filter(Boolean);
+    console.log('[SUBJECT_FIX]', { selectedSubject: subject ? canonicalSubjectToEligibilityLabel(subject) : '', eligibleProviderIds, shownProviders });
     console.log('[SLOT_RANGE_DEBUG]', {
       providerId: providerId || null,
       serviceType: normalizedServiceType,
@@ -217,6 +308,13 @@ export async function GET(request: NextRequest) {
       firstSlot: slotsSorted[0] || null,
       lastSlot: slotsSorted[slotsSorted.length - 1] || null,
       slotCount: slotsSorted.length,
+    });
+
+    console.log('[DATE_FIX]', {
+      selectedDate,
+      startOfDay,
+      endOfDay,
+      slotsFound: slotsSorted.length,
     });
     
     return NextResponse.json({ slots });
