@@ -49,6 +49,12 @@ function normalizeStringArray(input: unknown): string[] {
   return input.map((v) => String(v || '').trim()).filter(Boolean);
 }
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 function overlapsAnyWindow(
   slotStartMs: number,
   slotEndMs: number,
@@ -104,122 +110,6 @@ export async function GET(req: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
-    const { data: rows, error } = await supabase
-      .from('availability_slots')
-      .select('provider_id, start_time, end_time')
-      .eq('is_booked', false)
-      .eq('service_type', inventoryServiceType)
-      .eq('start_time', startD.toISOString())
-      .order('provider_id', { ascending: true });
-    if (error) throw error;
-
-    const reserved = await readReservedSlotsFile();
-    const reservedSet = new Set(
-      (reserved || [])
-        .map((s) => ({
-          providerId: String((s as any)?.providerId || '').trim(),
-          start: typeof (s as any)?.startTime === 'string' ? new Date((s as any).startTime).toISOString() : '',
-          end: typeof (s as any)?.endTime === 'string' ? new Date((s as any).endTime).toISOString() : '',
-          status: String((s as any)?.status || 'available'),
-        }))
-        .filter((s) => s.providerId && s.start && s.end && s.status === 'reserved')
-        .map((s) => `${s.providerId}|${s.start}|${s.end}`)
-    );
-
-    const candidateSlotRows = (rows ?? [])
-      .map((r: any) => {
-        const providerId = String(r?.provider_id || '').trim();
-        const startIso = new Date(r?.start_time).toISOString();
-        const endIso = new Date(r?.end_time).toISOString();
-        if (!providerId) return null;
-        const key = `${providerId}|${startIso}|${endIso}`;
-        if (reservedSet.has(key)) return null;
-        return { providerId, startIso, endIso };
-      })
-      .filter(Boolean) as Array<{ providerId: string; startIso: string; endIso: string }>;
-
-    const providerIdsFromSlots = Array.from(new Set(candidateSlotRows.map((r) => r.providerId)));
-    if (providerIdsFromSlots.length === 0) {
-      console.log('[DATE_FILTER_DEBUG]', {
-        selectedDate,
-        selectedTime,
-        matchingSlotCount: 0,
-        providerIds: [],
-      });
-      console.log('[BOOKING_FLOW]', {
-        selectedService: normalizedServiceType,
-        selectedTime: startD.toISOString(),
-        providerIds: [],
-        noSchoolMatch: false,
-      });
-      return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch: false }, { status: 200 });
-    }
-
-    // Defensively exclude providers with overlapping booked sessions.
-    const rangeStartISO = new Date(startD.getTime() - 60 * 60 * 1000).toISOString();
-    const rangeEndISO = new Date(startD.getTime() + 2 * 60 * 60 * 1000).toISOString();
-    const bookedWindows = await getBookedSessionWindowsForProviders({
-      providerIds: providerIdsFromSlots,
-      rangeStartISO,
-      rangeEndISO,
-      defaultDurationMinutesWhenMissingEnd: 60,
-    });
-    const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
-    for (const w of bookedWindows || []) {
-      const arr = windowsByProvider.get(w.providerId) || [];
-      arr.push({ sessionStartMs: w.sessionStartMs, sessionEndMs: w.sessionEndMs });
-      windowsByProvider.set(w.providerId, arr);
-    }
-
-    const providerIdsStillFree = providerIdsFromSlots.filter((pid) => {
-      const anyRow = candidateSlotRows.find((r) => r.providerId === pid);
-      if (!anyRow) return false;
-      const startMs = new Date(anyRow.startIso).getTime();
-      const endMs = new Date(anyRow.endIso).getTime();
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return false;
-      const windows = windowsByProvider.get(pid) || [];
-      if (windows.length === 0) return true;
-      return !overlapsAnyWindow(startMs, endMs, windows);
-    });
-
-    if (providerIdsStillFree.length === 0) {
-      console.log('[DATE_FILTER_DEBUG]', {
-        selectedDate,
-        selectedTime,
-        matchingSlotCount: 0,
-        providerIds: [],
-      });
-      console.log('[BOOKING_FLOW]', {
-        selectedService: normalizedServiceType,
-        selectedTime: startD.toISOString(),
-        providerIds: [],
-        noSchoolMatch: false,
-      });
-      return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch: false }, { status: 200 });
-    }
-
-    // Prefer `user_id` when available so we can also pull user-level subjects.
-    let providerRows: any[] = [];
-    {
-      const attempt = await supabase
-        .from('providers')
-        .select('id, user_id, data')
-        .in('id', providerIdsStillFree)
-        .order('id', { ascending: true });
-      if (!attempt.error) {
-        providerRows = attempt.data ?? [];
-      } else {
-        const fallback = await supabase
-          .from('providers')
-          .select('id, data')
-          .in('id', providerIdsStillFree)
-          .order('id', { ascending: true });
-        if (fallback.error) throw fallback.error;
-        providerRows = fallback.data ?? [];
-      }
-    }
-
-    const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
     const requestedSubjectRaw = String(subject || '').trim();
@@ -231,13 +121,63 @@ export async function GET(req: NextRequest) {
           ? normalizeSubjectId(requestedSubjectRaw)
           : null;
 
-    // Best-effort: load subjects from users.data.subjects when providers.data.subjects isn't populated.
+    // Subject is required for tutoring/test prep; if we cannot normalize it, treat as no match.
+    if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
+      if (!requestedSubjectKey) {
+        return NextResponse.json({ error: `Unrecognized subject: "${requestedSubjectRaw || subject || ''}"` }, { status: 400 });
+      }
+    }
+
+    // Load provider inventory eligibility FIRST (subject + service + optional language/school).
+    // This prevents "next available" and provider lists from widening beyond subject-matched providers.
+    let providerRowsAll: any[] = [];
+    {
+      const attempt = await supabase.from('providers').select('id, user_id, data').order('id', { ascending: true });
+      if (!attempt.error) {
+        providerRowsAll = attempt.data ?? [];
+      } else {
+        const fallback = await supabase.from('providers').select('id, data').order('id', { ascending: true });
+        if (fallback.error) throw fallback.error;
+        providerRowsAll = fallback.data ?? [];
+      }
+    }
+
+    // Optional: load provider subjects from a dedicated column when present.
+    const subjectsByProviderId = new Map<string, string[]>();
+    try {
+      const { data: subjectRows, error: subjectErr } = await supabase
+        .from('providers')
+        .select('id, subjects')
+        .order('id', { ascending: true });
+      if (subjectErr) throw subjectErr;
+      for (const r of subjectRows ?? []) {
+        const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
+        const subj = (r as any)?.subjects;
+        if (!id || !Array.isArray(subj)) continue;
+        subjectsByProviderId.set(
+          id,
+          Array.from(
+            new Set(
+              subj
+                .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
+                .filter((s: any): s is string => !!s)
+            )
+          )
+        );
+      }
+    } catch {
+      // Ignore: column does not exist yet.
+    }
+
+    const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
+
+    // Best-effort: load subjects/languages from users.data only as a fallback.
     const subjectsByUserId = new Map<string, string[]>();
     const languagesByUserId = new Map<string, string[]>();
     try {
       const userIds = Array.from(
         new Set(
-          (providerRows ?? [])
+          (providerRowsAll ?? [])
             .map((r: any) => (typeof r?.user_id === 'string' ? String(r.user_id).trim() : ''))
             .filter(Boolean)
         )
@@ -271,7 +211,7 @@ export async function GET(req: NextRequest) {
       // ignore
     }
 
-    const providersAll = (providerRows ?? [])
+    const providersAll = (providerRowsAll ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
@@ -308,27 +248,37 @@ export async function GET(req: NextRequest) {
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
 
-        const subjects = Array.from(
+        // SUBJECT AUTHORITY RULE:
+        // Prefer provider-owned sources (providers.subjects column, providers.data.subjects/specialties).
+        // Fall back to users.data.subjects ONLY when provider-owned sources are empty.
+        const subjectsPrimaryRaw = [
+          ...(subjectsByProviderId.get(id) || []),
+          ...normalizeStringArray((data as any)?.subjects),
+          ...normalizeStringArray((data as any)?.specialties),
+        ];
+        const subjectsFallbackRaw = userId ? subjectsByUserId.get(userId) || [] : [];
+
+        const subjectsPrimary = Array.from(
           new Set(
-            [
-              ...(userId ? subjectsByUserId.get(userId) || [] : []),
-              ...normalizeStringArray((data as any)?.subjects),
-              ...normalizeStringArray((data as any)?.specialties),
-            ]
+            subjectsPrimaryRaw
               .map((s) => normalizeSubjectId(String(s ?? '').trim()))
               .filter((s): s is string => !!s)
           )
         );
-
-        const providerLanguages = Array.from(
+        const subjectsFallback = Array.from(
           new Set(
-            [
-              ...(userId ? languagesByUserId.get(userId) || [] : []),
-              ...normalizeStringArray((data as any)?.languages),
-            ]
-              .map((s) => String(s ?? '').trim())
-              .filter(Boolean)
+            subjectsFallbackRaw
+              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
+              .filter((s): s is string => !!s)
           )
+        );
+        const subjects = subjectsPrimary.length > 0 ? subjectsPrimary : subjectsFallback;
+
+        // Language authority: prefer providers.data.languages; fall back to users.data.languages when missing.
+        const languagesPrimary = normalizeStringArray((data as any)?.languages);
+        const languagesFallback = userId ? languagesByUserId.get(userId) || [] : [];
+        const providerLanguages = Array.from(
+          new Set((languagesPrimary.length > 0 ? languagesPrimary : languagesFallback).map((s) => String(s ?? '').trim()).filter(Boolean))
         );
 
         const providerName =
@@ -436,25 +386,123 @@ export async function GET(req: NextRequest) {
 
     const providerIds = providerCandidates.map((p) => p.providerId);
 
+    // Now apply availability-at-time constraint ONLY within eligible provider IDs.
+    if (providerIds.length === 0) {
+      console.log('[SUBJECT_PROVIDER_DEBUG]', {
+        selectedSubject: requestedSubjectKey || requestedSubjectRaw || null,
+        eligibleProviderIds: [],
+        shownProviderIds: [],
+      });
+      return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
+    }
+
+    const slotRows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
+    for (const batch of chunkArray(providerIds, 200)) {
+      const { data, error } = await supabase
+        .from('availability_slots')
+        .select('provider_id, start_time, end_time')
+        .in('provider_id', batch)
+        .eq('is_booked', false)
+        .eq('service_type', inventoryServiceType)
+        .eq('start_time', startD.toISOString())
+        .order('provider_id', { ascending: true });
+      if (error) throw error;
+      for (const r of data ?? []) slotRows.push(r as any);
+    }
+
+    const reserved = await readReservedSlotsFile();
+    const reservedSet = new Set(
+      (reserved || [])
+        .map((s) => ({
+          providerId: String((s as any)?.providerId || '').trim(),
+          start: typeof (s as any)?.startTime === 'string' ? new Date((s as any).startTime).toISOString() : '',
+          end: typeof (s as any)?.endTime === 'string' ? new Date((s as any).endTime).toISOString() : '',
+          status: String((s as any)?.status || 'available'),
+        }))
+        .filter((s) => s.providerId && s.start && s.end && s.status === 'reserved')
+        .map((s) => `${s.providerId}|${s.start}|${s.end}`)
+    );
+
+    const candidateSlotRows = (slotRows ?? [])
+      .map((r: any) => {
+        const providerId = String(r?.provider_id || '').trim();
+        const startIso = new Date(r?.start_time).toISOString();
+        const endIso = new Date(r?.end_time).toISOString();
+        if (!providerId) return null;
+        const key = `${providerId}|${startIso}|${endIso}`;
+        if (reservedSet.has(key)) return null;
+        return { providerId, startIso, endIso };
+      })
+      .filter(Boolean) as Array<{ providerId: string; startIso: string; endIso: string }>;
+
+    const providerIdsFromSlots = Array.from(new Set(candidateSlotRows.map((r) => r.providerId)));
+    if (providerIdsFromSlots.length === 0) {
+      console.log('[SUBJECT_PROVIDER_DEBUG]', {
+        selectedSubject: requestedSubjectKey || requestedSubjectRaw || null,
+        eligibleProviderIds: providerIds,
+        shownProviderIds: [],
+      });
+      return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
+    }
+
+    // Defensively exclude providers with overlapping booked sessions.
+    const rangeStartISO = new Date(startD.getTime() - 60 * 60 * 1000).toISOString();
+    const rangeEndISO = new Date(startD.getTime() + 2 * 60 * 60 * 1000).toISOString();
+    const bookedWindows = await getBookedSessionWindowsForProviders({
+      providerIds: providerIdsFromSlots,
+      rangeStartISO,
+      rangeEndISO,
+      defaultDurationMinutesWhenMissingEnd: 60,
+    });
+    const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
+    for (const w of bookedWindows || []) {
+      const arr = windowsByProvider.get(w.providerId) || [];
+      arr.push({ sessionStartMs: w.sessionStartMs, sessionEndMs: w.sessionEndMs });
+      windowsByProvider.set(w.providerId, arr);
+    }
+
+    const providerIdsStillFree = providerIdsFromSlots.filter((pid) => {
+      const anyRow = candidateSlotRows.find((r) => r.providerId === pid);
+      if (!anyRow) return false;
+      const startMs = new Date(anyRow.startIso).getTime();
+      const endMs = new Date(anyRow.endIso).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return false;
+      const windows = windowsByProvider.get(pid) || [];
+      if (windows.length === 0) return true;
+      return !overlapsAnyWindow(startMs, endMs, windows);
+    });
+
+    const shownProviderIds = providerCandidates
+      .map((p) => p.providerId)
+      .filter((pid) => providerIdsStillFree.includes(pid));
+
+    console.log('[SUBJECT_PROVIDER_DEBUG]', {
+      selectedSubject: requestedSubjectKey || requestedSubjectRaw || null,
+      eligibleProviderIds: providerIds,
+      shownProviderIds,
+    });
+
     console.log('[DATE_FILTER_DEBUG]', {
       selectedDate,
       selectedTime,
       matchingSlotCount: providerIdsStillFree.length,
-      providerIds,
+      providerIds: shownProviderIds,
     });
 
     console.log('[BOOKING_FLOW]', {
       selectedService: normalizedServiceType,
       selectedTime: startD.toISOString(),
-      providerIds,
+      providerIds: shownProviderIds,
       noSchoolMatch,
     });
 
+    const shownProviders = providerCandidates.filter((p) => shownProviderIds.includes(p.providerId));
+
     return NextResponse.json(
       {
-        providerIds,
+        providerIds: shownProviderIds,
         noSchoolMatch,
-        providers: providerCandidates.map((p) => ({
+        providers: shownProviders.map((p) => ({
           providerId: p.providerId,
           name: p.providerName,
           school: p.providerSchoolName,

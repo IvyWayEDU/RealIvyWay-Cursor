@@ -160,15 +160,12 @@ export async function GET(req: NextRequest) {
       endOfDayUTC: endOfDay.toISOString(),
     });
 
-    // IMPORTANT:
-    // Query a slightly wider UTC range, then filter by zoned dateKey in code.
-    // This prevents "evening slots" from being dropped due to UTC day boundaries or DST edge cases.
-    const queryStartISO = new Date(startOfDay.getTime() - 6 * 60 * 60 * 1000).toISOString();
-    const queryEndISO = new Date(endOfDay.getTime() + 6 * 60 * 60 * 1000).toISOString();
-
-    // This remains the canonical "selected day" window for debug + reserved-slot filtering.
+    // Canonical "selected day" window (in UTC instants) derived from the booking timezone day.
+    // We use this exact window for the DB query so "Monday" in the booking UI maps to Monday slots.
     const rangeStartISO = startOfDay.toISOString();
     const rangeEndISO = endOfDay.toISOString();
+    const queryStartISO = rangeStartISO;
+    const queryEndISO = rangeEndISO;
 
     const cutoffUTC = new Date(Date.now() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000);
     const cutoffISO = cutoffUTC.toISOString();
@@ -328,28 +325,38 @@ export async function GET(req: NextRequest) {
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
 
-        const canonicalSubjects = Array.from(
+        // SUBJECT AUTHORITY RULE:
+        // Prefer provider-owned sources (providers.subjects column, providers.data.subjects/specialties).
+        // Fall back to users.data.subjects ONLY when provider-owned sources are empty.
+        const subjectsPrimaryRaw = [
+          ...(subjectsByProviderId.get(id) || []),
+          ...normalizeStringArray((data as any)?.subjects),
+          ...normalizeStringArray((data as any)?.specialties),
+        ];
+        const subjectsFallbackRaw = userId ? subjectsByUserId.get(userId) || [] : [];
+
+        const canonicalSubjectsPrimary = Array.from(
           new Set(
-            [
-              ...(subjectsByProviderId.get(id) || []),
-              ...(userId ? subjectsByUserId.get(userId) || [] : []),
-              ...normalizeStringArray((data as any)?.subjects),
-              ...normalizeStringArray((data as any)?.specialties),
-            ]
+            subjectsPrimaryRaw
               .map((s) => normalizeSubjectId(String(s ?? '').trim()))
               .filter((s): s is string => !!s)
           )
         );
-
-        const providerLanguages = Array.from(
+        const canonicalSubjectsFallback = Array.from(
           new Set(
-            [
-              ...(userId ? languagesByUserId.get(userId) || [] : []),
-              ...normalizeStringArray((data as any)?.languages),
-            ]
-              .map((s) => String(s ?? '').trim())
-              .filter(Boolean)
+            subjectsFallbackRaw
+              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
+              .filter((s): s is string => !!s)
           )
+        );
+        const canonicalSubjects =
+          canonicalSubjectsPrimary.length > 0 ? canonicalSubjectsPrimary : canonicalSubjectsFallback;
+
+        // Language authority: prefer providers.data.languages; fall back to users.data.languages when missing.
+        const languagesPrimary = normalizeStringArray((data as any)?.languages);
+        const languagesFallback = userId ? languagesByUserId.get(userId) || [] : [];
+        const providerLanguages = Array.from(
+          new Set((languagesPrimary.length > 0 ? languagesPrimary : languagesFallback).map((s) => String(s ?? '').trim()).filter(Boolean))
         );
 
         const providerName =
@@ -590,6 +597,14 @@ export async function GET(req: NextRequest) {
       firstSlot: slotsSorted[0] || null,
       lastSlot: slotsSorted[slotsSorted.length - 1] || null,
       slotCount: slotsSorted.length,
+    });
+
+    console.log('[SLOT_DATE_DEBUG]', {
+      selectedDate: date,
+      startOfDay: startOfDay.toISOString(),
+      endOfDay: endOfDay.toISOString(),
+      slotCount: slotsSorted.length,
+      serviceType: normalizedServiceType,
     });
 
     // Keep `providers` for backward compatibility, but booking UI no longer uses it.
