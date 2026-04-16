@@ -149,65 +149,19 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Strict date filtering:
-    // Interpret the selected YYYY-MM-DD as a UTC day and query ONLY by UTC bounds.
-    // Do not use local time comparisons or timezone-based re-filtering.
-    const selectedDate = date;
-    const startOfDay = parseIsoDateYYYYMMDDToUtcDate(selectedDate);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-    const endOfDay = parseIsoDateYYYYMMDDToUtcDate(selectedDate);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-
-    const rangeStartISO = startOfDay.toISOString();
-    const rangeEndISO = endOfDay.toISOString();
-    const queryStartISO = rangeStartISO;
-    const queryEndISO = rangeEndISO;
-
     const cutoffUTC = new Date(Date.now() + LEAD_TIME_BUFFER_MINUTES * 60 * 1000);
     const cutoffISO = cutoffUTC.toISOString();
 
     // Provider matching must come from Supabase `providers` table (school + serviceType filters).
     const supabase = getSupabaseAdmin();
 
-    // DEBUG: Temporarily remove ALL filters except provider_id (requires providerId).
-    // This returns ALL slots for that provider (including other dates/service types/is_booked).
-    if (debugOnlyProviderFilter === '1') {
-      const pid = String(providerId || '').trim();
-      if (!pid) {
-        return NextResponse.json(
-          { error: 'providerId is required when debugOnlyProviderFilter=1' },
-          { status: 400, headers: rateHeaders }
-        );
-      }
-
-      const { data: debugRows, error: debugErr } = await supabase
-        .from('availability_slots')
-        .select('provider_id, start_time, end_time')
-        .eq('provider_id', pid)
-        .order('start_time', { ascending: true });
-      if (debugErr) throw debugErr;
-
-      const slots = (debugRows ?? []).map((r: any) => ({
-        providerId: String(r?.provider_id || '').trim(),
-        startTimeUTC: new Date(r?.start_time).toISOString(),
-        endTimeUTC: new Date(r?.end_time).toISOString(),
-      }));
-
-      return NextResponse.json({ slots, providers: [] }, { status: 200, headers: rateHeaders });
-    }
-
-    // Providers table shape differs across environments. Prefer `user_id` when available for subject fallback.
-    let providerRows: any[] = [];
-    {
-      const attempt = await supabase.from('providers').select('id, user_id, data').order('id', { ascending: true });
-      if (!attempt.error) {
-        providerRows = attempt.data ?? [];
-      } else {
-        const fallback = await supabase.from('providers').select('id, data').order('id', { ascending: true });
-        if (fallback.error) throw fallback.error;
-        providerRows = fallback.data ?? [];
-      }
-    }
+    // Providers must be sourced from real DB-backed `providers.subjects` (TEXT[] array).
+    // If subjects is NULL or a string -> provider is NOT eligible for booking.
+    const { data: providerRows, error: providerErr } = await supabase
+      .from('providers')
+      .select('id, data, subjects')
+      .order('id', { ascending: true });
+    if (providerErr) throw providerErr;
 
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
 
@@ -215,81 +169,12 @@ export async function GET(req: NextRequest) {
     const requestedSchoolName = String(schoolName || '').trim();
     const requestedLanguageRaw = String(language || '').trim();
 
-    // Optional: load provider subjects from a dedicated column when present.
-    // Kept in a separate query so older schemas (without providers.subjects) don't 500.
-    const subjectsByProviderId = new Map<string, string[]>();
-    try {
-      const { data: subjectRows, error: subjectErr } = await supabase
-        .from('providers')
-        .select('id, subjects')
-        .order('id', { ascending: true });
-      if (subjectErr) throw subjectErr;
-      for (const r of subjectRows ?? []) {
-        const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-        const subj = (r as any)?.subjects;
-        if (!id || !Array.isArray(subj)) continue;
-        subjectsByProviderId.set(
-          id,
-          Array.from(
-            new Set(
-              subj
-                .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
-                .filter((s: any): s is string => !!s)
-            )
-          )
-        );
-      }
-    } catch {
-      // Ignore: column does not exist yet.
-    }
-
-    // Fallback: some environments store provider subjects only on the related `users.data.subjects`.
-    // Pull those too (best-effort) so availability matching doesn't depend on providers.data being up to date.
-    const subjectsByUserId = new Map<string, string[]>();
-    const languagesByUserId = new Map<string, string[]>();
-    try {
-      const userIds = Array.from(
-        new Set(
-          (providerRows ?? [])
-            .map((r: any) => (typeof r?.user_id === 'string' ? String(r.user_id).trim() : ''))
-            .filter(Boolean)
-        )
-      );
-      if (userIds.length > 0) {
-        const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', userIds);
-        if (userErr) throw userErr;
-        for (const r of userRows ?? []) {
-          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-          const data = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : {};
-          const subj = Array.isArray((data as any)?.subjects) ? (data as any).subjects : [];
-          const langs = Array.isArray((data as any)?.languages) ? (data as any).languages : [];
-          if (!id) continue;
-          subjectsByUserId.set(
-            id,
-            Array.from(
-              new Set(
-                subj
-                  .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
-                  .filter((s: any): s is string => !!s)
-              )
-            )
-          );
-          languagesByUserId.set(
-            id,
-            Array.from(new Set(langs.map((s: any) => String(s ?? '').trim()).filter(Boolean)))
-          );
-        }
-      }
-    } catch {
-      // Ignore: not all environments have `user_id` or `users.data.subjects` populated.
-    }
-
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
+        const subjects = (r as any)?.subjects;
         if (!id) return null;
-        const userId = typeof (r as any)?.user_id === 'string' ? String((r as any).user_id).trim() : '';
 
         const servicesRaw: unknown = (data as any)?.services;
         const services = Array.isArray(servicesRaw)
@@ -320,40 +205,7 @@ export async function GET(req: NextRequest) {
         );
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
-
-        // SUBJECT AUTHORITY RULE:
-        // Prefer provider-owned sources (providers.subjects column, providers.data.subjects/specialties).
-        // Fall back to users.data.subjects ONLY when provider-owned sources are empty.
-        const subjectsPrimaryRaw = [
-          ...(subjectsByProviderId.get(id) || []),
-          ...normalizeStringArray((data as any)?.subjects),
-          ...normalizeStringArray((data as any)?.specialties),
-        ];
-        const subjectsFallbackRaw = userId ? subjectsByUserId.get(userId) || [] : [];
-
-        const canonicalSubjectsPrimary = Array.from(
-          new Set(
-            subjectsPrimaryRaw
-              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
-              .filter((s): s is string => !!s)
-          )
-        );
-        const canonicalSubjectsFallback = Array.from(
-          new Set(
-            subjectsFallbackRaw
-              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
-              .filter((s): s is string => !!s)
-          )
-        );
-        const canonicalSubjects =
-          canonicalSubjectsPrimary.length > 0 ? canonicalSubjectsPrimary : canonicalSubjectsFallback;
-
-        // Language authority: prefer providers.data.languages; fall back to users.data.languages when missing.
-        const languagesPrimary = normalizeStringArray((data as any)?.languages);
-        const languagesFallback = userId ? languagesByUserId.get(userId) || [] : [];
-        const providerLanguages = Array.from(
-          new Set((languagesPrimary.length > 0 ? languagesPrimary : languagesFallback).map((s) => String(s ?? '').trim()).filter(Boolean))
-        );
+        const providerLanguages = Array.from(new Set(normalizeStringArray((data as any)?.languages)));
 
         const providerName =
           typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
@@ -370,8 +222,7 @@ export async function GET(req: NextRequest) {
             ? String((data as any).avatar).trim()
             : null;
 
-        const providerSchoolName =
-          schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
+        const providerSchoolName = schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
 
         return {
           id,
@@ -384,11 +235,12 @@ export async function GET(req: NextRequest) {
           schoolNames,
           services,
           offersVirtualTours,
-          subjects: Array.isArray(canonicalSubjects) ? canonicalSubjects : [],
+          subjects,
           languages: providerLanguages,
         };
       })
       .filter(Boolean) as Array<{
+      id: string;
       providerId: string;
       providerName: string;
       providerSchoolName: string | null;
@@ -398,7 +250,7 @@ export async function GET(req: NextRequest) {
       schoolNames: string[];
       services: string[];
       offersVirtualTours: boolean;
-      subjects: string[];
+      subjects: unknown;
       languages: string[];
     }>;
 
@@ -465,94 +317,114 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const matchingProviders =
-      normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
-        ? providerCandidates.filter((provider) => {
-            const subjects = Array.isArray((provider as any).subjects) ? (provider as any).subjects : [];
-            return subjects.some((sub: any) => normalizedSelectedSubjects.includes(String(sub || '').toLowerCase()));
-          })
-        : providerCandidates;
-
-    // SUBJECT FIX: compute eligible providers BEFORE any availability query.
-    // We keep canonical matching elsewhere, but this explicit gate ensures subject eligibility never widens.
-    const selectedSubjectRaw = String(selectedSubjectsRaw?.[0] || subject || '').trim();
-    const selectedSubject = selectedSubjectRaw ? canonicalSubjectToEligibilityLabel(selectedSubjectRaw) : '';
-    const providers = providerCandidates.map((p) => ({
-      id: p.providerId,
-      subjects: subjectsToEligibilityLabels((p as any).subjects),
-    }));
-    const eligibleProviderIds = selectedSubject
-      ? providers
-          .filter((p) => {
-            if (selectedSubject === 'Math') return p.subjects.includes('Math') || p.subjects.includes('math');
-            if (selectedSubject === 'English') return p.subjects.includes('English') || p.subjects.includes('english');
-            if (selectedSubject === 'Computer Science')
-              return p.subjects.includes('Computer Science') || p.subjects.includes('computer_science');
-            if (selectedSubject === 'Languages') return true; // handled separately
-            if (selectedSubject === 'Test Prep') return p.subjects.includes('Test Prep') || p.subjects.includes('test_prep');
-            return false;
-          })
-          .map((p) => p.id)
-      : providers.map((p) => p.id);
-
-    const eligibleProviderIdSet = new Set(eligibleProviderIds);
-
     const explicitProviderId = String(providerId || '').trim();
+
+    // Language tutoring is special-case: require a concrete language match.
+    const subjectKeyRaw = String(selectedSubjectsRaw?.[0] || subject || '').trim();
+    const subjectKey =
+      normalizedServiceType === 'test_prep'
+        ? 'test_prep'
+        : normalizeSubjectId(subjectKeyRaw) || subjectKeyRaw;
+
     const shouldApplyLanguageFilter =
-      !explicitProviderId &&
-      normalizedServiceType === 'tutoring' &&
-      normalizedSelectedSubjects.some((s) => String(s || '').trim().toLowerCase() === 'languages');
+      !explicitProviderId && normalizedServiceType === 'tutoring' && String(subjectKey || '').trim().toLowerCase() === 'languages';
 
-    const languageFilteredProviders = shouldApplyLanguageFilter
-      ? requestedLanguageRaw
-        ? matchingProviders.filter((p) => Array.isArray((p as any).languages) && (p as any).languages.some((l: any) => languageTutoringMatches(String(l ?? ''), requestedLanguageRaw)))
-        : []
-      : matchingProviders;
+    const providersAfterServiceSchool = providerCandidates;
+    const providersAfterLanguage =
+      shouldApplyLanguageFilter && requestedLanguageRaw
+        ? providersAfterServiceSchool.filter(
+            (p) =>
+              Array.isArray((p as any).languages) &&
+              (p as any).languages.some((l: any) => languageTutoringMatches(String(l ?? ''), requestedLanguageRaw))
+          )
+        : shouldApplyLanguageFilter
+          ? []
+          : providersAfterServiceSchool;
 
-    const providerIdsPreEligibility = explicitProviderId
-      ? [explicitProviderId]
-      : uniqStrings(languageFilteredProviders.map((p) => p.providerId));
-    const providerIds = providerIdsPreEligibility.filter((pid) => eligibleProviderIdSet.has(pid));
+    // FIX 2: Build eligibleProviderIds ONLY from DB-backed subjects[] (must be an array).
+    const providersForEligibility = providersAfterLanguage.map((p) => ({
+      id: p.providerId,
+      subjects: (p as any).subjects,
+    }));
 
-    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && normalizedSelectedSubjects.length > 0) {
-      console.log('[SUBJECT_FILTER]', { subjects: normalizedSelectedSubjects, providerIds });
+    console.log('ALL PROVIDERS', providersForEligibility);
+
+    const eligibleProviderIds = providersForEligibility
+      .filter(
+        (p) =>
+          Array.isArray(p.subjects) &&
+          (p.subjects as any[]).length > 0 &&
+          (subjectKey ? (p.subjects as any[]).includes(subjectKey) : true)
+      )
+      .map((p) => p.id);
+
+    console.log('ELIGIBLE IDS', eligibleProviderIds);
+
+    const idsToQuery = explicitProviderId ? eligibleProviderIds.filter((id) => id === explicitProviderId) : eligibleProviderIds;
+    if (idsToQuery.length === 0) {
+      return NextResponse.json(
+        { slots: [], nextAvailableSlots: [], providers: [], noSchoolMatch: false },
+        { status: 200, headers: rateHeaders }
+      );
     }
 
-    if (providerIds.length === 0) {
-      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
-      return NextResponse.json({ slots: [], providers: [], noSchoolMatch: false }, { status: 200, headers: rateHeaders });
-    }
-
-    const rows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
-
-    console.log("[AVAILABILITY_FETCH]", { serviceType, providerId: explicitProviderId || null });
-
-    for (const batch of chunkArray(providerIds, 200)) {
+    // FIX 1: Fetch slots with strict provider filter at DB query level.
+    // SELECT * FROM availability_slots WHERE provider_id = ANY(eligibleProviderIds) AND service_type = selectedService AND is_booked = false;
+    const rows: any[] = [];
+    for (const batch of chunkArray(idsToQuery, 200)) {
       const { data, error } = await supabase
         .from('availability_slots')
-        .select('provider_id, start_time, end_time')
+        .select('*')
         .in('provider_id', batch)
-        .eq('is_booked', false)
         .eq('service_type', availabilityServiceType)
-        .gte('start_time', queryStartISO)
-        .lte('start_time', queryEndISO)
-        .gt('start_time', cutoffISO)
+        .eq('is_booked', false)
         .order('start_time', { ascending: true });
       if (error) throw error;
       for (const r of data ?? []) rows.push(r as any);
     }
 
+    const slots = (rows ?? [])
+      .map((r: any) => {
+        const provider_id = String(r?.provider_id || '').trim();
+        const start_time = typeof r?.start_time === 'string' ? r.start_time : '';
+        const end_time = typeof r?.end_time === 'string' ? r.end_time : '';
+        if (!provider_id || !start_time || !end_time) return null;
+        return { ...r, provider_id, start_time, end_time };
+      })
+      .filter(Boolean) as any[];
+
+    console.log('ALL SLOTS', slots);
+
+    // Remove lead-time slots after fetch (still within the strict provider/service dataset).
+    const slotsAfterLeadTime = slots.filter((slot) => {
+      const startMs = new Date(slot.start_time).getTime();
+      if (!Number.isFinite(startMs)) return false;
+      return startMs > new Date(cutoffISO).getTime();
+    });
+
+    // Remove reserved slots + overlapping booked sessions defensively (applies across the full fetched slot range).
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
       (reserved || [])
-        .filter((s) => s.startTime >= rangeStartISO && s.startTime <= rangeEndISO)
-        .map((s) => `${s.providerId}|${s.startTime}|${s.endTime}`)
+        .filter((s) => (s.status ?? 'available') === 'reserved')
+        .map((s) => `${String((s as any)?.providerId || '').trim()}|${String((s as any)?.startTime || '').trim()}|${String((s as any)?.endTime || '').trim()}`)
+        .filter((k) => k.split('|').every(Boolean))
     );
 
+    const providerIdsForWindows = Array.from(new Set(slotsAfterLeadTime.map((s: any) => String(s?.provider_id || '').trim()).filter(Boolean)));
+    const times = slotsAfterLeadTime
+      .map((s: any) => {
+        const ms = new Date(s?.start_time).getTime();
+        return Number.isFinite(ms) ? ms : NaN;
+      })
+      .filter((ms: any) => Number.isFinite(ms)) as number[];
+    const rangeStartISO = times.length > 0 ? new Date(Math.min(...times) - 2 * 60 * 60 * 1000).toISOString() : cutoffISO;
+    const rangeEndISO = times.length > 0 ? new Date(Math.max(...times) + 2 * 60 * 60 * 1000).toISOString() : cutoffISO;
+
     const bookedWindows = await getBookedSessionWindowsForProviders({
-      providerIds,
-      rangeStartISO: queryStartISO,
-      rangeEndISO: queryEndISO,
+      providerIds: providerIdsForWindows,
+      rangeStartISO,
+      rangeEndISO,
       defaultDurationMinutesWhenMissingEnd: 60,
     });
     const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
@@ -562,15 +434,15 @@ export async function GET(req: NextRequest) {
       windowsByProvider.set(w.providerId, arr);
     }
 
-    const slotsWithProviders = rows
-      .map((r) => {
-        const providerId = String((r as any)?.provider_id || '').trim();
-        const startTimeUTC = new Date((r as any)?.start_time).toISOString();
-        const endTimeUTC = new Date((r as any)?.end_time).toISOString();
+    const allSlots = slotsAfterLeadTime
+      .map((r: any) => {
+        const providerId = String(r?.provider_id || '').trim();
+        const startTimeUTC = new Date(r?.start_time).toISOString();
+        const endTimeUTC = new Date(r?.end_time).toISOString();
         if (!providerId) return null;
 
-        const key = `${providerId}|${startTimeUTC}|${endTimeUTC}`;
-        if (reservedSet.has(key)) return null;
+        const reservationKey = `${providerId}|${startTimeUTC}|${endTimeUTC}`;
+        if (reservedSet.has(reservationKey)) return null;
 
         const startMs = new Date(startTimeUTC).getTime();
         const endMs = new Date(endTimeUTC).getTime();
@@ -583,36 +455,38 @@ export async function GET(req: NextRequest) {
       })
       .filter(Boolean) as Array<{ providerId: string; startTimeUTC: string; endTimeUTC: string }>;
 
-    const shownProviders = Array.from(new Set(slotsWithProviders.map((s) => s.providerId))).filter(Boolean);
-    console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders });
+    // FIX 1: Filter by date in backend (NOT frontend).
+    const selectedDate = new Date(String(date || '').trim());
+    const filteredSlots = allSlots.filter((slot) => {
+      const slotDate = new Date(slot.startTimeUTC);
+      return slotDate.toDateString() === selectedDate.toDateString();
+    });
+
+    console.log('FILTERED SLOTS', filteredSlots);
 
     // TIME-FIRST: return unique times (not provider-specific) so the user selects time first.
     const uniqByTime = new Map<string, { startTimeUTC: string; endTimeUTC: string }>();
-    for (const s of slotsWithProviders) {
+    for (const s of filteredSlots) {
       const key = `${s.startTimeUTC}|${s.endTimeUTC}`;
       if (!uniqByTime.has(key)) uniqByTime.set(key, { startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC });
     }
-    const slots = Array.from(uniqByTime.values());
+    const slotsOut = Array.from(uniqByTime.values()).sort(
+      (a, b) => new Date(a.startTimeUTC).getTime() - new Date(b.startTimeUTC).getTime()
+    );
 
-    const slotsSorted = [...slots].sort((a, b) => new Date(a.startTimeUTC).getTime() - new Date(b.startTimeUTC).getTime());
-    console.log('[SLOT_RANGE_DEBUG]', {
-      providerId: explicitProviderId || null,
-      serviceType: normalizedServiceType,
-      selectedDate,
-      firstSlot: slotsSorted[0] || null,
-      lastSlot: slotsSorted[slotsSorted.length - 1] || null,
-      slotCount: slotsSorted.length,
-    });
+    // FIX 3: Next available must use the SAME filtered dataset (no separate query).
+    const nextAvailable = [...allSlots]
+      .filter((slot) => eligibleProviderIds.includes(slot.providerId))
+      .filter((slot) => new Date(slot.startTimeUTC).toDateString() !== selectedDate.toDateString())
+      .sort((a, b) => new Date(a.startTimeUTC).getTime() - new Date(b.startTimeUTC).getTime());
 
-    console.log('[DATE_FIX]', {
-      selectedDate,
-      startOfDay,
-      endOfDay,
-      slotsFound: slotsSorted.length,
-    });
+    const nextAvailableSlots = nextAvailable.slice(0, 9).map((s) => ({ startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC }));
 
     // Keep `providers` for backward compatibility, but booking UI no longer uses it.
-    return NextResponse.json({ slots, providers: [], noSchoolMatch }, { status: 200, headers: rateHeaders });
+    return NextResponse.json(
+      { slots: slotsOut, nextAvailableSlots, providers: [], noSchoolMatch },
+      { status: 200, headers: rateHeaders }
+    );
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/availability/all-slots]' });
   }

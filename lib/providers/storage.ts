@@ -23,6 +23,7 @@ type ProviderDbRow = {
   id: string | null;
   user_id: string | null;
   data: any;
+  subjects?: string[] | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -36,6 +37,20 @@ function toIsoOrNow(v: unknown, fallback: string): string {
   if (!s) return fallback;
   const d = new Date(s);
   return Number.isFinite(d.getTime()) ? d.toISOString() : fallback;
+}
+
+function normalizeStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of input) {
+    const s = String(v ?? '').trim();
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
 }
 
 function normalizeProviderFromDbRow(row: ProviderDbRow): ProviderProfile | null {
@@ -178,7 +193,7 @@ export async function getProviders(): Promise<ProviderProfile[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from(PROVIDERS_TABLE)
-    .select('id, user_id, data, created_at, updated_at')
+    .select('id, user_id, data, subjects, created_at, updated_at')
     .order('created_at', { ascending: true });
   if (error) {
     console.error('[providers.storage] Error reading providers from Supabase:', error);
@@ -222,10 +237,12 @@ export async function saveProviders(providers: ProviderProfile[]): Promise<void>
       // Canonicalize: row.id is provider user id; `data.id` must not override it.
       const createdAt = toIsoOrNow(p?.createdAt, now);
       const updatedAt = toIsoOrNow(p?.updatedAt, now);
-      const data = { ...(p || {}), id: userId, userId };
+      const subjects = normalizeStringArray(p?.subjects);
+      const data = { ...(p || {}), subjects, id: userId, userId };
       return {
         id: userId,
         user_id: userId,
+        subjects,
         data,
         created_at: createdAt,
         updated_at: updatedAt,
@@ -349,10 +366,18 @@ export async function upsertProviderDataByUserId(userId: string, patch: Record<s
   const existingData = row?.data && typeof row.data === 'object' ? row.data : {};
   const nextData = { ...(existingData as any), ...(safePatch as any), id: pid, userId: pid };
 
+  // Keep provider.subjects column in sync when `subjects` is explicitly being updated.
+  const hasSubjectsPatch = Object.prototype.hasOwnProperty.call(safePatch, 'subjects');
+  const subjects = hasSubjectsPatch ? normalizeStringArray((safePatch as any).subjects) : undefined;
+  if (hasSubjectsPatch) {
+    (nextData as any).subjects = subjects;
+  }
+
   const { error: upsertErr } = await supabase.from(PROVIDERS_TABLE).upsert(
     {
       id: pid,
       user_id: pid,
+      ...(hasSubjectsPatch ? { subjects } : {}),
       data: nextData,
     } as any,
     { onConflict: 'id' }

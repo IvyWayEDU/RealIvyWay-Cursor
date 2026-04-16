@@ -173,80 +173,67 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     console.log("[AVAILABILITY_FETCH]", { serviceType, providerId });
 
-    // SUBJECT FIX: compute eligible providers BEFORE any availability query.
-    const selectedSubject = subject ? canonicalSubjectToEligibilityLabel(subject) : '';
-    const subjectsByProviderId = new Map<string, string[]>();
-    try {
-      const { data: subjectRows, error: subjectErr } = await supabase
-        .from('providers')
-        .select('id, subjects')
-        .order('id', { ascending: true });
-      if (subjectErr) throw subjectErr;
-      for (const r of subjectRows ?? []) {
-        const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-        const subj = (r as any)?.subjects;
-        if (!id || !Array.isArray(subj)) continue;
-        subjectsByProviderId.set(id, subj.map((s: any) => String(s ?? '').trim()).filter(Boolean));
-      }
-    } catch {
-      // ignore
-    }
-
-    const { data: providerRows, error: provErr } = await supabase.from('providers').select('id, data').order('id', { ascending: true });
+    // FIX 2: Build eligibleProviderIds ONLY from DB-backed subjects[] (must be an array).
+    const { data: providerRows, error: provErr } = await supabase
+      .from('providers')
+      .select('id, subjects')
+      .order('id', { ascending: true });
     if (provErr) throw provErr;
 
+    const subjectKeyRaw = String(subject || '').trim();
+    const subjectKey =
+      normalizedServiceType === 'test_prep'
+        ? 'test_prep'
+        : normalizeSubjectId(subjectKeyRaw) || subjectKeyRaw;
+
     const providers = (providerRows ?? [])
-      .map((r: any) => {
-        const id = typeof r?.id === 'string' ? String(r.id).trim() : '';
-        const data = r?.data && typeof r.data === 'object' ? r.data : {};
-        if (!id) return null;
-        const subjectsRaw = [
-          ...(subjectsByProviderId.get(id) || []),
-          ...normalizeStringArray((data as any)?.subjects),
-          ...normalizeStringArray((data as any)?.specialties),
-        ];
-        const canonicalSubjects = subjectsRaw.map((s) => normalizeSubjectId(s)).filter(Boolean) as string[];
-        return { id, subjects: subjectsToEligibilityLabels(canonicalSubjects) };
-      })
-      .filter(Boolean) as Array<{ id: string; subjects: string[] }>;
+      .map((r: any) => ({
+        id: typeof r?.id === 'string' ? String(r.id).trim() : '',
+        subjects: (r as any)?.subjects,
+      }))
+      .filter((p: any) => !!p.id);
 
-    const eligibleProviderIds = selectedSubject
-      ? providers
-          .filter((p) => {
-            if (selectedSubject === 'Math') return p.subjects.includes('Math') || p.subjects.includes('math');
-            if (selectedSubject === 'English') return p.subjects.includes('English') || p.subjects.includes('english');
-            if (selectedSubject === 'Computer Science')
-              return p.subjects.includes('Computer Science') || p.subjects.includes('computer_science');
-            if (selectedSubject === 'Languages') return true; // handled separately
-            if (selectedSubject === 'Test Prep') return p.subjects.includes('Test Prep') || p.subjects.includes('test_prep');
-            return false;
-          })
-          .map((p) => p.id)
-      : providers.map((p) => p.id);
+    const eligibleProviderIds = providers
+      .filter(
+        (p: any) =>
+          Array.isArray(p.subjects) &&
+          (p.subjects as any[]).length > 0 &&
+          (subjectKey ? (p.subjects as any[]).includes(subjectKey) : true)
+      )
+      .map((p: any) => p.id);
 
-    const eligibleProviderIdSet = new Set(eligibleProviderIds);
     const idsToQueryRaw = providerId ? [String(providerId).trim()] : eligibleProviderIds;
+    const eligibleProviderIdSet = new Set(eligibleProviderIds);
     const idsToQuery = idsToQueryRaw.filter((id) => eligibleProviderIdSet.has(id));
 
     if (idsToQuery.length === 0) {
-      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
       return NextResponse.json({ slots: [] });
     }
 
+    // FIX 1: Fetch slots with strict provider filter at DB query level.
     const rows: any[] = [];
     for (const batch of chunkArray(idsToQuery, 200)) {
       const { data, error } = await supabase
         .from('availability_slots')
-        .select('provider_id, start_time, end_time')
+        .select('provider_id, start_time, end_time, service_type, is_booked')
         .in('provider_id', batch)
+        .eq('service_type', availabilityServiceType)
         .eq('is_booked', false)
-        .in('service_type', normalizedServiceTypes.length > 0 ? normalizedServiceTypes : [availabilityServiceType])
-        .gte('start_time', queryStartISO)
-        .lte('start_time', queryEndISO)
         .order('start_time', { ascending: true });
       if (error) throw error;
       for (const r of data ?? []) rows.push(r as any);
     }
+
+    // Filter by date in backend (NOT frontend)
+    const selected = new Date(String(selectedDate || '').trim());
+    const rowsForDate = (rows ?? []).filter((r: any) => {
+      try {
+        const slotDate = new Date(r?.start_time);
+        return slotDate.toDateString() === selected.toDateString();
+      } catch {
+        return false;
+      }
+    });
 
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
@@ -256,7 +243,7 @@ export async function GET(request: NextRequest) {
     );
 
     const providerIds = Array.from(
-      new Set((rows ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
+      new Set((rowsForDate ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
     );
     const sessionQueryStartISO = queryStartISO;
     const sessionQueryEndISO = queryEndISO;
@@ -273,7 +260,7 @@ export async function GET(request: NextRequest) {
       windowsByProvider.set(w.providerId, arr);
     }
 
-    const slots: SlotOut[] = (rows ?? [])
+    const slots: SlotOut[] = (rowsForDate ?? [])
       .map((r: any) => {
         const providerId = String(r?.provider_id || '').trim();
         const start = new Date(r?.start_time).toISOString();
@@ -300,22 +287,10 @@ export async function GET(request: NextRequest) {
 
     const slotsSorted = [...slots].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     const shownProviders = Array.from(new Set(slotsSorted.map((s) => s.providerId))).filter(Boolean);
-    console.log('[SUBJECT_FIX]', { selectedSubject: subject ? canonicalSubjectToEligibilityLabel(subject) : '', eligibleProviderIds, shownProviders });
-    console.log('[SLOT_RANGE_DEBUG]', {
-      providerId: providerId || null,
-      serviceType: normalizedServiceType,
-      selectedDate: date,
-      firstSlot: slotsSorted[0] || null,
-      lastSlot: slotsSorted[slotsSorted.length - 1] || null,
-      slotCount: slotsSorted.length,
-    });
-
-    console.log('[DATE_FIX]', {
-      selectedDate,
-      startOfDay,
-      endOfDay,
-      slotsFound: slotsSorted.length,
-    });
+    console.log('ALL PROVIDERS', providers);
+    console.log('ELIGIBLE IDS', eligibleProviderIds);
+    console.log('ALL SLOTS', rows);
+    console.log('FILTERED SLOTS', rowsForDate);
     
     return NextResponse.json({ slots });
   } catch (error) {

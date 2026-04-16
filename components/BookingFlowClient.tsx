@@ -1887,78 +1887,10 @@ function Step4ChooseTimeSlot({
       params.set('durationMinutes', '60');
     }
 
-    const baseParams = new URLSearchParams(params);
-    baseParams.delete('date');
-
-    const buildDateParam = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-    const findNextAvailableSlots = async () => {
-      // Only run when the selected date itself has no availability.
-      if (!cancelled) setLoadingNextAvailable(true);
-      try {
-        const maxLookaheadDays = 30;
-        const tz = 'America/New_York';
-        const timeFormatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: tz,
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-        });
-        const dateFormatter = new Intl.DateTimeFormat('en-US', {
-          timeZone: tz,
-          weekday: 'short',
-          month: 'short',
-          day: 'numeric',
-        });
-
-        for (let i = 1; i <= maxLookaheadDays; i++) {
-          const d = new Date(selectedDate);
-          d.setDate(d.getDate() + i);
-
-          const p = new URLSearchParams(baseParams);
-          p.set('date', buildDateParam(d));
-
-          const res = await fetch(`/api/availability/all-slots?${p.toString()}`);
-          if (!res.ok) continue;
-          const data = await res.json();
-
-          const slots = Array.isArray(data?.slots) ? data.slots : [];
-          if (slots.length === 0) continue;
-
-          const mapped: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; displayDate: string }> =
-            slots
-              .map((slot: any) => {
-                const startTimeUTC = String(slot?.startTimeUTC || '').trim();
-                const endTimeUTC = String(slot?.endTimeUTC || '').trim();
-                if (!startTimeUTC || !endTimeUTC) return null;
-                const startDate = new Date(startTimeUTC);
-                if (isNaN(startDate.getTime())) return null;
-                return {
-                  startTimeUTC,
-                  endTimeUTC,
-                  displayTime: timeFormatter.format(startDate),
-                  displayDate: dateFormatter.format(startDate),
-                };
-              })
-              .filter(Boolean)
-              .slice(0, 9) as any;
-
-          if (!cancelled) setNextAvailableSlots(mapped);
-          return;
-        }
-
-        if (!cancelled) setNextAvailableSlots([]);
-      } catch {
-        if (!cancelled) setNextAvailableSlots([]);
-      } finally {
-        if (!cancelled) setLoadingNextAvailable(false);
-      }
-    };
-
     // Fetch slots from API
     setLoadingSlots(true);
     setSlotsError(null);
+    setLoadingNextAvailable(false);
     fetch(`/api/availability/all-slots?${params.toString()}`)
       .then(res => {
         if (!res.ok) {
@@ -1969,6 +1901,7 @@ function Step4ChooseTimeSlot({
       .then(data => {
         const slots = Array.isArray(data?.slots) ? data.slots : [];
         console.log("Slots returned:", slots);
+        console.log("ALL SLOTS", slots);
 
         // Convert API slots to display format (time-first).
         const rawSlots: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string }> = (data.slots || [])
@@ -1989,8 +1922,44 @@ function Step4ChooseTimeSlot({
           .filter((s: any) => typeof s.startTimeUTC === 'string' && typeof s.endTimeUTC === 'string');
 
         if (!cancelled) setAvailableSlots(rawSlots);
+        console.log("FILTERED SLOTS", rawSlots);
         if (rawSlots.length === 0) {
-          findNextAvailableSlots().catch(() => {});
+          const tz = 'America/New_York';
+          const timeFormatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz,
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+          const dateFormatter = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz,
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+          });
+
+          const nextRaw = Array.isArray((data as any)?.nextAvailableSlots) ? (data as any).nextAvailableSlots : [];
+          const mapped: Array<{ startTimeUTC: string; endTimeUTC: string; displayTime: string; displayDate: string }> =
+            nextRaw
+              .map((slot: any) => {
+                const startTimeUTC = String(slot?.startTimeUTC || '').trim();
+                const endTimeUTC = String(slot?.endTimeUTC || '').trim();
+                if (!startTimeUTC || !endTimeUTC) return null;
+                const startDate = new Date(startTimeUTC);
+                if (isNaN(startDate.getTime())) return null;
+                return {
+                  startTimeUTC,
+                  endTimeUTC,
+                  displayTime: timeFormatter.format(startDate),
+                  displayDate: dateFormatter.format(startDate),
+                };
+              })
+              .filter(Boolean)
+              .slice(0, 9) as any;
+
+          if (!cancelled) setNextAvailableSlots(mapped);
+        } else {
+          if (!cancelled) setNextAvailableSlots([]);
         }
       })
       .catch(err => {
@@ -2002,7 +1971,10 @@ function Step4ChooseTimeSlot({
         }
       })
       .finally(() => {
-        if (!cancelled) setLoadingSlots(false);
+        if (!cancelled) {
+          setLoadingSlots(false);
+          setLoadingNextAvailable(false);
+        }
       });
 
     return () => {
@@ -2368,7 +2340,18 @@ function Step5SelectProvider({
           if (!res.ok) throw new Error('Failed to load providers');
           const json = await res.json();
 
-          const providers: any[] = Array.isArray(json?.providers) ? json.providers : [];
+          let providers: any[] = Array.isArray(json?.providers) ? json.providers : [];
+          const eligibleProviderIds: string[] = Array.isArray(json?.providerIds)
+            ? (json.providerIds as any[]).map((id) => String(id || '').trim()).filter(Boolean)
+            : [];
+
+          // FIX 4 — HARD GUARD BEFORE RENDER (and before any downstream intersection logic).
+          if (eligibleProviderIds.length > 0) {
+            providers = providers.filter((p) => eligibleProviderIds.includes(String(p?.providerId || '').trim()));
+          }
+
+          console.log("ALL PROVIDERS", providers);
+          console.log("ELIGIBLE IDS", eligibleProviderIds);
           const current = new Map<string, (typeof eligibleProviders)[number]>();
           for (const p of providers) {
             const providerId = String(p?.providerId || '').trim();

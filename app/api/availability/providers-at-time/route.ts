@@ -156,95 +156,21 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Load provider inventory eligibility FIRST (subject + service + optional language/school).
-    // This prevents "next available" and provider lists from widening beyond subject-matched providers.
-    let providerRowsAll: any[] = [];
-    {
-      const attempt = await supabase.from('providers').select('id, user_id, data').order('id', { ascending: true });
-      if (!attempt.error) {
-        providerRowsAll = attempt.data ?? [];
-      } else {
-        const fallback = await supabase.from('providers').select('id, data').order('id', { ascending: true });
-        if (fallback.error) throw fallback.error;
-        providerRowsAll = fallback.data ?? [];
-      }
-    }
-
-    // Optional: load provider subjects from a dedicated column when present.
-    const subjectsByProviderId = new Map<string, string[]>();
-    try {
-      const { data: subjectRows, error: subjectErr } = await supabase
-        .from('providers')
-        .select('id, subjects')
-        .order('id', { ascending: true });
-      if (subjectErr) throw subjectErr;
-      for (const r of subjectRows ?? []) {
-        const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-        const subj = (r as any)?.subjects;
-        if (!id || !Array.isArray(subj)) continue;
-        subjectsByProviderId.set(
-          id,
-          Array.from(
-            new Set(
-              subj
-                .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
-                .filter((s: any): s is string => !!s)
-            )
-          )
-        );
-      }
-    } catch {
-      // Ignore: column does not exist yet.
-    }
+    // FIX 2: Eligible providers must be computed ONLY from DB-backed `providers.subjects` (TEXT[] array).
+    const { data: providerRowsAll, error: providerErr } = await supabase
+      .from('providers')
+      .select('id, data, subjects')
+      .order('id', { ascending: true });
+    if (providerErr) throw providerErr;
 
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
-
-    // Best-effort: load subjects/languages from users.data only as a fallback.
-    const subjectsByUserId = new Map<string, string[]>();
-    const languagesByUserId = new Map<string, string[]>();
-    try {
-      const userIds = Array.from(
-        new Set(
-          (providerRowsAll ?? [])
-            .map((r: any) => (typeof r?.user_id === 'string' ? String(r.user_id).trim() : ''))
-            .filter(Boolean)
-        )
-      );
-      if (userIds.length > 0) {
-        const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', userIds);
-        if (userErr) throw userErr;
-        for (const r of userRows ?? []) {
-          const id = typeof (r as any)?.id === 'string' ? String((r as any).id).trim() : '';
-          const data = (r as any)?.data && typeof (r as any).data === 'object' ? (r as any).data : {};
-          const subj = Array.isArray((data as any)?.subjects) ? (data as any).subjects : [];
-          const langs = Array.isArray((data as any)?.languages) ? (data as any).languages : [];
-          if (!id) continue;
-          subjectsByUserId.set(
-            id,
-            Array.from(
-              new Set(
-                subj
-                  .map((s: any) => normalizeSubjectId(typeof s === 'string' ? s : String(s ?? '')))
-                  .filter((s: any): s is string => !!s)
-              )
-            )
-          );
-          languagesByUserId.set(
-            id,
-            Array.from(new Set(langs.map((s: any) => String(s ?? '').trim()).filter(Boolean)))
-          );
-        }
-      }
-    } catch {
-      // ignore
-    }
 
     const providersAll = (providerRowsAll ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
+        const subjects = (r as any)?.subjects;
         if (!id) return null;
-        const userId = typeof (r as any)?.user_id === 'string' ? String((r as any).user_id).trim() : '';
 
         const servicesRaw: unknown = (data as any)?.services;
         const services = Array.isArray(servicesRaw)
@@ -275,39 +201,7 @@ export async function GET(req: NextRequest) {
         );
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
-
-        // SUBJECT AUTHORITY RULE:
-        // Prefer provider-owned sources (providers.subjects column, providers.data.subjects/specialties).
-        // Fall back to users.data.subjects ONLY when provider-owned sources are empty.
-        const subjectsPrimaryRaw = [
-          ...(subjectsByProviderId.get(id) || []),
-          ...normalizeStringArray((data as any)?.subjects),
-          ...normalizeStringArray((data as any)?.specialties),
-        ];
-        const subjectsFallbackRaw = userId ? subjectsByUserId.get(userId) || [] : [];
-
-        const subjectsPrimary = Array.from(
-          new Set(
-            subjectsPrimaryRaw
-              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
-              .filter((s): s is string => !!s)
-          )
-        );
-        const subjectsFallback = Array.from(
-          new Set(
-            subjectsFallbackRaw
-              .map((s) => normalizeSubjectId(String(s ?? '').trim()))
-              .filter((s): s is string => !!s)
-          )
-        );
-        const subjects = subjectsPrimary.length > 0 ? subjectsPrimary : subjectsFallback;
-
-        // Language authority: prefer providers.data.languages; fall back to users.data.languages when missing.
-        const languagesPrimary = normalizeStringArray((data as any)?.languages);
-        const languagesFallback = userId ? languagesByUserId.get(userId) || [] : [];
-        const providerLanguages = Array.from(
-          new Set((languagesPrimary.length > 0 ? languagesPrimary : languagesFallback).map((s) => String(s ?? '').trim()).filter(Boolean))
-        );
+        const providerLanguages = Array.from(new Set(normalizeStringArray((data as any)?.languages)));
 
         const providerName =
           typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
@@ -324,8 +218,7 @@ export async function GET(req: NextRequest) {
             ? String((data as any).avatar).trim()
             : null;
 
-        const providerSchoolName =
-          schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
+        const providerSchoolName = schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
 
         return {
           providerId: id,
@@ -337,7 +230,7 @@ export async function GET(req: NextRequest) {
           schoolNames,
           services,
           offersVirtualTours,
-          subjects: Array.isArray(subjects) ? subjects : [],
+          subjects,
           languages: providerLanguages,
         };
       })
@@ -351,7 +244,7 @@ export async function GET(req: NextRequest) {
       schoolNames: string[];
       services: string[];
       offersVirtualTours: boolean;
-      subjects: string[];
+      subjects: unknown;
       languages: string[];
     }>;
 
@@ -373,10 +266,16 @@ export async function GET(req: NextRequest) {
     };
 
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
-      if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
+      // CRITICAL: If subjects is NULL or string -> exclude provider.
+      if (!Array.isArray(p.subjects)) return false;
+      if ((p.subjects as any[]).length === 0) return false;
+
+      if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
+        // For non-subject services, we still require a real subjects[] array (hard guard).
+        return true;
+      }
       if (!requestedSubjectKey) return false;
-      if (!Array.isArray(p.subjects) || p.subjects.length === 0) return false;
-      if (!p.subjects.some((ps) => subjectsMatch(ps, requestedSubjectKey))) return false;
+      if (!(p.subjects as any[]).includes(requestedSubjectKey)) return false;
 
       // Language tutoring: require a concrete language match (providers without languages are excluded).
       if (requestedSubjectKey === 'languages') {
@@ -412,52 +311,34 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // SUBJECT FIX: compute eligible providers BEFORE any availability query.
-    const selectedSubject = requestedSubjectKey
-      ? canonicalSubjectToEligibilityLabel(requestedSubjectKey)
-      : requestedSubjectRaw
-        ? canonicalSubjectToEligibilityLabel(requestedSubjectRaw)
-        : '';
-    const providers = providerCandidates.map((p) => ({
-      id: p.providerId,
-      subjects: subjectsToEligibilityLabels((p as any).subjects),
-    }));
-    const eligibleProviderIds = selectedSubject
-      ? providers
-          .filter((p) => {
-            if (selectedSubject === 'Math') return p.subjects.includes('Math') || p.subjects.includes('math');
-            if (selectedSubject === 'English') return p.subjects.includes('English') || p.subjects.includes('english');
-            if (selectedSubject === 'Computer Science')
-              return p.subjects.includes('Computer Science') || p.subjects.includes('computer_science');
-            if (selectedSubject === 'Languages') return true; // handled separately
-            if (selectedSubject === 'Test Prep') return p.subjects.includes('Test Prep') || p.subjects.includes('test_prep');
-            return false;
-          })
-          .map((p) => p.id)
-      : providers.map((p) => p.id);
-
-    const eligibleProviderIdSet = new Set(eligibleProviderIds);
-    const providerIds = eligibleProviderIds;
-
-    // Now apply availability-at-time constraint ONLY within eligible provider IDs.
+    // Eligible providers computed STRICTLY from DB subjects[].
+    const providerIds = uniqStrings(providerCandidates.map((p) => p.providerId));
     if (providerIds.length === 0) {
-      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
     }
 
+    // FIX 1: Fetch slots with strict provider filter at DB query level, then filter in backend for the selected time.
     const slotRows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
     for (const batch of chunkArray(providerIds, 200)) {
       const { data, error } = await supabase
         .from('availability_slots')
         .select('provider_id, start_time, end_time')
         .in('provider_id', batch)
-        .eq('is_booked', false)
         .eq('service_type', inventoryServiceType)
-        .eq('start_time', startD.toISOString())
+        .eq('is_booked', false)
         .order('provider_id', { ascending: true });
       if (error) throw error;
       for (const r of data ?? []) slotRows.push(r as any);
     }
+
+    const startIsoTarget = startD.toISOString();
+    const slotRowsAtTime = (slotRows ?? []).filter((r: any) => {
+      try {
+        return new Date(r?.start_time).toISOString() === startIsoTarget;
+      } catch {
+        return false;
+      }
+    });
 
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
@@ -472,7 +353,7 @@ export async function GET(req: NextRequest) {
         .map((s) => `${s.providerId}|${s.start}|${s.end}`)
     );
 
-    const candidateSlotRows = (slotRows ?? [])
+    const candidateSlotRows = (slotRowsAtTime ?? [])
       .map((r: any) => {
         const providerId = String(r?.provider_id || '').trim();
         const startIso = new Date(r?.start_time).toISOString();
@@ -486,7 +367,6 @@ export async function GET(req: NextRequest) {
 
     const providerIdsFromSlots = Array.from(new Set(candidateSlotRows.map((r) => r.providerId)));
     if (providerIdsFromSlots.length === 0) {
-      console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: [] });
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
     }
 
@@ -519,9 +399,7 @@ export async function GET(req: NextRequest) {
 
     const shownProviderIds = providerCandidates
       .map((p) => p.providerId)
-      .filter((pid) => providerIdsStillFree.includes(pid) && eligibleProviderIdSet.has(pid));
-
-    console.log('[SUBJECT_FIX]', { selectedSubject, eligibleProviderIds, shownProviders: shownProviderIds });
+      .filter((pid) => providerIdsStillFree.includes(pid));
 
     console.log('[DATE_FILTER_DEBUG]', {
       selectedDate,
