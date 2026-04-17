@@ -9,6 +9,19 @@ import { normalizeSubjectId } from '@/lib/models/subjects';
 
 type SlotOut = { start: string; end: string; providerId: string };
 
+function normalizeSubject(s: unknown): string | null {
+  if (!s) return null;
+  const val = String(s).toLowerCase().trim();
+
+  if (val === 'math' || val === 'mathematics') return 'math';
+  if (val === 'english') return 'english';
+  if (val === 'computer science') return 'computer_science';
+  if (val === 'test prep') return 'test_prep';
+  if (val === 'languages') return 'languages';
+
+  return null;
+}
+
 function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return input.map((v) => String(v || '').trim()).filter(Boolean);
@@ -173,34 +186,84 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     console.log("[AVAILABILITY_FETCH]", { serviceType, providerId });
 
-    // FIX 2: Build eligibleProviderIds ONLY from DB-backed subjects[] (must be an array).
+    // Build eligibleProviderIds STRICTLY from raw subjects/specialties (provider + user profile JSON).
     const { data: providerRows, error: provErr } = await supabase
       .from('providers')
-      .select('id, subjects')
+      .select('id, data')
       .order('id', { ascending: true });
     if (provErr) throw provErr;
 
     const subjectKeyRaw = String(subject || '').trim();
-    const subjectKey =
-      normalizedServiceType === 'test_prep'
-        ? 'test_prep'
-        : normalizeSubjectId(subjectKeyRaw) || subjectKeyRaw;
+    const selectedSubject =
+      normalizedServiceType === 'test_prep' ? 'test_prep' : normalizeSubject(subjectKeyRaw);
+
+    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !selectedSubject) {
+      return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
+    }
 
     const providers = (providerRows ?? [])
       .map((r: any) => ({
         id: typeof r?.id === 'string' ? String(r.id).trim() : '',
-        subjects: (r as any)?.subjects,
+        data: r?.data && typeof r.data === 'object' ? r.data : {},
       }))
       .filter((p: any) => !!p.id);
 
+    const providerIds = providers.map((p: any) => p.id).filter(Boolean) as string[];
+    const userDataById = new Map<string, any>();
+    if (providerIds.length > 0) {
+      const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', providerIds as any);
+      if (userErr) throw userErr;
+      for (const row of userRows ?? []) {
+        const id = typeof (row as any)?.id === 'string' ? String((row as any).id).trim() : '';
+        const data = (row as any)?.data && typeof (row as any).data === 'object' ? (row as any).data : null;
+        if (id && data) userDataById.set(id, data);
+      }
+    }
+
+    const normalizedSubjectsMap: Record<string, string[]> = {};
+    for (const p of providers) {
+      const userData = userDataById.get(p.id) && typeof userDataById.get(p.id) === 'object' ? userDataById.get(p.id) : {};
+      const rawSubjects = [
+        ...(((p as any).data?.subjects as any[]) || []),
+        ...(((p as any).data?.specialties as any[]) || []),
+        ...(((userData as any)?.subjects as any[]) || []),
+        ...(((userData as any)?.specialties as any[]) || []),
+      ];
+
+      if (rawSubjects.length === 0) {
+        normalizedSubjectsMap[p.id] = [];
+        continue;
+      }
+
+      normalizedSubjectsMap[p.id] = rawSubjects.map(normalizeSubject).filter(Boolean) as string[];
+    }
+
     const eligibleProviderIds = providers
-      .filter(
-        (p: any) =>
-          Array.isArray(p.subjects) &&
-          (p.subjects as any[]).length > 0 &&
-          (subjectKey ? (p.subjects as any[]).includes(subjectKey) : true)
-      )
+      .filter((p: any) => {
+        const rawSubjects = [
+          ...(((p as any).data?.subjects as any[]) || []),
+          ...(((p as any).data?.specialties as any[]) || []),
+          ...(((userDataById.get(p.id) as any)?.subjects as any[]) || []),
+          ...(((userDataById.get(p.id) as any)?.specialties as any[]) || []),
+        ];
+        if (rawSubjects.length === 0) return false;
+        const subjects = normalizedSubjectsMap[p.id] || [];
+        return !!selectedSubject && subjects.includes(selectedSubject);
+      })
       .map((p: any) => p.id);
+
+    console.log('[SUBJECT_FILTER_DEBUG]', {
+      selectedSubject,
+      providers: providers.map((p: any) => ({
+        id: p.id,
+        rawSubjects: [
+          ...(((p as any).data?.subjects as any[]) || []),
+          ...(((p as any).data?.specialties as any[]) || []),
+        ],
+        normalized: normalizedSubjectsMap[p.id],
+      })),
+      eligibleProviderIds,
+    });
 
     const idsToQueryRaw = providerId ? [String(providerId).trim()] : eligibleProviderIds;
     const eligibleProviderIdSet = new Set(eligibleProviderIds);
@@ -287,10 +350,6 @@ export async function GET(request: NextRequest) {
 
     const slotsSorted = [...slots].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
     const shownProviders = Array.from(new Set(slotsSorted.map((s) => s.providerId))).filter(Boolean);
-    console.log('ALL PROVIDERS', providers);
-    console.log('ELIGIBLE IDS', eligibleProviderIds);
-    console.log('ALL SLOTS', rows);
-    console.log('FILTERED SLOTS', rowsForDate);
     
     return NextResponse.json({ slots });
   } catch (error) {

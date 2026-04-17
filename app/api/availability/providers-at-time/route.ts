@@ -7,7 +7,19 @@ import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
-import { getProviderSubjectIdsFromProfileJson, normalizeBookingSubjectId } from '@/lib/booking/strictSubjectEligibility';
+
+function normalizeSubject(s: unknown): string | null {
+  if (!s) return null;
+  const val = String(s).toLowerCase().trim();
+
+  if (val === 'math' || val === 'mathematics') return 'math';
+  if (val === 'english') return 'english';
+  if (val === 'computer science') return 'computer_science';
+  if (val === 'test prep') return 'test_prep';
+  if (val === 'languages') return 'languages';
+
+  return null;
+}
 
 function uniqStrings(arr: string[]) {
   return Array.from(new Set(arr));
@@ -163,7 +175,7 @@ export async function GET(req: NextRequest) {
     const requestedSubjectKey =
       normalizedServiceType === 'test_prep'
         ? 'test_prep'
-        : normalizeBookingSubjectId(requestedSubjectRaw);
+        : normalizeSubject(requestedSubjectRaw);
 
     // Subject is required for tutoring/test prep; if we cannot normalize it, treat as no match.
     if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
@@ -205,7 +217,6 @@ export async function GET(req: NextRequest) {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
         const userData = userDataById.get(id) && typeof userDataById.get(id) === 'object' ? userDataById.get(id) : {};
-        const subjects = getProviderSubjectIdsFromProfileJson({ providerData: data, userData });
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
@@ -266,11 +277,12 @@ export async function GET(req: NextRequest) {
           providerSchoolName,
           profile_image_url,
           avatar,
+          data,
+          userData,
           schoolIds,
           schoolNames,
           services,
           offersVirtualTours,
-          subjects,
           languages: providerLanguages,
         };
       })
@@ -280,13 +292,33 @@ export async function GET(req: NextRequest) {
       providerSchoolName: string | null;
       profile_image_url: string | null;
       avatar: string | null;
+      data: any;
+      userData: any;
       schoolIds: string[];
       schoolNames: string[];
       services: string[];
       offersVirtualTours: boolean;
-      subjects: unknown;
       languages: string[];
     }>;
+
+    // Build provider subject eligibility STRICTLY from raw subjects/specialties (provider + user profile JSON).
+    // HARD FAIL: if rawSubjects is empty, provider is excluded from subject-based services.
+    const normalizedSubjectsMap: Record<string, string[]> = {};
+    for (const p of providersAll) {
+      const rawSubjects = [
+        ...(((p as any).data?.subjects as any[]) || []),
+        ...(((p as any).data?.specialties as any[]) || []),
+        ...(((p as any).userData?.subjects as any[]) || []),
+        ...(((p as any).userData?.specialties as any[]) || []),
+      ];
+
+      if (rawSubjects.length === 0) {
+        normalizedSubjectsMap[p.providerId] = [];
+        continue;
+      }
+
+      normalizedSubjectsMap[p.providerId] = rawSubjects.map(normalizeSubject).filter(Boolean) as string[];
+    }
 
     const matchesServiceType = (p: (typeof providersAll)[number]) => {
       if (normalizedServiceType === 'virtual_tour') {
@@ -308,8 +340,7 @@ export async function GET(req: NextRequest) {
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
-      if (!Array.isArray(p.subjects)) return false;
-      const subjects = (p.subjects as any[]).map((s) => String(s ?? '').trim()).filter(Boolean);
+      const subjects = normalizedSubjectsMap[p.providerId] || [];
       if (subjects.length === 0) return false;
       if (!subjects.includes(requestedSubjectKey)) return false;
 
@@ -347,32 +378,27 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Eligible providers computed STRICTLY from DB subjects[].
-    const providerIds = uniqStrings(providerCandidates.map((p) => p.providerId));
-    if (providerIds.length === 0) {
-      console.log('[STRICT_SUBJECT_ELIGIBILITY]', {
-        selectedSubject: requestedSubjectKey,
-        eligibleProviderIds: [],
-        providerSubjects: {},
-      });
+    const eligibleProviderIds = uniqStrings(providerCandidates.map((p) => p.providerId));
+    console.log('[SUBJECT_FILTER_DEBUG]', {
+      selectedSubject: requestedSubjectKey,
+      providers: providerCandidates.map((p) => ({
+        id: p.providerId,
+        rawSubjects: [
+          ...(((p as any).data?.subjects as any[]) || []),
+          ...(((p as any).data?.specialties as any[]) || []),
+        ],
+        normalized: normalizedSubjectsMap[p.providerId],
+      })),
+      eligibleProviderIds,
+    });
+
+    if (eligibleProviderIds.length === 0) {
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
     }
 
-    const providerSubjects: Record<string, string[]> = {};
-    for (const p of providerCandidates) {
-      providerSubjects[p.providerId] = Array.isArray(p.subjects)
-        ? (p.subjects as any[]).map((s) => String(s ?? '').trim()).filter(Boolean)
-        : [];
-    }
-    console.log('[STRICT_SUBJECT_ELIGIBILITY]', {
-      selectedSubject: requestedSubjectKey,
-      eligibleProviderIds: providerIds,
-      providerSubjects,
-    });
-
     // FIX 1: Fetch slots with strict provider filter at DB query level, then filter in backend for the selected time.
     const slotRows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];
-    for (const batch of chunkArray(providerIds, 200)) {
+    for (const batch of chunkArray(eligibleProviderIds, 200)) {
       const { data, error } = await supabase
         .from('availability_slots')
         .select('provider_id, start_time, end_time')
@@ -479,7 +505,7 @@ export async function GET(req: NextRequest) {
           name: p.providerName,
           school: p.providerSchoolName,
           profileImageUrl: p.profile_image_url || p.avatar,
-          subjects: p.subjects,
+          subjects: normalizedSubjectsMap[p.providerId] || [],
         })),
       },
       { status: 200 }

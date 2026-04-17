@@ -9,7 +9,19 @@ import { normalizeSubjectId } from '@/lib/models/subjects';
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 import { getNYDateKey } from '@/lib/booking/nyDate';
-import { getProviderSubjectIdsFromProfileJson, normalizeBookingSubjectId } from '@/lib/booking/strictSubjectEligibility';
+
+function normalizeSubject(s: unknown): string | null {
+  if (!s) return null;
+  const val = String(s).toLowerCase().trim();
+
+  if (val === 'math' || val === 'mathematics') return 'math';
+  if (val === 'english') return 'english';
+  if (val === 'computer science') return 'computer_science';
+  if (val === 'test prep') return 'test_prep';
+  if (val === 'languages') return 'languages';
+
+  return null;
+}
 
 const QuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
@@ -215,7 +227,6 @@ export async function GET(req: NextRequest) {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
         const userData = userDataById.get(id) && typeof userDataById.get(id) === 'object' ? userDataById.get(id) : {};
-        const subjects = getProviderSubjectIdsFromProfileJson({ providerData: data, userData });
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
@@ -277,11 +288,12 @@ export async function GET(req: NextRequest) {
           providerSchoolName,
           profile_image_url,
           avatar,
+          data,
+          userData,
           schoolIds,
           schoolNames,
           services,
           offersVirtualTours,
-          subjects,
           languages: providerLanguages,
         };
       })
@@ -292,11 +304,12 @@ export async function GET(req: NextRequest) {
       providerSchoolName: string | null;
       profile_image_url: string | null;
       avatar: string | null;
+      data: any;
+      userData: any;
       schoolIds: string[];
       schoolNames: string[];
       services: string[];
       offersVirtualTours: boolean;
-      subjects: unknown;
       languages: string[];
     }>;
 
@@ -334,15 +347,6 @@ export async function GET(req: NextRequest) {
 
     // Subject filtering must be provider-based (NOT availability_slots.subject).
     // Match providers by intersecting normalized selected subject keys with provider.subjects[].
-    const normalizeSubject = (s: unknown): string => String(s || '').trim().toLowerCase().replace(/\s+/g, '_');
-    const normalizedSelectedSubjects =
-      normalizedServiceType === 'test_prep'
-        ? ['test_prep']
-        : selectedSubjectsRaw
-            .map((s) => normalizeSubjectId(s) || normalizeSubject(s))
-            .map((s) => String(s || '').trim())
-            .filter(Boolean);
-
     const baseCandidates = providersAll.filter(matchesServiceType);
 
     let noSchoolMatch = false;
@@ -368,7 +372,7 @@ export async function GET(req: NextRequest) {
     // Language tutoring is special-case: require a concrete language match.
     const subjectKeyRaw = String(selectedSubjectsRaw?.[0] || subject || '').trim();
     const selectedSubject =
-      normalizedServiceType === 'test_prep' ? 'test_prep' : normalizeBookingSubjectId(subjectKeyRaw);
+      normalizedServiceType === 'test_prep' ? 'test_prep' : normalizeSubject(subjectKeyRaw);
 
     if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !selectedSubject) {
       return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
@@ -389,27 +393,48 @@ export async function GET(req: NextRequest) {
           ? []
           : providersAfterServiceSchool;
 
-    const providerSubjects: Record<string, string[]> = {};
+    // Build provider subject eligibility STRICTLY from raw subjects/specialties (provider + user profile JSON).
+    // HARD FAIL: if rawSubjects is empty, provider is excluded from subject-based services.
+    const normalizedSubjectsMap: Record<string, string[]> = {};
     for (const p of providersAfterLanguage) {
-      providerSubjects[p.providerId] = Array.isArray((p as any).subjects)
-        ? ((p as any).subjects as any[]).map((s) => String(s ?? '').trim()).filter(Boolean)
-        : [];
+      const rawSubjects = [
+        ...(((p as any).data?.subjects as any[]) || []),
+        ...(((p as any).data?.specialties as any[]) || []),
+        ...(((p as any).userData?.subjects as any[]) || []),
+        ...(((p as any).userData?.specialties as any[]) || []),
+      ];
+
+      if (rawSubjects.length === 0) {
+        normalizedSubjectsMap[p.providerId] = [];
+        continue;
+      }
+
+      const normalizedSubjects = rawSubjects.map(normalizeSubject).filter(Boolean) as string[];
+      normalizedSubjectsMap[p.providerId] = normalizedSubjects;
     }
 
-    const eligibleProviderIds = providersAfterLanguage
-      .filter((p) => {
-        if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
-        if (!selectedSubject) return false;
-        const subjects = providerSubjects[p.providerId] || [];
-        if (subjects.length === 0) return false;
-        return subjects.includes(selectedSubject);
-      })
-      .map((p) => p.providerId);
+    const eligibleProviderIds =
+      normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
+        ? providersAfterLanguage
+            .filter((p) => {
+              if (!selectedSubject) return false;
+              const subjects = normalizedSubjectsMap[p.providerId] || [];
+              return subjects.includes(selectedSubject);
+            })
+            .map((p) => p.providerId)
+        : providersAfterLanguage.map((p) => p.providerId);
 
-    console.log('[STRICT_SUBJECT_ELIGIBILITY]', {
+    console.log('[SUBJECT_FILTER_DEBUG]', {
       selectedSubject,
+      providers: providersAfterLanguage.map((p) => ({
+        id: p.id,
+        rawSubjects: [
+          ...(((p as any).data?.subjects as any[]) || []),
+          ...(((p as any).data?.specialties as any[]) || []),
+        ],
+        normalized: normalizedSubjectsMap[p.id],
+      })),
       eligibleProviderIds,
-      providerSubjects,
     });
 
     if (selectedSubject === 'math' && eligibleProviderIds.length === 0) {
