@@ -14,7 +14,7 @@ import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { updateProviderAvailability } from '@/lib/providers/storage';
 
-const timeZone = "America/New_York";
+const DEFAULT_TIME_ZONE = "America/New_York";
 
 function toCanonicalSlotServiceType(raw: string): string {
   const canonical = normalizeServiceType(String(raw || '').trim());
@@ -42,9 +42,11 @@ async function regenerateAvailabilitySlots(params: {
   providerId: string;
   serviceType: string;
   blocks: Array<{ dayOfWeek: number; startMinutes: number; endMinutes: number }>;
+  timeZone?: string;
 }): Promise<void> {
   const providerId = String(params.providerId || '').trim();
   const slotServiceType = toCanonicalSlotServiceType(String(params.serviceType || '').trim());
+  const timeZone = params.timeZone || DEFAULT_TIME_ZONE;
 
   if (!providerId) throw new Error('providerId is required to regenerate slots');
 
@@ -224,6 +226,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const timeZone = DEFAULT_TIME_ZONE;
+  console.log("[AVAILABILITY_SAVE_DEBUG]", { timeZone });
+
   try {
     const authResult = await requireAuth();
     if (authResult instanceof NextResponse) {
@@ -407,7 +412,7 @@ export async function POST(request: NextRequest) {
 
     // Concrete slot inventory (next 4 weeks) is stored in Supabase `availability_slots`.
     for (const slotServiceType of targetSlotServiceTypes) {
-      await regenerateAvailabilitySlots({ providerId, serviceType: slotServiceType, blocks });
+      await regenerateAvailabilitySlots({ providerId, serviceType: slotServiceType, blocks, timeZone });
     }
 
     return NextResponse.json(
