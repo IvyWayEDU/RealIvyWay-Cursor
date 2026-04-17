@@ -305,13 +305,13 @@ export async function GET(request: NextRequest) {
         .map((s) => `${s.providerId}|${s.startTime}|${s.endTime}`)
     );
 
-    const providerIds = Array.from(
+    const providerIdsForDate = Array.from(
       new Set((rowsForDate ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
     );
     const sessionQueryStartISO = queryStartISO;
     const sessionQueryEndISO = queryEndISO;
     const bookedWindows = await getBookedSessionWindowsForProviders({
-      providerIds,
+      providerIds: providerIdsForDate,
       rangeStartISO: sessionQueryStartISO,
       rangeEndISO: sessionQueryEndISO,
       defaultDurationMinutesWhenMissingEnd: 60,
