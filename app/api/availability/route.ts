@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/requireAuth';
 import type { DayAvailability } from '@/lib/availability/types';
-import { bindDateKeyAndMinutesToUtcDate, generateSlotsForBlocks, normalizeServiceType } from '@/lib/availability/engine';
+import {
+  addDaysToDateKey,
+  bindDateKeyAndMinutesToUtcDate,
+  generateSlotsForBlocks,
+  getDateKeyInTimeZone,
+  getNextWeekdayDateKeyInTimeZone,
+  normalizeServiceType,
+  minutesToTime,
+} from '@/lib/availability/engine';
 import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { updateProviderAvailability } from '@/lib/providers/storage';
@@ -26,36 +34,6 @@ function uniqueNonEmptyStrings(input: unknown): string[] {
     out.push(s);
   }
   return out;
-}
-
-function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = formatter.formatToParts(date);
-  const year = parts.find((p) => p.type === 'year')?.value || '2000';
-  const month = parts.find((p) => p.type === 'month')?.value || '01';
-  const day = parts.find((p) => p.type === 'day')?.value || '01';
-  return `${year}-${month}-${day}`;
-}
-
-function getZonedDayOfWeek(date: Date, timeZone: string): number {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = dtf.formatToParts(date);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value;
-  const year = Number(get('year'));
-  const month = Number(get('month'));
-  const day = Number(get('day'));
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return new Date(date).getUTCDay();
-  return new Date(Date.UTC(year, month - 1, day, 0, 0, 0)).getUTCDay();
 }
 
 async function regenerateAvailabilitySlots(params: {
@@ -105,10 +83,6 @@ async function regenerateAvailabilitySlots(params: {
 
   if (normalizedBlocks.length === 0) return;
 
-  // Next 4 weeks (28 days), computed in provider timezone with a midday anchor to avoid DST edge cases.
-  const todayKey = formatDateKeyInTimeZone(now, timezone);
-  const anchorMiddayUtc = bindDateKeyAndMinutesToUtcDate(todayKey, 12 * 60, timezone);
-
   const durationMinutes = 60; // IvyWay invariant for all services today
   const slotsToInsert: Array<{
     provider_id: string;
@@ -118,42 +92,70 @@ async function regenerateAvailabilitySlots(params: {
     is_booked: boolean;
   }> = [];
 
-  for (let i = 0; i < 28; i++) {
-    const day = new Date(anchorMiddayUtc.getTime() + i * 24 * 60 * 60 * 1000);
-    const dateKey = formatDateKeyInTimeZone(day, timezone);
-    const dow = getZonedDayOfWeek(day, timezone);
+  // Next 4 weeks (28 local calendar days) in provider timezone.
+  // Build local schedule dates FIRST, then convert exactly once to UTC for storage.
+  const todayKey = getDateKeyInTimeZone(now, timezone);
+  const endKeyInclusive = addDaysToDateKey(todayKey, 27);
 
-    const blocksForDay = normalizedBlocks
-      .filter((b) => b.dayOfWeek === dow)
-      .map((b) => ({ startMinutes: b.startMinutes, endMinutes: b.endMinutes }));
-    if (blocksForDay.length === 0) continue;
+  // Group blocks by local weekday to generate recurring occurrences efficiently.
+  const blocksByDow = new Map<number, Array<{ startMinutes: number; endMinutes: number }>>();
+  for (const b of normalizedBlocks) {
+    const arr = blocksByDow.get(b.dayOfWeek) || [];
+    arr.push({ startMinutes: b.startMinutes, endMinutes: b.endMinutes });
+    blocksByDow.set(b.dayOfWeek, arr);
+  }
 
-    const startISOs = generateSlotsForBlocks(blocksForDay, dateKey, {
-      slotIntervalMinutes: durationMinutes,
-      sessionDurationMinutes: durationMinutes,
-      roundToInterval: true,
-      timeZone: timezone,
-    });
+  for (const [dow, blocksForDow] of blocksByDow.entries()) {
+    let localDateKey = getNextWeekdayDateKeyInTimeZone(todayKey, dow, timezone);
 
-    for (const startIso of startISOs) {
-      const startMs = new Date(startIso).getTime();
-      if (!Number.isFinite(startMs)) continue;
-      const endIso = new Date(startMs + durationMinutes * 60 * 1000).toISOString();
-      slotsToInsert.push({
-        provider_id: providerId,
-        service_type: slotServiceType,
-        start_time: startIso,
-        end_time: endIso,
-        is_booked: false,
+    while (localDateKey <= endKeyInclusive) {
+      // Debug logs for the saved weekly blocks on this local calendar date.
+      for (const block of blocksForDow) {
+        const utcStart = bindDateKeyAndMinutesToUtcDate(localDateKey, block.startMinutes, timezone).toISOString();
+
+        const utcEnd =
+          block.endMinutes === 1440
+            ? bindDateKeyAndMinutesToUtcDate(addDaysToDateKey(localDateKey, 1), 0, timezone).toISOString()
+            : bindDateKeyAndMinutesToUtcDate(localDateKey, block.endMinutes, timezone).toISOString();
+
+        console.log('[AVAILABILITY_GENERATION_DEBUG]', {
+          providerId,
+          timezone,
+          blockDayOfWeek: dow,
+          localDate: localDateKey,
+          localStart: `${localDateKey} ${minutesToTime(block.startMinutes)}`,
+          localEnd: `${localDateKey} ${minutesToTime(block.endMinutes % 1440)}`,
+          utcStart,
+          utcEnd,
+        });
+      }
+
+      const startISOs = generateSlotsForBlocks(blocksForDow, localDateKey, {
+        slotIntervalMinutes: durationMinutes,
+        sessionDurationMinutes: durationMinutes,
+        roundToInterval: true,
+        timeZone: timezone,
       });
+
+      for (const startIso of startISOs) {
+        const startMs = new Date(startIso).getTime();
+        if (!Number.isFinite(startMs)) continue;
+        const endIso = new Date(startMs + durationMinutes * 60 * 1000).toISOString();
+        slotsToInsert.push({
+          provider_id: providerId,
+          service_type: slotServiceType,
+          start_time: startIso,
+          end_time: endIso,
+          is_booked: false,
+        });
+      }
+
+      // Advance by 7 local calendar days (same weekday) without UTC-day iteration.
+      localDateKey = addDaysToDateKey(localDateKey, 7);
     }
   }
 
   if (slotsToInsert.length === 0) return;
-
-  for (const slot of slotsToInsert) {
-    console.log("Inserting availability slot:", slot);
-  }
 
   // Insert concrete inventory (no ON CONFLICT clause).
   const { error: insErr } = await supabase.from('availability_slots').insert(slotsToInsert as any);

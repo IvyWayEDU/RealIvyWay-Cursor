@@ -363,6 +363,67 @@ export function generateSlotsForBlocks(
   return Array.from(new Set(slots)).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 }
 
+const WEEKDAY_NAME_TO_INDEX: Record<string, number> = {
+  Sunday: 0,
+  Monday: 1,
+  Tuesday: 2,
+  Wednesday: 3,
+  Thursday: 4,
+  Friday: 5,
+  Saturday: 6,
+};
+
+export function getDateKeyInTimeZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [year, month, day] = String(dateKey || '').split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    throw new Error(`[availability/engine] Invalid dateKey: ${dateKey}`);
+  }
+  const dt = new Date(Date.UTC(year, month - 1, day + Number(days || 0), 12, 0, 0));
+  const y = dt.getUTCFullYear();
+  const m = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(dt.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function getWeekdayIndexForDateKey(dateKey: string, timeZone: string): number {
+  // Use local noon to avoid DST edge cases while still computing the correct local calendar weekday.
+  const noonUtc = bindDateKeyAndMinutesToUtcDate(dateKey, 12 * 60, timeZone);
+  const weekdayName = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'long',
+  }).format(noonUtc);
+  const idx = WEEKDAY_NAME_TO_INDEX[weekdayName];
+  return Number.isFinite(idx) ? idx : 0;
+}
+
+/**
+ * Find the next occurrence (inclusive) of a weekday in a provider's local calendar.
+ * - anchorDateKey is interpreted as a local calendar date in `timeZone`.
+ * - desiredDayOfWeek uses JS convention: 0=Sunday ... 6=Saturday
+ */
+export function getNextWeekdayDateKeyInTimeZone(
+  anchorDateKey: string,
+  desiredDayOfWeek: number,
+  timeZone: string
+): string {
+  const desired = Number(desiredDayOfWeek);
+  if (!Number.isFinite(desired) || desired < 0 || desired > 6) {
+    throw new Error(`[availability/engine] Invalid desiredDayOfWeek: ${desiredDayOfWeek}`);
+  }
+  const anchorDow = getWeekdayIndexForDateKey(anchorDateKey, timeZone);
+  const delta = (desired - anchorDow + 7) % 7;
+  return addDaysToDateKey(anchorDateKey, delta);
+}
+
 /**
  * Check if a session window fits inside an availability range
  * Uses inclusive start and inclusive end logic
