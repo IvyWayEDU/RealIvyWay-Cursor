@@ -106,7 +106,6 @@ export async function signup(
         qualifications: [],
         certifications: [],
         yearsOfExperience: undefined,
-        specialties: [],
         subjects: [],
         gradeLevels: [],
         availabilityStatus: 'available',

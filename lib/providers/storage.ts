@@ -98,14 +98,8 @@ function mergeProviderCompatibility(provider: ProviderProfile, user: any | null)
     p.profileImageUrl = userProfilePhoto;
   }
 
-  // Subjects often live on the user record (provider profile page writes `subjects` to user).
-  if ((!Array.isArray(p.subjects) || p.subjects.length === 0) && Array.isArray(user?.subjects)) {
-    p.subjects = user.subjects;
-  }
-  if ((!Array.isArray(p.specialties) || p.specialties.length === 0) && Array.isArray(user?.subjects)) {
-    // Legacy: specialties mirrored subjects in several write paths.
-    p.specialties = user.subjects;
-  }
+  // NOTE: Subjects must come from provider profile data only (providers.data.subjects).
+  // Do not merge/fallback from users.data.subjects or providers.data.specialties.
 
   if (!isNonEmptyString(p.timezone) && userTimezone) {
     p.timezone = userTimezone;

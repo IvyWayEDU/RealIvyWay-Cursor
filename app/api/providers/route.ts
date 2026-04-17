@@ -183,7 +183,6 @@ export async function POST(request: NextRequest) {
       displayName: displayName.trim(),
       bio: bio?.trim(),
       subjects: subjects || [],
-      specialties: subjects || [],
       availabilityStatus: 'available',
       profileComplete: false,
       verified: false,

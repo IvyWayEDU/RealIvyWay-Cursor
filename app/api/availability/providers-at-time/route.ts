@@ -12,11 +12,13 @@ function normalizeSubject(s: unknown): string | null {
   if (!s) return null;
   const val = String(s).toLowerCase().trim();
 
-  if (val === 'math' || val === 'mathematics') return 'math';
+  if (val === 'math') return 'math';
   if (val === 'english') return 'english';
+  if (val === 'science') return 'science';
+  if (val === 'history') return 'history';
+  if (val === 'languages') return 'languages';
   if (val === 'computer science') return 'computer_science';
   if (val === 'test prep') return 'test_prep';
-  if (val === 'languages') return 'languages';
 
   return null;
 }
@@ -301,25 +303,6 @@ export async function GET(req: NextRequest) {
       languages: string[];
     }>;
 
-    // Build provider subject eligibility STRICTLY from raw subjects/specialties (provider + user profile JSON).
-    // HARD FAIL: if rawSubjects is empty, provider is excluded from subject-based services.
-    const normalizedSubjectsMap: Record<string, string[]> = {};
-    for (const p of providersAll) {
-      const rawSubjects = [
-        ...(((p as any).data?.subjects as any[]) || []),
-        ...(((p as any).data?.specialties as any[]) || []),
-        ...(((p as any).userData?.subjects as any[]) || []),
-        ...(((p as any).userData?.specialties as any[]) || []),
-      ];
-
-      if (rawSubjects.length === 0) {
-        normalizedSubjectsMap[p.providerId] = [];
-        continue;
-      }
-
-      normalizedSubjectsMap[p.providerId] = rawSubjects.map(normalizeSubject).filter(Boolean) as string[];
-    }
-
     const matchesServiceType = (p: (typeof providersAll)[number]) => {
       if (normalizedServiceType === 'virtual_tour') {
         return p.offersVirtualTours === true || p.services.includes('virtual_tour');
@@ -340,8 +323,19 @@ export async function GET(req: NextRequest) {
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
-      const subjects = normalizedSubjectsMap[p.providerId] || [];
-      if (subjects.length === 0) return false;
+
+      // SINGLE SOURCE OF TRUTH:
+      // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
+      const rawSubjects = (p as any).data?.subjects;
+
+      // HARD REQUIREMENT:
+      // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
+      if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
+
+      const subjects = (rawSubjects as any[])
+        .map(normalizeSubject)
+        .filter(Boolean) as string[];
+
       if (!subjects.includes(requestedSubjectKey)) return false;
 
       // Language tutoring: require a concrete language match (providers without languages are excluded).
@@ -379,15 +373,11 @@ export async function GET(req: NextRequest) {
     }
 
     const eligibleProviderIds = uniqStrings(providerCandidates.map((p) => p.providerId));
-    console.log('[SUBJECT_FILTER_DEBUG]', {
+    console.log('[FINAL_SUBJECT_FIX]', {
       selectedSubject: requestedSubjectKey,
-      providers: providerCandidates.map((p) => ({
+      providers: providersAll.map((p) => ({
         id: p.providerId,
-        rawSubjects: [
-          ...(((p as any).data?.subjects as any[]) || []),
-          ...(((p as any).data?.specialties as any[]) || []),
-        ],
-        normalized: normalizedSubjectsMap[p.providerId],
+        subjects: (p as any).data?.subjects,
       })),
       eligibleProviderIds,
     });

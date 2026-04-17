@@ -13,11 +13,13 @@ function normalizeSubject(s: unknown): string | null {
   if (!s) return null;
   const val = String(s).toLowerCase().trim();
 
-  if (val === 'math' || val === 'mathematics') return 'math';
+  if (val === 'math') return 'math';
   if (val === 'english') return 'english';
+  if (val === 'science') return 'science';
+  if (val === 'history') return 'history';
+  if (val === 'languages') return 'languages';
   if (val === 'computer science') return 'computer_science';
   if (val === 'test prep') return 'test_prep';
-  if (val === 'languages') return 'languages';
 
   return null;
 }
@@ -186,7 +188,6 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     console.log("[AVAILABILITY_FETCH]", { serviceType, providerId });
 
-    // Build eligibleProviderIds STRICTLY from raw subjects/specialties (provider + user profile JSON).
     const { data: providerRows, error: provErr } = await supabase
       .from('providers')
       .select('id, data')
@@ -208,59 +209,29 @@ export async function GET(request: NextRequest) {
       }))
       .filter((p: any) => !!p.id);
 
-    const providerIds = providers.map((p: any) => p.id).filter(Boolean) as string[];
-    const userDataById = new Map<string, any>();
-    if (providerIds.length > 0) {
-      const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', providerIds as any);
-      if (userErr) throw userErr;
-      for (const row of userRows ?? []) {
-        const id = typeof (row as any)?.id === 'string' ? String((row as any).id).trim() : '';
-        const data = (row as any)?.data && typeof (row as any).data === 'object' ? (row as any).data : null;
-        if (id && data) userDataById.set(id, data);
-      }
-    }
-
-    const normalizedSubjectsMap: Record<string, string[]> = {};
-    for (const p of providers) {
-      const userData = userDataById.get(p.id) && typeof userDataById.get(p.id) === 'object' ? userDataById.get(p.id) : {};
-      const rawSubjects = [
-        ...(((p as any).data?.subjects as any[]) || []),
-        ...(((p as any).data?.specialties as any[]) || []),
-        ...(((userData as any)?.subjects as any[]) || []),
-        ...(((userData as any)?.specialties as any[]) || []),
-      ];
-
-      if (rawSubjects.length === 0) {
-        normalizedSubjectsMap[p.id] = [];
-        continue;
-      }
-
-      normalizedSubjectsMap[p.id] = rawSubjects.map(normalizeSubject).filter(Boolean) as string[];
-    }
-
     const eligibleProviderIds = providers
       .filter((p: any) => {
-        const rawSubjects = [
-          ...(((p as any).data?.subjects as any[]) || []),
-          ...(((p as any).data?.specialties as any[]) || []),
-          ...(((userDataById.get(p.id) as any)?.subjects as any[]) || []),
-          ...(((userDataById.get(p.id) as any)?.specialties as any[]) || []),
-        ];
-        if (rawSubjects.length === 0) return false;
-        const subjects = normalizedSubjectsMap[p.id] || [];
+        // SINGLE SOURCE OF TRUTH:
+        // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
+        const rawSubjects = (p as any).data?.subjects;
+
+        // HARD REQUIREMENT:
+        // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
+        if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
+
+        const subjects = (rawSubjects as any[])
+          .map(normalizeSubject)
+          .filter(Boolean) as string[];
+
         return !!selectedSubject && subjects.includes(selectedSubject);
       })
       .map((p: any) => p.id);
 
-    console.log('[SUBJECT_FILTER_DEBUG]', {
+    console.log('[FINAL_SUBJECT_FIX]', {
       selectedSubject,
       providers: providers.map((p: any) => ({
         id: p.id,
-        rawSubjects: [
-          ...(((p as any).data?.subjects as any[]) || []),
-          ...(((p as any).data?.specialties as any[]) || []),
-        ],
-        normalized: normalizedSubjectsMap[p.id],
+        subjects: (p as any).data?.subjects,
       })),
       eligibleProviderIds,
     });

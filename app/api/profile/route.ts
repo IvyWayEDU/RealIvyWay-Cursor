@@ -409,24 +409,27 @@ export async function POST(request: NextRequest) {
         ? (Array.isArray(body.availability) ? body.availability : [])
         : existingAvailability;
 
-      const providerSubjects = Array.isArray(updateData.subjects) ? updateData.subjects : Array.isArray((user as any)?.subjects) ? (user as any).subjects : [];
-
       const existingLanguages =
         Array.isArray((existingProvider as any)?.languages) ? (existingProvider as any).languages : Array.isArray((user as any)?.languages) ? (user as any).languages : [];
       const nextLanguages = Object.prototype.hasOwnProperty.call(rawBody, 'languages')
         ? (Array.isArray((updateData as any).languages) ? (updateData as any).languages : Array.isArray(body.languages) ? body.languages : [])
         : existingLanguages;
 
-      const providerData = {
+      const providerData: Record<string, any> = {
         services: servicesCanonical,
         school: nextSchoolName ?? null,
         schoolId: nextSchoolId ?? null,
         availability: nextAvailability,
         offersVirtualTours: servicesCanonical.includes('virtual_tour'),
-        // Provider-level subjects used for availability filtering (canonical keys only).
-        subjects: providerSubjects,
         languages: Array.isArray(nextLanguages) ? nextLanguages : [],
       };
+
+      // SINGLE SOURCE OF TRUTH:
+      // Only persist provider subjects when explicitly provided by the client.
+      // Never fall back to users.data.subjects or providers.data.specialties.
+      if (Object.prototype.hasOwnProperty.call(rawBody, 'subjects')) {
+        providerData.subjects = Array.isArray(updateData.subjects) ? updateData.subjects : [];
+      }
 
       await upsertProviderDataByUserId(session.userId, providerData as any);
       console.log('Provider saved:', providerData);

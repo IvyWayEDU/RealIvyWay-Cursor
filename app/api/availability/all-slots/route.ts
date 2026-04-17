@@ -14,11 +14,13 @@ function normalizeSubject(s: unknown): string | null {
   if (!s) return null;
   const val = String(s).toLowerCase().trim();
 
-  if (val === 'math' || val === 'mathematics') return 'math';
+  if (val === 'math') return 'math';
   if (val === 'english') return 'english';
+  if (val === 'science') return 'science';
+  if (val === 'history') return 'history';
+  if (val === 'languages') return 'languages';
   if (val === 'computer science') return 'computer_science';
   if (val === 'test prep') return 'test_prep';
-  if (val === 'languages') return 'languages';
 
   return null;
 }
@@ -393,46 +395,32 @@ export async function GET(req: NextRequest) {
           ? []
           : providersAfterServiceSchool;
 
-    // Build provider subject eligibility STRICTLY from raw subjects/specialties (provider + user profile JSON).
-    // HARD FAIL: if rawSubjects is empty, provider is excluded from subject-based services.
-    const normalizedSubjectsMap: Record<string, string[]> = {};
-    for (const p of providersAfterLanguage) {
-      const rawSubjects = [
-        ...(((p as any).data?.subjects as any[]) || []),
-        ...(((p as any).data?.specialties as any[]) || []),
-        ...(((p as any).userData?.subjects as any[]) || []),
-        ...(((p as any).userData?.specialties as any[]) || []),
-      ];
-
-      if (rawSubjects.length === 0) {
-        normalizedSubjectsMap[p.providerId] = [];
-        continue;
-      }
-
-      const normalizedSubjects = rawSubjects.map(normalizeSubject).filter(Boolean) as string[];
-      normalizedSubjectsMap[p.providerId] = normalizedSubjects;
-    }
-
     const eligibleProviderIds =
       normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
         ? providersAfterLanguage
             .filter((p) => {
-              if (!selectedSubject) return false;
-              const subjects = normalizedSubjectsMap[p.providerId] || [];
-              return subjects.includes(selectedSubject);
+              // SINGLE SOURCE OF TRUTH:
+              // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
+              const rawSubjects = (p as any).data?.subjects;
+
+              // HARD REQUIREMENT:
+              // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
+              if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
+
+              const subjects = (rawSubjects as any[])
+                .map(normalizeSubject)
+                .filter(Boolean) as string[];
+
+              return !!selectedSubject && subjects.includes(selectedSubject);
             })
             .map((p) => p.providerId)
         : providersAfterLanguage.map((p) => p.providerId);
 
-    console.log('[SUBJECT_FILTER_DEBUG]', {
+    console.log('[FINAL_SUBJECT_FIX]', {
       selectedSubject,
       providers: providersAfterLanguage.map((p) => ({
         id: p.id,
-        rawSubjects: [
-          ...(((p as any).data?.subjects as any[]) || []),
-          ...(((p as any).data?.specialties as any[]) || []),
-        ],
-        normalized: normalizedSubjectsMap[p.id],
+        subjects: (p as any).data?.subjects,
       })),
       eligibleProviderIds,
     });

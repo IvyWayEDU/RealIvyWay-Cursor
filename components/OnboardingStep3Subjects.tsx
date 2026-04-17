@@ -24,9 +24,11 @@ export default function OnboardingStep3Subjects({
   const [searchTerm, setSearchTerm] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
 
+  const uniqueSubjects = Array.from(new Set(subjects));
+
   const filteredSubjects = COMMON_SUBJECTS.filter((subject) =>
     subject.toLowerCase().includes(searchTerm.toLowerCase())
-  ).filter((subject) => !subjects.includes(subject));
+  ).filter((subject) => !uniqueSubjects.includes(subject));
 
   const handleAddSubject = (subject: string) => {
     if (!subjects.includes(subject)) {
@@ -123,11 +125,11 @@ export default function OnboardingStep3Subjects({
       </div>
 
       {/* Selected Subjects */}
-      {subjects.length > 0 && (
+      {uniqueSubjects.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-700 mb-2">Selected Subjects:</h3>
           <div className="flex flex-wrap gap-2">
-            {subjects.map((subject) => (
+            {uniqueSubjects.map((subject) => (
               <span
                 key={subject}
                 className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white"
@@ -152,7 +154,7 @@ export default function OnboardingStep3Subjects({
         </div>
       )}
 
-      {subjects.length === 0 && (
+      {uniqueSubjects.length === 0 && (
         <p className="text-sm text-red-600">
           Please add at least one subject to continue.
         </p>

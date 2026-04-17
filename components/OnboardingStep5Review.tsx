@@ -20,6 +20,8 @@ export default function OnboardingStep5Review({
   onComplete,
   isSubmitting,
 }: OnboardingStep5ReviewProps) {
+  const uniqueSubjects = Array.from(new Set(onboardingData.subjects ?? []));
+
   return (
     <div className="space-y-6">
       <div>
@@ -101,9 +103,9 @@ export default function OnboardingStep5Review({
         {onboardingData.isTutor && (
           <div className="border-b border-gray-200 pb-4">
             <h3 className="text-sm font-medium text-gray-700 mb-2">Subjects</h3>
-            {onboardingData.subjects && onboardingData.subjects.length > 0 ? (
+            {uniqueSubjects.length > 0 ? (
               <div className="flex flex-wrap gap-2">
-                {onboardingData.subjects.map((subject) => (
+                {uniqueSubjects.map((subject) => (
                   <span
                     key={subject}
                     className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800"

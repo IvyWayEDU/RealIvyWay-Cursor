@@ -119,7 +119,6 @@ export async function POST(request: NextRequest) {
         qualifications: [],
         certifications: [],
         yearsOfExperience: undefined,
-        specialties: [],
         subjects: [],
         gradeLevels: [],
         availabilityStatus: 'available',

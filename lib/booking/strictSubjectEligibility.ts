@@ -46,14 +46,10 @@ function normalizeStringArray(input: unknown): string[] {
 
 export function getProviderSubjectIdsFromProfileJson(params: { providerData: unknown; userData: unknown }): string[] {
   const providerData = params.providerData && typeof params.providerData === 'object' ? (params.providerData as any) : {};
-  const userData = params.userData && typeof params.userData === 'object' ? (params.userData as any) : {};
 
-  const rawSubjects = [
-    ...normalizeStringArray(providerData?.subjects),
-    ...normalizeStringArray(providerData?.specialties),
-    ...normalizeStringArray(userData?.subjects),
-    ...normalizeStringArray(userData?.specialties),
-  ];
+  // SINGLE SOURCE OF TRUTH:
+  // Subjects must come ONLY from providers.data.subjects (no merging, no fallbacks).
+  const rawSubjects = normalizeStringArray(providerData?.subjects);
 
   const out: string[] = [];
   const seen = new Set<string>();
