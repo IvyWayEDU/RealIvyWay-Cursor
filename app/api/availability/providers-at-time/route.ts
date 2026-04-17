@@ -10,6 +10,10 @@ import { subjectsMatch } from '@/lib/models/subjects';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 
+function uniqStrings(arr: string[]) {
+  return Array.from(new Set(arr));
+}
+
 const QuerySchema = z.object({
   startTimeUTC: z.string().min(1),
   serviceType: z.string().min(1),
