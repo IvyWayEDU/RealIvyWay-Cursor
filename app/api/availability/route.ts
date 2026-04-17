@@ -14,6 +14,8 @@ import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { updateProviderAvailability } from '@/lib/providers/storage';
 
+const timeZone = "America/New_York";
+
 function toCanonicalSlotServiceType(raw: string): string {
   const canonical = normalizeServiceType(String(raw || '').trim());
   // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
@@ -39,11 +41,9 @@ function uniqueNonEmptyStrings(input: unknown): string[] {
 async function regenerateAvailabilitySlots(params: {
   providerId: string;
   serviceType: string;
-  timezone: string;
   blocks: Array<{ dayOfWeek: number; startMinutes: number; endMinutes: number }>;
 }): Promise<void> {
   const providerId = String(params.providerId || '').trim();
-  const timezone = String(params.timezone || '').trim() || 'America/New_York';
   const slotServiceType = toCanonicalSlotServiceType(String(params.serviceType || '').trim());
 
   if (!providerId) throw new Error('providerId is required to regenerate slots');
@@ -94,7 +94,7 @@ async function regenerateAvailabilitySlots(params: {
 
   // Next 4 weeks (28 local calendar days) in provider timezone.
   // Build local schedule dates FIRST, then convert exactly once to UTC for storage.
-  const todayKey = getDateKeyInTimeZone(now, timezone);
+  const todayKey = getDateKeyInTimeZone(now, timeZone);
   const endKeyInclusive = addDaysToDateKey(todayKey, 27);
 
   // Group blocks by local weekday to generate recurring occurrences efficiently.
@@ -105,22 +105,23 @@ async function regenerateAvailabilitySlots(params: {
     blocksByDow.set(b.dayOfWeek, arr);
   }
 
+  let didLogTz = false;
   for (const [dow, blocksForDow] of blocksByDow.entries()) {
-    let localDateKey = getNextWeekdayDateKeyInTimeZone(todayKey, dow, timezone);
+    let localDateKey = getNextWeekdayDateKeyInTimeZone(todayKey, dow, timeZone);
 
     while (localDateKey <= endKeyInclusive) {
       // Debug logs for the saved weekly blocks on this local calendar date.
       for (const block of blocksForDow) {
-        const utcStart = bindDateKeyAndMinutesToUtcDate(localDateKey, block.startMinutes, timezone).toISOString();
+        const utcStart = bindDateKeyAndMinutesToUtcDate(localDateKey, block.startMinutes, timeZone).toISOString();
 
         const utcEnd =
           block.endMinutes === 1440
-            ? bindDateKeyAndMinutesToUtcDate(addDaysToDateKey(localDateKey, 1), 0, timezone).toISOString()
-            : bindDateKeyAndMinutesToUtcDate(localDateKey, block.endMinutes, timezone).toISOString();
+            ? bindDateKeyAndMinutesToUtcDate(addDaysToDateKey(localDateKey, 1), 0, timeZone).toISOString()
+            : bindDateKeyAndMinutesToUtcDate(localDateKey, block.endMinutes, timeZone).toISOString();
 
         console.log('[AVAILABILITY_GENERATION_DEBUG]', {
           providerId,
-          timezone,
+          timeZone,
           blockDayOfWeek: dow,
           localDate: localDateKey,
           localStart: `${localDateKey} ${minutesToTime(block.startMinutes)}`,
@@ -130,11 +131,16 @@ async function regenerateAvailabilitySlots(params: {
         });
       }
 
+      if (!didLogTz) {
+        console.log("[AVAILABILITY_TZ]", { providerId, timeZone });
+        didLogTz = true;
+      }
+
       const startISOs = generateSlotsForBlocks(blocksForDow, localDateKey, {
         slotIntervalMinutes: durationMinutes,
         sessionDurationMinutes: durationMinutes,
         roundToInterval: true,
-        timeZone: timezone,
+        timeZone,
       });
 
       for (const startIso of startISOs) {
@@ -237,7 +243,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const requestedProviderId = typeof body?.providerId === 'string' ? body.providerId : null;
     const providerId = session.roles.includes('admin') && requestedProviderId ? requestedProviderId : session.userId;
-    const timezone = typeof body?.timezone === 'string' && body.timezone.trim() ? body.timezone.trim() : 'America/New_York';
     const serviceType = typeof body?.serviceType === 'string' ? body.serviceType.trim() : '';
     const serviceTypes = uniqueNonEmptyStrings(body?.serviceTypes);
     const intent = typeof body?.intent === 'string' ? body.intent.trim() : 'save';
@@ -287,7 +292,7 @@ export async function POST(request: NextRequest) {
     if (intent === 'clear') {
       const updatedAt = new Date().toISOString();
       for (const slotServiceType of targetSlotServiceTypes) {
-        await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone, updatedAt, days: [], blocks: [] });
+        await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone: timeZone, updatedAt, days: [], blocks: [] });
       }
 
       // Replace slot inventory: remove future unbooked slots for this provider/serviceType(s).
@@ -314,7 +319,7 @@ export async function POST(request: NextRequest) {
       }
       console.log('[AVAILABILITY_WRITE]', { providerId, serviceTypes: targetSlotServiceTypes, daysCount: 0 });
       return NextResponse.json(
-        { availability: { providerId, serviceType: targetSlotServiceTypes[0], timezone, updatedAt, days: [], blocks: [] } },
+        { availability: { providerId, serviceType: targetSlotServiceTypes[0], timezone: timeZone, updatedAt, days: [], blocks: [] } },
         { status: 200 }
       );
     }
@@ -396,17 +401,17 @@ export async function POST(request: NextRequest) {
 
     const updatedAt = new Date().toISOString();
     for (const slotServiceType of targetSlotServiceTypes) {
-      await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone, updatedAt, days, blocks });
+      await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone: timeZone, updatedAt, days, blocks });
     }
     console.log('[AVAILABILITY_WRITE]', { providerId, serviceTypes: targetSlotServiceTypes, daysCount: days.length });
 
     // Concrete slot inventory (next 4 weeks) is stored in Supabase `availability_slots`.
     for (const slotServiceType of targetSlotServiceTypes) {
-      await regenerateAvailabilitySlots({ providerId, serviceType: slotServiceType, timezone, blocks });
+      await regenerateAvailabilitySlots({ providerId, serviceType: slotServiceType, blocks });
     }
 
     return NextResponse.json(
-      { availability: { providerId, serviceType: targetSlotServiceTypes[0], timezone, updatedAt, days, blocks } },
+      { availability: { providerId, serviceType: targetSlotServiceTypes[0], timezone: timeZone, updatedAt, days, blocks } },
       { status: 201 }
     );
   } catch (error) {

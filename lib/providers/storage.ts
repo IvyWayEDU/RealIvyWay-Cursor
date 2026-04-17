@@ -23,7 +23,6 @@ type ProviderDbRow = {
   id: string | null;
   user_id: string | null;
   data: any;
-  subjects?: string[] | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -71,6 +70,7 @@ function normalizeProviderFromDbRow(row: ProviderDbRow): ProviderProfile | null 
   provider.userId = isNonEmptyString((base as any)?.userId) ? String((base as any).userId).trim() : canonicalId;
   provider.createdAt = createdAt;
   provider.updatedAt = updatedAt;
+  provider.subjects = normalizeStringArray((provider as any)?.subjects);
 
   return provider as ProviderProfile;
 }
@@ -187,7 +187,7 @@ export async function getProviders(): Promise<ProviderProfile[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from(PROVIDERS_TABLE)
-    .select('id, user_id, data, subjects, created_at, updated_at')
+    .select('id, user_id, data, created_at, updated_at')
     .order('created_at', { ascending: true });
   if (error) {
     console.error('[providers.storage] Error reading providers from Supabase:', error);
@@ -236,7 +236,6 @@ export async function saveProviders(providers: ProviderProfile[]): Promise<void>
       return {
         id: userId,
         user_id: userId,
-        subjects,
         data,
         created_at: createdAt,
         updated_at: updatedAt,
@@ -360,18 +359,14 @@ export async function upsertProviderDataByUserId(userId: string, patch: Record<s
   const existingData = row?.data && typeof row.data === 'object' ? row.data : {};
   const nextData = { ...(existingData as any), ...(safePatch as any), id: pid, userId: pid };
 
-  // Keep provider.subjects column in sync when `subjects` is explicitly being updated.
+  // Subjects must be stored in providers.data.subjects only.
   const hasSubjectsPatch = Object.prototype.hasOwnProperty.call(safePatch, 'subjects');
-  const subjects = hasSubjectsPatch ? normalizeStringArray((safePatch as any).subjects) : undefined;
-  if (hasSubjectsPatch) {
-    (nextData as any).subjects = subjects;
-  }
+  if (hasSubjectsPatch) (nextData as any).subjects = normalizeStringArray((safePatch as any).subjects);
 
   const { error: upsertErr } = await supabase.from(PROVIDERS_TABLE).upsert(
     {
       id: pid,
       user_id: pid,
-      ...(hasSubjectsPatch ? { subjects } : {}),
       data: nextData,
     } as any,
     { onConflict: 'id' }
