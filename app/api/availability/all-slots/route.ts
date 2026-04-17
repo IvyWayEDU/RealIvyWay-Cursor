@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAuth } from '@/lib/auth/requireAuth';
-import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
@@ -43,6 +42,49 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return input.map((v) => String(v || '').trim()).filter(Boolean);
+}
+
+function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(date);
+  const year = parts.find((p) => p.type === 'year')?.value || '2000';
+  const month = parts.find((p) => p.type === 'month')?.value || '01';
+  const day = parts.find((p) => p.type === 'day')?.value || '01';
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeProviderSubjectsFromJson(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of raw) {
+    const canonical = normalizeSubjectId(typeof s === 'string' ? s : String(s ?? ''));
+    if (!canonical) continue;
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push(canonical);
+  }
+  return out;
+}
+
+function normalizeProviderLanguagesFromJson(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    const s = String(v ?? '').trim();
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
 }
 
 function uniqStrings(input: Array<string | null | undefined>): string[] {
@@ -155,15 +197,26 @@ export async function GET(req: NextRequest) {
     // Provider matching must come from Supabase `providers` table (school + serviceType filters).
     const supabase = getSupabaseAdmin();
 
-    // Providers must be sourced from real DB-backed `providers.subjects` (TEXT[] array).
-    // If subjects is NULL or a string -> provider is NOT eligible for booking.
     const { data: providerRows, error: providerErr } = await supabase
       .from('providers')
-      .select('id, data, subjects')
+      .select('id, data')
       .order('id', { ascending: true });
     if (providerErr) throw providerErr;
 
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
+
+    // Compatibility: subjects/languages often live on users.data (provider profile writes to user storage).
+    const providerIds = uniqStrings((providerRows ?? []).map((r: any) => (typeof r?.id === 'string' ? r.id.trim() : '')));
+    const userDataById = new Map<string, any>();
+    if (providerIds.length > 0) {
+      const { data: userRows, error: userErr } = await supabase.from('users').select('id, data').in('id', providerIds as any);
+      if (userErr) throw userErr;
+      for (const row of userRows ?? []) {
+        const id = typeof (row as any)?.id === 'string' ? String((row as any).id).trim() : '';
+        const data = (row as any)?.data && typeof (row as any).data === 'object' ? (row as any).data : null;
+        if (id && data) userDataById.set(id, data);
+      }
+    }
 
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
@@ -173,7 +226,13 @@ export async function GET(req: NextRequest) {
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
-        const subjects = (r as any)?.subjects;
+        const userData = userDataById.get(id) && typeof userDataById.get(id) === 'object' ? userDataById.get(id) : {};
+        const subjects = uniqStrings([
+          ...normalizeProviderSubjectsFromJson((data as any)?.subjects),
+          ...normalizeProviderSubjectsFromJson((data as any)?.specialties),
+          ...normalizeProviderSubjectsFromJson((userData as any)?.subjects),
+          ...normalizeProviderSubjectsFromJson((userData as any)?.specialties),
+        ]);
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
@@ -205,7 +264,11 @@ export async function GET(req: NextRequest) {
         );
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
-        const providerLanguages = Array.from(new Set(normalizeStringArray((data as any)?.languages)));
+        const providerLanguages = uniqStrings([
+          ...normalizeProviderLanguagesFromJson((data as any)?.languages),
+          ...normalizeProviderLanguagesFromJson((userData as any)?.languages),
+          ...normalizeProviderLanguagesFromJson((userData as any)?.tutoringLanguages),
+        ]);
 
         const providerName =
           typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
@@ -341,7 +404,6 @@ export async function GET(req: NextRequest) {
           ? []
           : providersAfterServiceSchool;
 
-    // FIX 2: Build eligibleProviderIds ONLY from DB-backed subjects[] (must be an array).
     const providersForEligibility = providersAfterLanguage.map((p) => ({
       id: p.providerId,
       subjects: (p as any).subjects,
@@ -352,9 +414,11 @@ export async function GET(req: NextRequest) {
     const eligibleProviderIds = providersForEligibility
       .filter(
         (p) =>
-          Array.isArray(p.subjects) &&
-          (p.subjects as any[]).length > 0 &&
-          (subjectKey ? (p.subjects as any[]).includes(subjectKey) : true)
+          // For tutoring/test_prep, enforce subject match strictly.
+          // For non-subject services, do not exclude providers based on subjects metadata.
+          normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
+            ? Array.isArray(p.subjects) && (p.subjects as any[]).includes(subjectKey)
+            : true
       )
       .map((p) => p.id);
 
@@ -455,11 +519,12 @@ export async function GET(req: NextRequest) {
       })
       .filter(Boolean) as Array<{ providerId: string; startTimeUTC: string; endTimeUTC: string }>;
 
-    // FIX 1: Filter by date in backend (NOT frontend).
-    const selectedDate = new Date(String(date || '').trim());
+    // Filter by date in booking timezone (America/New_York) to avoid UTC/local mismatches.
+    const bookingTimeZone = 'America/New_York';
+    const selectedDateKey = String(date || '').trim();
     const filteredSlots = allSlots.filter((slot) => {
-      const slotDate = new Date(slot.startTimeUTC);
-      return slotDate.toDateString() === selectedDate.toDateString();
+      const slotDateKey = formatDateKeyInTimeZone(new Date(slot.startTimeUTC), bookingTimeZone);
+      return slotDateKey === selectedDateKey;
     });
 
     console.log('FILTERED SLOTS', filteredSlots);
@@ -477,7 +542,7 @@ export async function GET(req: NextRequest) {
     // FIX 3: Next available must use the SAME filtered dataset (no separate query).
     const nextAvailable = [...allSlots]
       .filter((slot) => eligibleProviderIds.includes(slot.providerId))
-      .filter((slot) => new Date(slot.startTimeUTC).toDateString() !== selectedDate.toDateString())
+      .filter((slot) => formatDateKeyInTimeZone(new Date(slot.startTimeUTC), bookingTimeZone) !== selectedDateKey)
       .sort((a, b) => new Date(a.startTimeUTC).getTime() - new Date(b.startTimeUTC).getTime());
 
     const nextAvailableSlots = nextAvailable.slice(0, 9).map((s) => ({ startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC }));
@@ -488,7 +553,8 @@ export async function GET(req: NextRequest) {
       { status: 200, headers: rateHeaders }
     );
   } catch (error) {
-    return handleApiError(error, { logPrefix: '[api/availability/all-slots]' });
+    console.error('[TIME_SLOTS_LOAD_ERROR]', error);
+    return NextResponse.json({ error: String((error as any)?.message || error) }, { status: 500 });
   }
 }
 

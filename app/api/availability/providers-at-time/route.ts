@@ -1,17 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAuth } from '@/lib/auth/requireAuth';
-import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { normalizeServiceType } from '@/lib/availability/engine';
 import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
-import { subjectsMatch } from '@/lib/models/subjects';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 
 function uniqStrings(arr: string[]) {
   return Array.from(new Set(arr));
+}
+
+function normalizeProviderSubjectsFromJson(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of raw) {
+    const canonical = normalizeSubjectId(typeof s === 'string' ? s : String(s ?? ''));
+    if (!canonical) continue;
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push(canonical);
+  }
+  return out;
+}
+
+function normalizeProviderLanguagesFromJson(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    const s = String(v ?? '').trim();
+    if (!s) continue;
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
 }
 
 const QuerySchema = z.object({
@@ -160,20 +187,45 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // FIX 2: Eligible providers must be computed ONLY from DB-backed `providers.subjects` (TEXT[] array).
     const { data: providerRowsAll, error: providerErr } = await supabase
       .from('providers')
-      .select('id, data, subjects')
+      .select('id, data')
       .order('id', { ascending: true });
     if (providerErr) throw providerErr;
 
     const norm = (x: any) => String(x || '').trim().toLowerCase().replace(/-/g, '_');
 
+    // Compatibility: subjects/languages may live on users.data (provider profile writes there in some paths).
+    const providerIdsAll = uniqStrings(
+      (providerRowsAll ?? [])
+        .map((r: any) => (typeof r?.id === 'string' ? r.id.trim() : ''))
+        .filter(Boolean)
+    );
+    const userDataById = new Map<string, any>();
+    if (providerIdsAll.length > 0) {
+      const { data: userRows, error: userErr } = await supabase
+        .from('users')
+        .select('id, data')
+        .in('id', providerIdsAll as any);
+      if (userErr) throw userErr;
+      for (const row of userRows ?? []) {
+        const id = typeof (row as any)?.id === 'string' ? String((row as any).id).trim() : '';
+        const data = (row as any)?.data && typeof (row as any).data === 'object' ? (row as any).data : null;
+        if (id && data) userDataById.set(id, data);
+      }
+    }
+
     const providersAll = (providerRowsAll ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
-        const subjects = (r as any)?.subjects;
+        const userData = userDataById.get(id) && typeof userDataById.get(id) === 'object' ? userDataById.get(id) : {};
+        const subjects = uniqStrings([
+          ...normalizeProviderSubjectsFromJson((data as any)?.subjects),
+          ...normalizeProviderSubjectsFromJson((data as any)?.specialties),
+          ...normalizeProviderSubjectsFromJson((userData as any)?.subjects),
+          ...normalizeProviderSubjectsFromJson((userData as any)?.specialties),
+        ]);
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
@@ -205,7 +257,11 @@ export async function GET(req: NextRequest) {
         );
 
         const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
-        const providerLanguages = Array.from(new Set(normalizeStringArray((data as any)?.languages)));
+        const providerLanguages = uniqStrings([
+          ...normalizeProviderLanguagesFromJson((data as any)?.languages),
+          ...normalizeProviderLanguagesFromJson((userData as any)?.languages),
+          ...normalizeProviderLanguagesFromJson((userData as any)?.tutoringLanguages),
+        ]);
 
         const providerName =
           typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
@@ -270,16 +326,9 @@ export async function GET(req: NextRequest) {
     };
 
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
-      // CRITICAL: If subjects is NULL or string -> exclude provider.
-      if (!Array.isArray(p.subjects)) return false;
-      if ((p.subjects as any[]).length === 0) return false;
-
-      if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) {
-        // For non-subject services, we still require a real subjects[] array (hard guard).
-        return true;
-      }
+      if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
-      if (!(p.subjects as any[]).includes(requestedSubjectKey)) return false;
+      if (!Array.isArray(p.subjects) || !(p.subjects as any[]).includes(requestedSubjectKey)) return false;
 
       // Language tutoring: require a concrete language match (providers without languages are excluded).
       if (requestedSubjectKey === 'languages') {
@@ -436,7 +485,8 @@ export async function GET(req: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
-    return handleApiError(error, { logPrefix: '[api/availability/providers-at-time]' });
+    console.error('[TIME_SLOTS_LOAD_ERROR]', error);
+    return NextResponse.json({ error: String((error as any)?.message || error) }, { status: 500 });
   }
 }
 
