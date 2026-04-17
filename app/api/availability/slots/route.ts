@@ -244,18 +244,18 @@ export async function GET(request: NextRequest) {
 
     // Filter by date in backend (NOT frontend)
     const selectedDateKey = getNYDateKey(String(selectedDate || '').trim());
-    const slots = rows ?? [];
+    const rawSlots = rows ?? [];
 
     console.log('[DATE_DEBUG]', {
       selectedDate,
       selectedDateKey,
-      slotTimes: slots.slice(0, 10).map((s: any) => ({
+      slotTimes: rawSlots.slice(0, 10).map((s: any) => ({
         raw: s.start_time,
         ny: getNYDateKey(s.start_time),
       })),
     });
 
-    const rowsForDate = slots.filter((slot: any) => getNYDateKey(slot.start_time) === selectedDateKey);
+    const rowsForDate = rawSlots.filter((slot: any) => getNYDateKey(slot.start_time) === selectedDateKey);
 
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
