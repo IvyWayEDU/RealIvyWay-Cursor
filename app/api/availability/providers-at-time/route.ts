@@ -486,6 +486,17 @@ export async function GET(req: NextRequest) {
 
     const shownProviders = providerCandidates.filter((p) => shownProviderIds.includes(p.providerId));
 
+    const normalizedSubjectsMap: Record<string, string[]> = Object.fromEntries(
+      shownProviders.map((p) => {
+        const rawSubjects = (p as any)?.data?.subjects;
+        const subjects =
+          Array.isArray(rawSubjects) && rawSubjects.length > 0
+            ? (rawSubjects as any[]).map(normalizeSubject).filter(Boolean)
+            : [];
+        return [p.providerId, subjects as string[]];
+      })
+    );
+
     return NextResponse.json(
       {
         providerIds: shownProviderIds,
