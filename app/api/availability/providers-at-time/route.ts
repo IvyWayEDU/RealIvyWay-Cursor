@@ -7,23 +7,10 @@ import { readReservedSlotsFile } from '@/lib/availability/store.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
+import { getProviderSubjectIdsFromProfileJson, normalizeBookingSubjectId } from '@/lib/booking/strictSubjectEligibility';
 
 function uniqStrings(arr: string[]) {
   return Array.from(new Set(arr));
-}
-
-function normalizeProviderSubjectsFromJson(input: unknown): string[] {
-  const raw = Array.isArray(input) ? input : [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const s of raw) {
-    const canonical = normalizeSubjectId(typeof s === 'string' ? s : String(s ?? ''));
-    if (!canonical) continue;
-    if (seen.has(canonical)) continue;
-    seen.add(canonical);
-    out.push(canonical);
-  }
-  return out;
 }
 
 function normalizeProviderLanguagesFromJson(input: unknown): string[] {
@@ -176,9 +163,7 @@ export async function GET(req: NextRequest) {
     const requestedSubjectKey =
       normalizedServiceType === 'test_prep'
         ? 'test_prep'
-        : requestedSubjectRaw
-          ? normalizeSubjectId(requestedSubjectRaw)
-          : null;
+        : normalizeBookingSubjectId(requestedSubjectRaw);
 
     // Subject is required for tutoring/test prep; if we cannot normalize it, treat as no match.
     if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
@@ -220,12 +205,7 @@ export async function GET(req: NextRequest) {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
         const userData = userDataById.get(id) && typeof userDataById.get(id) === 'object' ? userDataById.get(id) : {};
-        const subjects = uniqStrings([
-          ...normalizeProviderSubjectsFromJson((data as any)?.subjects),
-          ...normalizeProviderSubjectsFromJson((data as any)?.specialties),
-          ...normalizeProviderSubjectsFromJson((userData as any)?.subjects),
-          ...normalizeProviderSubjectsFromJson((userData as any)?.specialties),
-        ]);
+        const subjects = getProviderSubjectIdsFromProfileJson({ providerData: data, userData });
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
@@ -328,7 +308,10 @@ export async function GET(req: NextRequest) {
     const matchesSubjectIfNeeded = (p: (typeof providersAll)[number]) => {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
-      if (!Array.isArray(p.subjects) || !(p.subjects as any[]).includes(requestedSubjectKey)) return false;
+      if (!Array.isArray(p.subjects)) return false;
+      const subjects = (p.subjects as any[]).map((s) => String(s ?? '').trim()).filter(Boolean);
+      if (subjects.length === 0) return false;
+      if (!subjects.includes(requestedSubjectKey)) return false;
 
       // Language tutoring: require a concrete language match (providers without languages are excluded).
       if (requestedSubjectKey === 'languages') {
@@ -367,8 +350,25 @@ export async function GET(req: NextRequest) {
     // Eligible providers computed STRICTLY from DB subjects[].
     const providerIds = uniqStrings(providerCandidates.map((p) => p.providerId));
     if (providerIds.length === 0) {
+      console.log('[STRICT_SUBJECT_ELIGIBILITY]', {
+        selectedSubject: requestedSubjectKey,
+        eligibleProviderIds: [],
+        providerSubjects: {},
+      });
       return NextResponse.json({ providers: [], providerIds: [], noSchoolMatch }, { status: 200 });
     }
+
+    const providerSubjects: Record<string, string[]> = {};
+    for (const p of providerCandidates) {
+      providerSubjects[p.providerId] = Array.isArray(p.subjects)
+        ? (p.subjects as any[]).map((s) => String(s ?? '').trim()).filter(Boolean)
+        : [];
+    }
+    console.log('[STRICT_SUBJECT_ELIGIBILITY]', {
+      selectedSubject: requestedSubjectKey,
+      eligibleProviderIds: providerIds,
+      providerSubjects,
+    });
 
     // FIX 1: Fetch slots with strict provider filter at DB query level, then filter in backend for the selected time.
     const slotRows: Array<{ provider_id: string; start_time: string; end_time: string }> = [];

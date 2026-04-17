@@ -8,6 +8,8 @@ import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindow
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
+import { getNYDateKey } from '@/lib/booking/nyDate';
+import { getProviderSubjectIdsFromProfileJson, normalizeBookingSubjectId } from '@/lib/booking/strictSubjectEligibility';
 
 const QuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
@@ -56,20 +58,6 @@ function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
   const month = parts.find((p) => p.type === 'month')?.value || '01';
   const day = parts.find((p) => p.type === 'day')?.value || '01';
   return `${year}-${month}-${day}`;
-}
-
-function normalizeProviderSubjectsFromJson(input: unknown): string[] {
-  const raw = Array.isArray(input) ? input : [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const s of raw) {
-    const canonical = normalizeSubjectId(typeof s === 'string' ? s : String(s ?? ''));
-    if (!canonical) continue;
-    if (seen.has(canonical)) continue;
-    seen.add(canonical);
-    out.push(canonical);
-  }
-  return out;
 }
 
 function normalizeProviderLanguagesFromJson(input: unknown): string[] {
@@ -227,12 +215,7 @@ export async function GET(req: NextRequest) {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
         const data = r?.data && typeof r.data === 'object' ? r.data : {};
         const userData = userDataById.get(id) && typeof userDataById.get(id) === 'object' ? userDataById.get(id) : {};
-        const subjects = uniqStrings([
-          ...normalizeProviderSubjectsFromJson((data as any)?.subjects),
-          ...normalizeProviderSubjectsFromJson((data as any)?.specialties),
-          ...normalizeProviderSubjectsFromJson((userData as any)?.subjects),
-          ...normalizeProviderSubjectsFromJson((userData as any)?.specialties),
-        ]);
+        const subjects = getProviderSubjectIdsFromProfileJson({ providerData: data, userData });
         if (!id) return null;
 
         const servicesRaw: unknown = (data as any)?.services;
@@ -384,13 +367,15 @@ export async function GET(req: NextRequest) {
 
     // Language tutoring is special-case: require a concrete language match.
     const subjectKeyRaw = String(selectedSubjectsRaw?.[0] || subject || '').trim();
-    const subjectKey =
-      normalizedServiceType === 'test_prep'
-        ? 'test_prep'
-        : normalizeSubjectId(subjectKeyRaw) || subjectKeyRaw;
+    const selectedSubject =
+      normalizedServiceType === 'test_prep' ? 'test_prep' : normalizeBookingSubjectId(subjectKeyRaw);
+
+    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !selectedSubject) {
+      return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
+    }
 
     const shouldApplyLanguageFilter =
-      !explicitProviderId && normalizedServiceType === 'tutoring' && String(subjectKey || '').trim().toLowerCase() === 'languages';
+      !explicitProviderId && normalizedServiceType === 'tutoring' && selectedSubject === 'languages';
 
     const providersAfterServiceSchool = providerCandidates;
     const providersAfterLanguage =
@@ -404,30 +389,40 @@ export async function GET(req: NextRequest) {
           ? []
           : providersAfterServiceSchool;
 
-    const providersForEligibility = providersAfterLanguage.map((p) => ({
-      id: p.providerId,
-      subjects: (p as any).subjects,
-    }));
+    const providerSubjects: Record<string, string[]> = {};
+    for (const p of providersAfterLanguage) {
+      providerSubjects[p.providerId] = Array.isArray((p as any).subjects)
+        ? ((p as any).subjects as any[]).map((s) => String(s ?? '').trim()).filter(Boolean)
+        : [];
+    }
 
-    console.log('ALL PROVIDERS', providersForEligibility);
+    const eligibleProviderIds = providersAfterLanguage
+      .filter((p) => {
+        if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
+        if (!selectedSubject) return false;
+        const subjects = providerSubjects[p.providerId] || [];
+        if (subjects.length === 0) return false;
+        return subjects.includes(selectedSubject);
+      })
+      .map((p) => p.providerId);
 
-    const eligibleProviderIds = providersForEligibility
-      .filter(
-        (p) =>
-          // For tutoring/test_prep, enforce subject match strictly.
-          // For non-subject services, do not exclude providers based on subjects metadata.
-          normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
-            ? Array.isArray(p.subjects) && (p.subjects as any[]).includes(subjectKey)
-            : true
-      )
-      .map((p) => p.id);
+    console.log('[STRICT_SUBJECT_ELIGIBILITY]', {
+      selectedSubject,
+      eligibleProviderIds,
+      providerSubjects,
+    });
 
-    console.log('ELIGIBLE IDS', eligibleProviderIds);
+    if (selectedSubject === 'math' && eligibleProviderIds.length === 0) {
+      return NextResponse.json(
+        { slots: [], nextAvailableSlots: [], providers: [], noSchoolMatch },
+        { status: 200, headers: rateHeaders }
+      );
+    }
 
     const idsToQuery = explicitProviderId ? eligibleProviderIds.filter((id) => id === explicitProviderId) : eligibleProviderIds;
     if (idsToQuery.length === 0) {
       return NextResponse.json(
-        { slots: [], nextAvailableSlots: [], providers: [], noSchoolMatch: false },
+        { slots: [], nextAvailableSlots: [], providers: [], noSchoolMatch },
         { status: 200, headers: rateHeaders }
       );
     }
@@ -457,7 +452,10 @@ export async function GET(req: NextRequest) {
       })
       .filter(Boolean) as any[];
 
-    console.log('ALL SLOTS', slots);
+    const selectedDateInput = String(date || '').trim();
+    const selectedDate =
+      /^\d{4}-\d{2}-\d{2}$/.test(selectedDateInput) ? new Date(`${selectedDateInput}T12:00:00Z`) : new Date(selectedDateInput);
+    const selectedDateKey = getNYDateKey(selectedDate);
 
     // Remove lead-time slots after fetch (still within the strict provider/service dataset).
     const slotsAfterLeadTime = slots.filter((slot) => {
@@ -520,14 +518,15 @@ export async function GET(req: NextRequest) {
       .filter(Boolean) as Array<{ providerId: string; startTimeUTC: string; endTimeUTC: string }>;
 
     // Filter by date in booking timezone (America/New_York) to avoid UTC/local mismatches.
-    const bookingTimeZone = 'America/New_York';
-    const selectedDateKey = String(date || '').trim();
-    const filteredSlots = allSlots.filter((slot) => {
-      const slotDateKey = formatDateKeyInTimeZone(new Date(slot.startTimeUTC), bookingTimeZone);
-      return slotDateKey === selectedDateKey;
-    });
+    const filteredSlots = allSlots.filter((slot) => getNYDateKey(slot.startTimeUTC) === selectedDateKey);
 
-    console.log('FILTERED SLOTS', filteredSlots);
+    console.log('[NY_DATE_FILTER]', {
+      selectedDate: selectedDateInput,
+      selectedDateKey,
+      rawSlotCount: slots.length,
+      filteredSlotCount: filteredSlots.length,
+      slotKeys: slots.slice(0, 20).map((s: any) => ({ id: s.id, key: getNYDateKey(s.start_time), start: s.start_time })),
+    });
 
     // TIME-FIRST: return unique times (not provider-specific) so the user selects time first.
     const uniqByTime = new Map<string, { startTimeUTC: string; endTimeUTC: string }>();
@@ -541,11 +540,21 @@ export async function GET(req: NextRequest) {
 
     // FIX 3: Next available must use the SAME filtered dataset (no separate query).
     const nextAvailable = [...allSlots]
-      .filter((slot) => eligibleProviderIds.includes(slot.providerId))
-      .filter((slot) => formatDateKeyInTimeZone(new Date(slot.startTimeUTC), bookingTimeZone) !== selectedDateKey)
+      .filter((slot) => idsToQuery.includes(slot.providerId))
+      .filter((slot) => getNYDateKey(slot.startTimeUTC) !== selectedDateKey)
       .sort((a, b) => new Date(a.startTimeUTC).getTime() - new Date(b.startTimeUTC).getTime());
 
-    const nextAvailableSlots = nextAvailable.slice(0, 9).map((s) => ({ startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC }));
+    const nextAvailableStrict = nextAvailable.slice(0, 9);
+    const nextAvailableSlots = nextAvailableStrict.map((s) => ({ startTimeUTC: s.startTimeUTC, endTimeUTC: s.endTimeUTC }));
+
+    const nextAvailableProviderIds = uniqStrings(nextAvailableStrict.map((s) => s.providerId));
+    const shownProviderIds = eligibleProviderIds.filter((id) => nextAvailableProviderIds.includes(id));
+    console.log('[NEXT_AVAILABLE_STRICT]', {
+      selectedSubject,
+      eligibleProviderIds,
+      nextAvailableProviderIds,
+      shownProviderIds,
+    });
 
     // Keep `providers` for backward compatibility, but booking UI no longer uses it.
     return NextResponse.json(

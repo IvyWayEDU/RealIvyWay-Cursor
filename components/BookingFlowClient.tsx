@@ -4,8 +4,9 @@ import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { SCHOOLS, School, searchSchools } from '@/data/schools';
 import { PRICING_CATALOG, formatUsdFromCents } from '@/lib/pricing/catalog';
-import { normalizeSubjectId } from '@/lib/models/subjects';
+import { normalizeBookingSubjectId } from '@/lib/booking/strictSubjectEligibility';
 import { LANGUAGE_TUTORING_OPTIONS, normalizeLanguageTutoringLabel } from '@/lib/models/languageTutoring';
+import { getNYDateKey } from '@/lib/booking/nyDate';
 
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
 type Plan = string | null;
@@ -613,7 +614,7 @@ export default function BookingFlowClient() {
     const prefillLanguage =
       normalizedService === 'tutoring' &&
       normalizedSubject &&
-      normalizeSubjectId(normalizedSubject) === 'languages' &&
+      normalizeBookingSubjectId(normalizedSubject) === 'languages' &&
       prefillTopic
         ? prefillTopic
         : '';
@@ -709,7 +710,7 @@ export default function BookingFlowClient() {
           const parsedSelectedLanguage = typeof parsed?.selectedLanguage === 'string' ? parsed.selectedLanguage : '';
           const parsedSubject = typeof parsed?.subject === 'string' ? parsed.subject : '';
           const parsedTopic = typeof parsed?.topic === 'string' ? parsed.topic : '';
-          const isLanguages = parsedSubject && normalizeSubjectId(parsedSubject) === 'languages';
+          const isLanguages = parsedSubject && normalizeBookingSubjectId(parsedSubject) === 'languages';
           parsed.selectedLanguage = parsedSelectedLanguage || (isLanguages ? parsedTopic : '');
 
           setBookingState(parsed);
@@ -792,7 +793,7 @@ export default function BookingFlowClient() {
       currentStep === 3 &&
       bookingState.service === 'tutoring' &&
       bookingState.subject &&
-      normalizeSubjectId(bookingState.subject) === 'languages'
+      normalizeBookingSubjectId(bookingState.subject) === 'languages'
     ) {
       const raw = typeof bookingState.selectedLanguage === 'string' ? bookingState.selectedLanguage : '';
       const trimmed = raw.trim();
@@ -1203,7 +1204,7 @@ function Step3ChooseSubjectOrSchool({
   const isTestPrep = bookingState.service === 'test-prep';
   const isVirtualTour = bookingState.service === 'virtual-tour';
   const isLanguageTutoring =
-    isTutoring && !!bookingState.subject && normalizeSubjectId(bookingState.subject) === 'languages';
+    isTutoring && !!bookingState.subject && normalizeBookingSubjectId(bookingState.subject) === 'languages';
   const availableTopics = bookingState.subject && isTutoring ? TUTORING_TOPICS[bookingState.subject] || [] : [];
 
   // Provider availability flags (standardized across ALL services).
@@ -1852,7 +1853,7 @@ function Step4ChooseTimeSlot({
     setLoadingNextAvailable(false);
 
     // Build API request
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    const dateStr = getNYDateKey(new Date(Date.UTC(year, month, selectedDate.getDate(), 12, 0, 0)));
     
     // Determine serviceType for API
     let serviceType: string | null = null;
@@ -1872,7 +1873,7 @@ function Step4ChooseTimeSlot({
     const params = new URLSearchParams({ date: dateStr });
     if (serviceType) params.set('serviceType', serviceType);
     if (bookingState.subject) {
-      const canonical = normalizeSubjectId(bookingState.subject);
+      const canonical = normalizeBookingSubjectId(bookingState.subject);
       params.set('subject', canonical || bookingState.subject);
       if ((canonical || bookingState.subject) === 'languages') {
         const lang = String(bookingState.selectedLanguage || bookingState.topic || '').trim();
@@ -2317,7 +2318,7 @@ function Step5SelectProvider({
 
         const schoolId = bookingState.school?.id || bookingState.schoolId || '';
         const schoolName = bookingState.school?.name || bookingState.schoolName || '';
-        const subject = bookingState.subject ? normalizeSubjectId(bookingState.subject) || bookingState.subject : '';
+        const subject = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) || bookingState.subject : '';
 
         let intersection: Map<string, (typeof eligibleProviders)[number]> | null = null;
 
