@@ -40,15 +40,6 @@ const QuerySchema = z.object({
 // Business rule: all sessions must be booked at least 60 minutes in advance.
 const LEAD_TIME_BUFFER_MINUTES = 60;
 
-function parseIsoDateYYYYMMDDToUtcDate(dateKey: string): Date {
-  const [yRaw, mRaw, dRaw] = String(dateKey || '').trim().split('-');
-  const y = Number(yRaw);
-  const m = Number(mRaw);
-  const d = Number(dRaw);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return new Date('invalid');
-  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
-}
-
 function chunkArray<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -58,20 +49,6 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   return input.map((v) => String(v || '').trim()).filter(Boolean);
-}
-
-function formatDateKeyInTimeZone(date: Date, timeZone: string): string {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = formatter.formatToParts(date);
-  const year = parts.find((p) => p.type === 'year')?.value || '2000';
-  const month = parts.find((p) => p.type === 'month')?.value || '01';
-  const day = parts.find((p) => p.type === 'day')?.value || '01';
-  return `${year}-${month}-${day}`;
 }
 
 function normalizeProviderLanguagesFromJson(input: unknown): string[] {
@@ -466,8 +443,7 @@ export async function GET(req: NextRequest) {
       .filter(Boolean) as any[];
 
     const selectedDateInput = String(date || '').trim();
-    const selectedDate =
-      /^\d{4}-\d{2}-\d{2}$/.test(selectedDateInput) ? new Date(`${selectedDateInput}T12:00:00Z`) : new Date(selectedDateInput);
+    const selectedDate = selectedDateInput;
     const selectedDateKey = getNYDateKey(selectedDate);
 
     // Remove lead-time slots after fetch (still within the strict provider/service dataset).
@@ -533,12 +509,13 @@ export async function GET(req: NextRequest) {
     // Filter by date in booking timezone (America/New_York) to avoid UTC/local mismatches.
     const filteredSlots = allSlots.filter((slot) => getNYDateKey(slot.startTimeUTC) === selectedDateKey);
 
-    console.log('[NY_DATE_FILTER]', {
-      selectedDate: selectedDateInput,
+    console.log('[DATE_DEBUG]', {
+      selectedDate,
       selectedDateKey,
-      rawSlotCount: slots.length,
-      filteredSlotCount: filteredSlots.length,
-      slotKeys: slots.slice(0, 20).map((s: any) => ({ id: s.id, key: getNYDateKey(s.start_time), start: s.start_time })),
+      slotTimes: slots.slice(0, 10).map((s: any) => ({
+        raw: s.start_time,
+        ny: getNYDateKey(s.start_time),
+      })),
     });
 
     // TIME-FIRST: return unique times (not provider-specific) so the user selects time first.

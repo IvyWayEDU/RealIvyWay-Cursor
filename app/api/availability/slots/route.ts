@@ -6,6 +6,7 @@ import { handleApiError } from '@/lib/errorHandler';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { normalizeSubjectId } from '@/lib/models/subjects';
+import { getNYDateKey } from '@/lib/booking/nyDate';
 
 type SlotOut = { start: string; end: string; providerId: string };
 
@@ -61,15 +62,6 @@ function subjectsToEligibilityLabels(subjects: unknown): string[] {
     }
   }
   return out;
-}
-
-function parseIsoDateYYYYMMDDToUtcDate(dateKey: string): Date {
-  const [yRaw, mRaw, dRaw] = String(dateKey || '').trim().split('-');
-  const y = Number(yRaw);
-  const m = Number(mRaw);
-  const d = Number(dRaw);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return new Date('invalid');
-  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
 }
 
 export async function GET(request: NextRequest) {
@@ -170,17 +162,9 @@ export async function GET(request: NextRequest) {
       )
     );
 
-    // Strict date filtering:
-    // Interpret the selected YYYY-MM-DD as a UTC day and query ONLY by UTC bounds.
-    // Do not use local time comparisons or timezone-based re-filtering.
+    // Selected date is a booking day in America/New_York (YYYY-MM-DD).
+    // We filter by comparing NY date keys only (see getNYDateKey usage below).
     const selectedDate = date;
-    const startOfDay = parseIsoDateYYYYMMDDToUtcDate(selectedDate);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-    const endOfDay = parseIsoDateYYYYMMDDToUtcDate(selectedDate);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-
-    const queryStartISO = startOfDay.toISOString();
-    const queryEndISO = endOfDay.toISOString();
 
     const leadTimeHours = normalized === 'virtual_tour' ? 2 : 0;
     const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
@@ -259,15 +243,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Filter by date in backend (NOT frontend)
-    const selected = new Date(String(selectedDate || '').trim());
-    const rowsForDate = (rows ?? []).filter((r: any) => {
-      try {
-        const slotDate = new Date(r?.start_time);
-        return slotDate.toDateString() === selected.toDateString();
-      } catch {
-        return false;
-      }
+    const selectedDateKey = getNYDateKey(String(selectedDate || '').trim());
+    const slots = rows ?? [];
+
+    console.log('[DATE_DEBUG]', {
+      selectedDate,
+      selectedDateKey,
+      slotTimes: slots.slice(0, 10).map((s: any) => ({
+        raw: s.start_time,
+        ny: getNYDateKey(s.start_time),
+      })),
     });
+
+    const rowsForDate = slots.filter((slot: any) => getNYDateKey(slot.start_time) === selectedDateKey);
 
     const reserved = await readReservedSlotsFile();
     const reservedSet = new Set(
@@ -279,14 +267,24 @@ export async function GET(request: NextRequest) {
     const providerIdsForDate = Array.from(
       new Set((rowsForDate ?? []).map((r: any) => String(r?.provider_id || '').trim()).filter(Boolean))
     );
-    const sessionQueryStartISO = queryStartISO;
-    const sessionQueryEndISO = queryEndISO;
-    const bookedWindows = await getBookedSessionWindowsForProviders({
-      providerIds: providerIdsForDate,
-      rangeStartISO: sessionQueryStartISO,
-      rangeEndISO: sessionQueryEndISO,
-      defaultDurationMinutesWhenMissingEnd: 60,
-    });
+    const rangeTimesMs = (rowsForDate ?? [])
+      .flatMap((r: any) => [new Date(r?.start_time).getTime(), new Date(r?.end_time).getTime()])
+      .filter((ms: number) => Number.isFinite(ms)) as number[];
+
+    const sessionQueryStartISO =
+      rangeTimesMs.length > 0 ? new Date(Math.min(...rangeTimesMs) - 2 * 60 * 60 * 1000).toISOString() : new Date().toISOString();
+    const sessionQueryEndISO =
+      rangeTimesMs.length > 0 ? new Date(Math.max(...rangeTimesMs) + 2 * 60 * 60 * 1000).toISOString() : new Date().toISOString();
+
+    const bookedWindows =
+      providerIdsForDate.length > 0
+        ? await getBookedSessionWindowsForProviders({
+            providerIds: providerIdsForDate,
+            rangeStartISO: sessionQueryStartISO,
+            rangeEndISO: sessionQueryEndISO,
+            defaultDurationMinutesWhenMissingEnd: 60,
+          })
+        : [];
     const windowsByProvider = new Map<string, Array<{ sessionStartMs: number; sessionEndMs: number }>>();
     for (const w of bookedWindows || []) {
       const arr = windowsByProvider.get(w.providerId) || [];
