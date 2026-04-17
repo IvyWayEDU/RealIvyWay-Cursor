@@ -3,6 +3,8 @@
  * Pure functions for availability calculations using America/New_York timezone
  */
 
+const DEFAULT_TIME_ZONE = 'America/New_York';
+
 /**
  * Normalize service type to canonical format
  * Returns one of: tutoring, test_prep, college_counseling, virtual_tour
@@ -61,7 +63,7 @@ export function normalizeDateKey(date: Date | string): string {
       const tzDate = new Date(date + 'T12:00:00'); // Use noon to avoid DST issues
       // Convert to America/New_York timezone
       const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'America/New_York',
+        timeZone: DEFAULT_TIME_ZONE,
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -79,7 +81,7 @@ export function normalizeDateKey(date: Date | string): string {
   
   // Format date in America/New_York timezone
   const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
+    timeZone: DEFAULT_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -239,10 +241,11 @@ export function generateSlotsForDay(
  * The returned value matches the sign of Date#getTimezoneOffset (e.g. New York in winter => +300).
  */
 function getTimeZoneOffsetMinutes(utcDate: Date, tz: string): number {
+  const safeTz = typeof tz === 'string' && tz.trim() ? tz.trim() : DEFAULT_TIME_ZONE;
   // Format the UTC instant in the target timezone, then interpret the formatted parts as a UTC timestamp.
   // The delta between that "as-if-UTC" timestamp and the real UTC instant yields the timezone offset.
   const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
+    timeZone: safeTz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -275,8 +278,9 @@ function getTimeZoneOffsetMinutes(utcDate: Date, tz: string): number {
 export function bindDateKeyAndMinutesToUtcDate(
   dateKey: string,
   minutesSinceMidnight: number,
-  timeZone: string = 'America/New_York'
+  timeZone: string = DEFAULT_TIME_ZONE
 ): Date {
+  const tz = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : DEFAULT_TIME_ZONE;
   const [year, month, day] = dateKey.split('-').map(Number);
   const hh = Math.floor(minutesSinceMidnight / 60);
   const mm = minutesSinceMidnight % 60;
@@ -286,7 +290,7 @@ export function bindDateKeyAndMinutesToUtcDate(
   let guessMs = localAsIfUTC;
   for (let i = 0; i < 3; i++) {
     const guessDate = new Date(guessMs);
-    const offsetMinutes = getTimeZoneOffsetMinutes(guessDate, timeZone);
+    const offsetMinutes = getTimeZoneOffsetMinutes(guessDate, tz);
     const correctedMs = localAsIfUTC + offsetMinutes * 60_000;
     if (correctedMs === guessMs) break;
     guessMs = correctedMs;
@@ -319,7 +323,8 @@ export function generateSlotsForBlocks(
   const slotIntervalMinutes = opts.slotIntervalMinutes ?? 60;
   const sessionDurationMinutes = opts.sessionDurationMinutes ?? 60;
   const roundToInterval = opts.roundToInterval ?? true;
-  const timeZone = opts.timeZone ?? 'America/New_York';
+  const timeZoneRaw = typeof opts.timeZone === 'string' ? opts.timeZone.trim() : '';
+  const timeZone = timeZoneRaw || DEFAULT_TIME_ZONE;
   
   const slots: string[] = [];
   
@@ -374,8 +379,9 @@ const WEEKDAY_NAME_TO_INDEX: Record<string, number> = {
 };
 
 export function getDateKeyInTimeZone(date: Date, timeZone: string): string {
+  const tz = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : DEFAULT_TIME_ZONE;
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
+    timeZone: tz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -395,10 +401,11 @@ export function addDaysToDateKey(dateKey: string, days: number): string {
 }
 
 export function getWeekdayIndexForDateKey(dateKey: string, timeZone: string): number {
+  const tz = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : DEFAULT_TIME_ZONE;
   // Use local noon to avoid DST edge cases while still computing the correct local calendar weekday.
-  const noonUtc = bindDateKeyAndMinutesToUtcDate(dateKey, 12 * 60, timeZone);
+  const noonUtc = bindDateKeyAndMinutesToUtcDate(dateKey, 12 * 60, tz);
   const weekdayName = new Intl.DateTimeFormat('en-US', {
-    timeZone,
+    timeZone: tz,
     weekday: 'long',
   }).format(noonUtc);
   const idx = WEEKDAY_NAME_TO_INDEX[weekdayName];
@@ -415,11 +422,12 @@ export function getNextWeekdayDateKeyInTimeZone(
   desiredDayOfWeek: number,
   timeZone: string
 ): string {
+  const tz = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : DEFAULT_TIME_ZONE;
   const desired = Number(desiredDayOfWeek);
   if (!Number.isFinite(desired) || desired < 0 || desired > 6) {
     throw new Error(`[availability/engine] Invalid desiredDayOfWeek: ${desiredDayOfWeek}`);
   }
-  const anchorDow = getWeekdayIndexForDateKey(anchorDateKey, timeZone);
+  const anchorDow = getWeekdayIndexForDateKey(anchorDateKey, tz);
   const delta = (desired - anchorDow + 7) % 7;
   return addDaysToDateKey(anchorDateKey, delta);
 }

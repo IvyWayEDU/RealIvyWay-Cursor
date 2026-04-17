@@ -47,6 +47,7 @@ async function regenerateAvailabilitySlots(params: {
   const providerId = String(params.providerId || '').trim();
   const slotServiceType = toCanonicalSlotServiceType(String(params.serviceType || '').trim());
   const timeZone = params.timeZone || DEFAULT_TIME_ZONE;
+  const tz = timeZone || DEFAULT_TIME_ZONE;
 
   if (!providerId) throw new Error('providerId is required to regenerate slots');
 
@@ -96,7 +97,7 @@ async function regenerateAvailabilitySlots(params: {
 
   // Next 4 weeks (28 local calendar days) in provider timezone.
   // Build local schedule dates FIRST, then convert exactly once to UTC for storage.
-  const todayKey = getDateKeyInTimeZone(now, timeZone);
+  const todayKey = getDateKeyInTimeZone(now, tz);
   const endKeyInclusive = addDaysToDateKey(todayKey, 27);
 
   // Group blocks by local weekday to generate recurring occurrences efficiently.
@@ -109,21 +110,21 @@ async function regenerateAvailabilitySlots(params: {
 
   let didLogTz = false;
   for (const [dow, blocksForDow] of blocksByDow.entries()) {
-    let localDateKey = getNextWeekdayDateKeyInTimeZone(todayKey, dow, timeZone);
+    let localDateKey = getNextWeekdayDateKeyInTimeZone(todayKey, dow, tz);
 
     while (localDateKey <= endKeyInclusive) {
       // Debug logs for the saved weekly blocks on this local calendar date.
       for (const block of blocksForDow) {
-        const utcStart = bindDateKeyAndMinutesToUtcDate(localDateKey, block.startMinutes, timeZone).toISOString();
+        const utcStart = bindDateKeyAndMinutesToUtcDate(localDateKey, block.startMinutes, tz).toISOString();
 
         const utcEnd =
           block.endMinutes === 1440
-            ? bindDateKeyAndMinutesToUtcDate(addDaysToDateKey(localDateKey, 1), 0, timeZone).toISOString()
-            : bindDateKeyAndMinutesToUtcDate(localDateKey, block.endMinutes, timeZone).toISOString();
+            ? bindDateKeyAndMinutesToUtcDate(addDaysToDateKey(localDateKey, 1), 0, tz).toISOString()
+            : bindDateKeyAndMinutesToUtcDate(localDateKey, block.endMinutes, tz).toISOString();
 
         console.log('[AVAILABILITY_GENERATION_DEBUG]', {
           providerId,
-          timeZone,
+          timeZone: tz,
           blockDayOfWeek: dow,
           localDate: localDateKey,
           localStart: `${localDateKey} ${minutesToTime(block.startMinutes)}`,
@@ -134,7 +135,7 @@ async function regenerateAvailabilitySlots(params: {
       }
 
       if (!didLogTz) {
-        console.log("[AVAILABILITY_TZ]", { providerId, timeZone });
+        console.log("[AVAILABILITY_TZ]", { providerId, timeZone: tz });
         didLogTz = true;
       }
 
@@ -142,7 +143,7 @@ async function regenerateAvailabilitySlots(params: {
         slotIntervalMinutes: durationMinutes,
         sessionDurationMinutes: durationMinutes,
         roundToInterval: true,
-        timeZone,
+        timeZone: tz,
       });
 
       for (const startIso of startISOs) {
@@ -165,9 +166,14 @@ async function regenerateAvailabilitySlots(params: {
 
   if (slotsToInsert.length === 0) return;
 
-  // Insert concrete inventory (no ON CONFLICT clause).
-  const { error: insErr } = await supabase.from('availability_slots').insert(slotsToInsert as any);
-  if (insErr) throw insErr;
+  // Insert concrete inventory (no ON CONFLICT clause). Chunk to avoid request-size limits.
+  const chunkSize = 500;
+  for (let i = 0; i < slotsToInsert.length; i += chunkSize) {
+    const chunk = slotsToInsert.slice(i, i + chunkSize);
+    if (chunk.length === 0) continue;
+    const { error: insErr } = await supabase.from('availability_slots').insert(chunk as any);
+    if (insErr) throw insErr;
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -226,9 +232,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const timeZone = DEFAULT_TIME_ZONE;
-  console.log("[AVAILABILITY_SAVE_DEBUG]", { timeZone });
-
   try {
     const authResult = await requireAuth();
     if (authResult instanceof NextResponse) {
@@ -284,6 +287,9 @@ export async function POST(request: NextRequest) {
     if (targetSlotServiceTypes.length === 0) {
       return NextResponse.json({ error: 'No valid service types provided' }, { status: 400 });
     }
+
+    const timeZone = DEFAULT_TIME_ZONE;
+    console.log("[AVAILABILITY_SAVE_DEBUG]", { providerId, serviceTypes: targetSlotServiceTypes, timeZone });
     
     // Check access: provider can only set their own, admin can set any
     if (!session.roles.includes('admin') && providerId !== session.userId) {

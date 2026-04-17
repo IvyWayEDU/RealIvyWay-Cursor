@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { updateProviderAvailability, upsertProviderDataByUserId } from '@/lib/providers/storage';
 
 const PROVIDERS_TABLE = 'providers';
+const DEFAULT_TIME_ZONE = 'America/New_York';
 
 export type SlotStatus = 'available' | 'reserved';
 
@@ -500,8 +501,9 @@ function getZonedDateParts(date: Date, timeZone: string): {
   minute: number;
   dayOfWeek: number; // 0-6 (Sunday-Saturday)
 } {
+  const tz = typeof timeZone === 'string' && timeZone.trim() ? timeZone.trim() : DEFAULT_TIME_ZONE;
   const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
+    timeZone: tz,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
