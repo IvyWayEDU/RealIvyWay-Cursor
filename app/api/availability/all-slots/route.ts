@@ -209,6 +209,11 @@ export async function GET(req: NextRequest) {
     const requestedSchool = requestedSchoolName;
     const requestedSchoolNorm = normalizeSchoolName(requestedSchool);
 
+    console.log('[BOOKING_INPUT]', {
+      requestedService,
+      requestedSchool,
+    });
+
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
         const id = typeof r?.id === 'string' ? r.id.trim() : '';
@@ -495,6 +500,13 @@ export async function GET(req: NextRequest) {
             })
             .map((p) => p.providerId)
         : providersAfterLanguage.map((p) => p.providerId);
+
+    const providers = eligibleProviderIds;
+    console.log('[BOOKING_RESULT]', {
+      requestedService,
+      normalizedRequestedService,
+      providersFound: providers.length,
+    });
 
     console.log('[FINAL_SUBJECT_FIX]', {
       selectedSubject,

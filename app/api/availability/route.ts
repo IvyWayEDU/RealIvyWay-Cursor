@@ -299,6 +299,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // SAFE MODE: fetch provider for logging only (must not block / throw / change behavior)
+    const supabase = getSupabaseAdmin();
+    let provider: any = null;
+    try {
+      const { data: providerRow, error: providerError } = await supabase
+        .from('providers')
+        .select('id, data')
+        .eq('id', providerId)
+        .maybeSingle();
+      if (providerError) {
+        console.error('[AVAILABILITY_SAFE_MODE_PROVIDER_FETCH_FAILED]', providerError);
+      } else {
+        provider = providerRow;
+      }
+    } catch (e) {
+      console.error('[AVAILABILITY_SAFE_MODE_PROVIDER_FETCH_EXCEPTION]', e);
+    }
+
+    const providerServices = Array.isArray(provider?.data?.services)
+      ? provider.data.services.map((s: any) => String(s).trim())
+      : [];
+
+    console.log('[AVAILABILITY_SAFE_MODE]', {
+      providerId,
+      providerServices,
+      requestedServiceTypes: targetSlotServiceTypes,
+    });
+
+    const invalidServiceTypes = targetSlotServiceTypes.filter(
+      (st) => !providerServices.includes(st)
+    );
+
+    if (invalidServiceTypes.length > 0) {
+      console.warn('[AVAILABILITY_INVALID_SERVICE]', {
+        providerId,
+        invalidServiceTypes,
+        providerServices,
+      });
+    }
+
     // Clear flow (explicit action)
     if (intent === 'clear') {
       const updatedAt = new Date().toISOString();
@@ -308,7 +348,6 @@ export async function POST(request: NextRequest) {
 
       // Replace slot inventory: remove future unbooked slots for this provider/serviceType(s).
       try {
-        const supabase = getSupabaseAdmin();
         const nowIso = new Date().toISOString();
         for (const slotServiceType of targetSlotServiceTypes) {
           const { error: delErr } = await supabase
@@ -415,6 +454,28 @@ export async function POST(request: NextRequest) {
       await updateProviderAvailability(providerId, { serviceType: slotServiceType, timezone: timeZone, updatedAt, days, blocks });
     }
     console.log('[AVAILABILITY_WRITE]', { providerId, serviceTypes: targetSlotServiceTypes, daysCount: days.length });
+
+    // SAFE MODE: if request uses service types not on provider, safely refresh derived slot inventory.
+    // Must not throw / block request success / change behavior outside inconsistency cases.
+    if (invalidServiceTypes.length > 0) {
+      try {
+        const nowIso = new Date().toISOString();
+        const { error: cleanupError } = await supabase
+          .from('availability_slots')
+          .delete()
+          .eq('provider_id', providerId)
+          .eq('is_booked', false)
+          .gt('start_time', nowIso);
+
+        if (cleanupError) {
+          console.error('[SAFE_SLOT_CLEANUP_FAILED]', cleanupError);
+        } else {
+          console.log('[SAFE_SLOT_CLEANUP_SUCCESS]', { providerId });
+        }
+      } catch (e) {
+        console.error('[SAFE_SLOT_CLEANUP_EXCEPTION]', e);
+      }
+    }
 
     // Concrete slot inventory (next 4 weeks) is stored in Supabase `availability_slots`.
     for (const slotServiceType of targetSlotServiceTypes) {
