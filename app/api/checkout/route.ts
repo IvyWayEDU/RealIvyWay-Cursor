@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     if (serviceType === 'virtual_tour') {
       normalizedServiceType = 'college_counseling';
     }
-    console.log('[CHECKOUT_DEBUG]', {
+    console.log('[CHECKOUT_SERVICE_DEBUG]', {
       originalServiceType: serviceType,
       normalizedServiceType,
     });
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
     const schoolName = String(schoolNameRaw || '').trim();
 
     // SAFETY: Prevent bypass for virtual tours — must not allow booking attempts for schools with 0 providers.
-    if (serviceType === 'virtual_tour') {
+    if (normalizedServiceType === 'virtual_tour') {
       if (!schoolId) {
         return NextResponse.json({ error: 'School ID is required for virtual tours' }, { status: 400 });
       }
