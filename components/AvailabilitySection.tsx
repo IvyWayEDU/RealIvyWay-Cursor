@@ -49,12 +49,26 @@ export default function AvailabilitySection() {
     }))
   );
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [enabledServices, setEnabledServices] = useState<string[]>([]);
-  const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
+  const [providerServices, setProviderServices] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const hasAnyAvailability = availability.some((day) => day.enabled);
+
+  const pickLatestAvailabilityEntry = (raw: any): any | null => {
+    const entries: any[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    if (entries.length === 0) return null;
+    let best = entries[0];
+    let bestTs = Number.isFinite(Date.parse(String(best?.updatedAt || ''))) ? Date.parse(String(best.updatedAt)) : -Infinity;
+    for (const e of entries.slice(1)) {
+      const ts = Number.isFinite(Date.parse(String(e?.updatedAt || ''))) ? Date.parse(String(e.updatedAt)) : -Infinity;
+      if (ts > bestTs) {
+        best = e;
+        bestTs = ts;
+      }
+    }
+    return best || null;
+  };
 
   // Get current provider's user ID on mount
   useEffect(() => {
@@ -66,17 +80,15 @@ export default function AvailabilitySection() {
       }
       setProviderId(userId);
       const servicesResult = await getCurrentUserEnabledServices();
-      if (servicesResult?.services?.length) {
-        setEnabledServices(servicesResult.services);
-        setSelectedServiceType((prev) => prev ?? servicesResult.services[0]);
-      }
+      const nextServices = Array.isArray(servicesResult?.services) ? servicesResult.services : [];
+      setProviderServices(nextServices);
     };
     fetchProviderId();
   }, []);
 
-  // Initialize from API once per (providerId + selectedServiceType) fetch.
+  // Initialize from API once per provider load.
   useEffect(() => {
-    if (!providerId || !selectedServiceType) return;
+    if (!providerId) return;
 
     const minutesToTime = (minutes: number): string => {
       const hours = Math.floor(minutes / 60);
@@ -95,17 +107,11 @@ export default function AvailabilitySection() {
 
     const load = async () => {
       try {
-        const apiServiceType =
-          selectedServiceType === 'test_prep'
-            ? 'tutoring'
-            : selectedServiceType === 'virtual_tour'
-              ? 'college_counseling'
-              : selectedServiceType;
-        const params = new URLSearchParams({ serviceType: apiServiceType });
-        const res = await fetch(`/api/availability?${params.toString()}`);
+        // Load provider availability once (single weekly schedule) and pick the most recently updated entry.
+        const res = await fetch('/api/availability');
         const data = await res.json();
         if (!res.ok) return;
-        const entry = data?.availability;
+        const entry = pickLatestAvailabilityEntry(data?.availability);
         if (!entry) return;
 
         const rangesByDayLabel = new Map<string, Array<{ start: string; end: string }>>();
@@ -149,7 +155,7 @@ export default function AvailabilitySection() {
     };
 
     load();
-  }, [providerId, selectedServiceType]);
+  }, [providerId]);
 
   const toggleDay = (dayIndex: number) => {
     setAvailability((prev) =>
@@ -217,8 +223,9 @@ export default function AvailabilitySection() {
       setSaveMessage({ type: 'error', text: 'Provider ID not found. Please refresh the page.' });
       return;
     }
-    if (!selectedServiceType) {
-      setSaveMessage({ type: 'error', text: 'Please select a service type before saving.' });
+    const serviceTypes = Array.isArray(providerServices) ? providerServices : [];
+    if (serviceTypes.length === 0) {
+      setSaveMessage({ type: 'error', text: 'No services found on your profile. Please add a service before saving availability.' });
       return;
     }
 
@@ -259,18 +266,10 @@ export default function AvailabilitySection() {
         return { dayOfWeek, enabled: !!source.enabled, timeRanges };
       });
 
-      const serviceTypes = enabledServices.length > 0 ? enabledServices : [selectedServiceType];
       const res = await fetch('/api/availability', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          providerId,
-          serviceType:
-            selectedServiceType === 'test_prep'
-              ? 'tutoring'
-              : selectedServiceType === 'virtual_tour'
-                ? 'college_counseling'
-                : selectedServiceType,
           serviceTypes,
           timezone: 'America/New_York',
           days,
@@ -300,29 +299,13 @@ export default function AvailabilitySection() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Availability</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Set your available days and times. Bookable slots are generated from this availability.
+            Set your available days and times. This schedule applies to all of your services.
           </p>
         </div>
-        {enabledServices.length > 0 && (
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-700">Service</label>
-            <select
-              value={selectedServiceType || ''}
-              onChange={(e) => setSelectedServiceType(e.target.value || null)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] text-sm py-2 px-3"
-            >
-              {enabledServices.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
         <button
           type="button"
           onClick={handleSaveAvailability}
-          disabled={saving || !hasAnyAvailability || !providerId || !selectedServiceType}
+          disabled={saving || !hasAnyAvailability || !providerId || providerServices.length === 0}
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? (

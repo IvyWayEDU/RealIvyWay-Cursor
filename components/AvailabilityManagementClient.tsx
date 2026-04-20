@@ -16,11 +16,25 @@ export default function AvailabilityManagementClient() {
     Array.from({ length: 7 }, () => ({ enabled: false, timeRanges: [{ start: '', end: '' }] }))
   );
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [enabledServices, setEnabledServices] = useState<string[]>([]);
-  const [selectedServiceType, setSelectedServiceType] = useState<string | null>(null);
+  const [providerServices, setProviderServices] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const pickLatestAvailabilityEntry = (raw: any): any | null => {
+    const entries: any[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    if (entries.length === 0) return null;
+    let best = entries[0];
+    let bestTs = Number.isFinite(Date.parse(String(best?.updatedAt || ''))) ? Date.parse(String(best.updatedAt)) : -Infinity;
+    for (const e of entries.slice(1)) {
+      const ts = Number.isFinite(Date.parse(String(e?.updatedAt || ''))) ? Date.parse(String(e.updatedAt)) : -Infinity;
+      if (ts > bestTs) {
+        best = e;
+        bestTs = ts;
+      }
+    }
+    return best || null;
+  };
 
   // Get current provider's user ID on mount
   useEffect(() => {
@@ -33,34 +47,22 @@ export default function AvailabilityManagementClient() {
       }
       setProviderId(userId);
       const servicesResult = await getCurrentUserEnabledServices();
-      if (servicesResult?.services?.length) {
-        setEnabledServices(servicesResult.services);
-        const initialService = servicesResult.services[0];
-        setSelectedServiceType((prev) => prev ?? initialService);
-        await loadAvailability(initialService);
-        setLoading(false);
-        return;
-      }
+      const nextServices = Array.isArray(servicesResult?.services) ? servicesResult.services : [];
+      setProviderServices(nextServices);
+      await loadAvailability();
       setLoading(false);
     };
     fetchProviderId();
   }, []);
 
-  const loadAvailability = async (serviceTypeOverride?: string) => {
-    const st0 = serviceTypeOverride || selectedServiceType;
-    const st =
-      st0 === 'test_prep'
-        ? 'tutoring'
-        : st0 === 'virtual_tour'
-          ? 'college_counseling'
-          : st0;
-    if (!st) return;
+  const loadAvailability = async () => {
     try {
-      const params = new URLSearchParams({ serviceType: st });
-      const response = await fetch(`/api/availability?${params.toString()}`);
+      // Load provider availability once (single weekly schedule) and pick the most recently updated entry.
+      const response = await fetch('/api/availability');
       if (response.ok) {
         const data = await response.json();
-        const entry = data?.availability as any;
+        const entry = pickLatestAvailabilityEntry(data?.availability);
+        if (!entry) return;
         const daysPayload: DayAvailability[] | null = Array.isArray(entry?.days) ? (entry.days as DayAvailability[]) : null;
         const blocksPayload: Array<{ dayOfWeek: number; startMinutes: number; endMinutes: number }> | null =
           Array.isArray(entry?.blocks) ? (entry.blocks as any) : null;
@@ -98,13 +100,6 @@ export default function AvailabilityManagementClient() {
       console.error('Error loading availability:', error);
     }
   };
-
-  // Refetch when serviceType changes (only re-init from API on refetch).
-  useEffect(() => {
-    if (!providerId || !selectedServiceType) return;
-    loadAvailability(selectedServiceType);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providerId, selectedServiceType]);
 
   // Convert minutes since midnight to HH:MM format
   const minutesToTime = (minutes: number): string => {
@@ -198,8 +193,9 @@ export default function AvailabilityManagementClient() {
       setSaveMessage({ type: 'error', text: 'Provider ID not found. Please refresh the page.' });
       return;
     }
-    if (!selectedServiceType) {
-      setSaveMessage({ type: 'error', text: 'Please select a service type before saving.' });
+    const serviceTypes = Array.isArray(providerServices) ? providerServices : [];
+    if (serviceTypes.length === 0) {
+      setSaveMessage({ type: 'error', text: 'No services found on your profile. Please add a service before saving availability.' });
       return;
     }
 
@@ -231,20 +227,12 @@ export default function AvailabilityManagementClient() {
         };
       });
 
-      const apiServiceType =
-        selectedServiceType === 'test_prep'
-          ? 'tutoring'
-          : selectedServiceType === 'virtual_tour'
-            ? 'college_counseling'
-            : selectedServiceType;
-      const serviceTypes = enabledServices.length > 0 ? enabledServices : [selectedServiceType];
       const response = await fetch('/api/availability', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          serviceType: apiServiceType,
           serviceTypes,
           days,
           timezone: 'America/New_York',
@@ -291,25 +279,9 @@ export default function AvailabilityManagementClient() {
         <div>
           <h2 className="text-xl font-semibold text-gray-900">Weekly Availability</h2>
           <p className="mt-1 text-sm text-gray-500">
-            Set your available days and times. You can add multiple time slots per day.
+            Set your available days and times. This schedule applies to all of your services.
           </p>
         </div>
-        {enabledServices.length > 0 && (
-          <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-gray-700">Service</label>
-            <select
-              value={selectedServiceType || ''}
-              onChange={(e) => setSelectedServiceType(e.target.value || null)}
-              className="rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] text-sm py-2 px-3"
-            >
-              {enabledServices.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
         <button
           type="button"
           onClick={handleSave}
