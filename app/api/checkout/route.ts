@@ -120,14 +120,24 @@ export async function POST(request: NextRequest) {
 
     // Canonical service type (paid booking services)
     const normalizedService = String(serviceRaw || '').trim().toLowerCase().replace(/-/g, '_');
+    const serviceType = normalizedService;
+    let normalizedServiceType = serviceType;
+    if (serviceType === 'virtual_tour') {
+      normalizedServiceType = 'college_counseling';
+    }
+    console.log('[CHECKOUT_DEBUG]', {
+      originalServiceType: serviceType,
+      normalizedServiceType,
+    });
+
     const canonicalServiceType: PricingServiceType | null =
-      normalizedService === 'tutoring'
+      normalizedServiceType === 'tutoring'
         ? 'tutoring'
-        : normalizedService === 'college_counseling' || normalizedService === 'counseling'
+        : normalizedServiceType === 'college_counseling' || normalizedServiceType === 'counseling'
           ? 'counseling'
-          : normalizedService === 'virtual_tour' || normalizedService === 'virtual_tours'
+          : normalizedServiceType === 'virtual_tour' || normalizedServiceType === 'virtual_tours'
             ? 'virtual_tour'
-            : normalizedService === 'test_prep' || normalizedService === 'testprep'
+            : normalizedServiceType === 'test_prep' || normalizedServiceType === 'testprep'
               ? 'test_prep'
               : null;
 
@@ -144,7 +154,7 @@ export async function POST(request: NextRequest) {
     const schoolName = String(schoolNameRaw || '').trim();
 
     // SAFETY: Prevent bypass for virtual tours — must not allow booking attempts for schools with 0 providers.
-    if (canonicalServiceType === 'virtual_tour') {
+    if (serviceType === 'virtual_tour') {
       if (!schoolId) {
         return NextResponse.json({ error: 'School ID is required for virtual tours' }, { status: 400 });
       }
@@ -300,7 +310,7 @@ export async function POST(request: NextRequest) {
         return {
           studentId,
           providerId,
-          serviceType: canonicalServiceType,
+          serviceType: normalizedServiceType,
           subject: canonicalServiceType === 'tutoring' || canonicalServiceType === 'test_prep' ? subject : '',
           school: canonicalServiceType === 'counseling' ? schoolName : '',
           schoolId: schoolId || undefined,
@@ -439,7 +449,7 @@ export async function POST(request: NextRequest) {
       createdAt: new Date().toISOString(),
       studentId,
       providerId,
-      serviceType: canonicalServiceType,
+      serviceType: normalizedServiceType,
       plan: pricingPlan,
       sessionTimes: sessionPayloads.map((p: any) => ({
         scheduledStart: String(p?.scheduledStart || ''),
@@ -524,11 +534,11 @@ export async function POST(request: NextRequest) {
           customer_email: user.email,
           success_url: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${baseUrl}/dashboard/book/summary?canceled=true`,
-          client_reference_id: `ivyway|${canonicalServiceType}|${studentId}|${providerId}|${String(single?.scheduledStart || '')}|${String(single?.scheduledEnd || '')}|${checkoutBookingId}`.slice(0, 500),
+          client_reference_id: `ivyway|${normalizedServiceType}|${studentId}|${providerId}|${String(single?.scheduledStart || '')}|${String(single?.scheduledEnd || '')}|${checkoutBookingId}`.slice(0, 500),
           metadata: {
             // Keep Stripe metadata minimal; webhook primarily uses client_reference_id + checkout store.
-            serviceType: canonicalServiceType,
-            service_type: canonicalServiceType,
+            serviceType: normalizedServiceType,
+            service_type: normalizedServiceType,
             studentId,
             providerId,
             checkoutBookingId,
