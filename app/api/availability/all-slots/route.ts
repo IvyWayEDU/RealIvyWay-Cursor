@@ -9,6 +9,7 @@ import { normalizeSubjectId } from '@/lib/models/subjects';
 import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiting/index';
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 import { getNYDateKey } from '@/lib/booking/nyDate';
+import { normalizeSchoolName } from '@/lib/availability/normalizeSchoolName';
 
 function normalizeSubject(s: unknown): string | null {
   if (!s) return null;
@@ -145,6 +146,10 @@ export async function GET(req: NextRequest) {
 
     const normalizedServiceType = normalizeServiceType(serviceType);
     const requestedService = String(normalizedServiceType || '').trim();
+    let normalizedRequestedService = requestedService;
+    if (requestedService === 'virtual_tour') {
+      normalizedRequestedService = 'college_counseling';
+    }
     // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
     const availabilityServiceType =
       normalizedServiceType === 'virtual_tour'
@@ -201,6 +206,8 @@ export async function GET(req: NextRequest) {
     const requestedSchoolId = String(schoolId || '').trim();
     const requestedSchoolName = String(schoolName || '').trim();
     const requestedLanguageRaw = String(language || '').trim();
+    const requestedSchool = requestedSchoolName;
+    const requestedSchoolNorm = normalizeSchoolName(requestedSchool);
 
     const providersAll = (providerRows ?? [])
       .map((r: any) => {
@@ -261,6 +268,27 @@ export async function GET(req: NextRequest) {
 
         const providerSchoolName = schoolNames.length > 0 ? String(schoolNames[0] || '').trim() || null : null;
 
+        const providerSchoolField =
+          typeof (data as any)?.school === 'string'
+            ? 'school'
+            : typeof (data as any)?.college === 'string'
+              ? 'college'
+              : typeof (data as any)?.university === 'string'
+                ? 'university'
+                : typeof (data as any)?.school_name === 'string'
+                  ? 'school_name'
+                  : '';
+        const providerSchool =
+          typeof (data as any)?.school === 'string'
+            ? String((data as any).school)
+            : typeof (data as any)?.college === 'string'
+              ? String((data as any).college)
+              : typeof (data as any)?.university === 'string'
+                ? String((data as any).university)
+                : typeof (data as any)?.school_name === 'string'
+                  ? String((data as any).school_name)
+                  : '';
+
         return {
           id,
           providerId: id,
@@ -275,6 +303,8 @@ export async function GET(req: NextRequest) {
           services,
           offersVirtualTours,
           languages: providerLanguages,
+          providerSchool,
+          providerSchoolField,
         };
       })
       .filter(Boolean) as Array<{
@@ -291,14 +321,40 @@ export async function GET(req: NextRequest) {
       services: string[];
       offersVirtualTours: boolean;
       languages: string[];
+      providerSchool: string;
+      providerSchoolField: string;
     }>;
 
     const matchesSchoolStrict = (p: (typeof providersAll)[number]) => {
       // If no school is provided, don't filter.
       if (!requestedSchoolId && !requestedSchoolName) return true;
-      if (requestedSchoolId) {
-        return p.schoolIds.some((id) => String(id || '').trim() === requestedSchoolId);
+      // Virtual tours + college counseling use normalized school-name equality only (source-of-truth: provider.data.school).
+      if (normalizedServiceType === 'virtual_tour' || normalizedServiceType === 'college_counseling') {
+        const providerSchool = String(p?.providerSchool || '').trim();
+        const providerSchoolNorm = normalizeSchoolName(providerSchool);
+        const isSchoolMatch =
+          requestedSchoolNorm.length > 0 &&
+          providerSchoolNorm.length > 0 &&
+          requestedSchoolNorm === providerSchoolNorm;
+
+        console.log('[VIRTUAL_TOUR_SCHOOL_DEBUG]', {
+          requestedService,
+          normalizedRequestedService,
+          requestedSchool,
+          requestedSchoolNorm,
+          providerId: p.id,
+          providerSchool,
+          providerSchoolNorm,
+          isSchoolMatch,
+          providerServices: (p as any)?.data?.services || [],
+          providerSchoolField: (p as any)?.providerSchoolField || '',
+        });
+
+        return isSchoolMatch;
       }
+
+      // Legacy strict school match (by id or raw name) for other services.
+      if (requestedSchoolId) return p.schoolIds.some((id) => String(id || '').trim() === requestedSchoolId);
       const target = requestedSchoolName.toLowerCase();
       return p.schoolNames.some((n) => String(n || '').trim().toLowerCase() === target);
     };
@@ -306,7 +362,13 @@ export async function GET(req: NextRequest) {
     const matchesServiceType = (p: (typeof providersAll)[number]) => {
       // Service filtering is strict: provider must offer the requested service (or an allowed equivalent).
       if (normalizedServiceType === 'virtual_tour') {
-        return p.offersVirtualTours === true || p.services.includes('virtual_tour');
+        // Virtual tours can be offered via virtual_tour OR college_counseling services (current internal mapping).
+        return (
+          p.offersVirtualTours === true ||
+          p.services.includes('virtual_tour') ||
+          p.services.includes('college_counseling') ||
+          p.services.includes('counseling')
+        );
       }
       if (normalizedServiceType === 'college_counseling') {
         return (
@@ -342,8 +404,14 @@ export async function GET(req: NextRequest) {
         providerCandidates = schoolMatched;
         noSchoolMatch = false;
       } else {
-        providerCandidates = baseCandidates;
-        noSchoolMatch = true;
+        // Virtual tours: if no school match, DO NOT fall back.
+        if (normalizedServiceType === 'virtual_tour') {
+          providerCandidates = [];
+          noSchoolMatch = true;
+        } else {
+          providerCandidates = baseCandidates;
+          noSchoolMatch = true;
+        }
       }
     }
 
@@ -351,16 +419,34 @@ export async function GET(req: NextRequest) {
     // Do not refactor existing matching; this only narrows candidates.
     providerCandidates = providerCandidates.filter((provider) => {
       const services = Array.isArray(provider?.data?.services)
-        ? provider.data.services.map((s: any) => String(s).trim())
+        ? provider.data.services
+            .map((s: any) => String(s).trim())
+            .map(norm)
+            .filter(Boolean)
         : [];
 
       console.log('[BOOKING_SERVICE_FILTER]', {
         providerId: provider.id,
         requestedService,
+        normalizedRequestedService,
         providerServices: services,
       });
 
-      return services.includes(requestedService);
+      // Virtual tours: allow providers that advertise either virtual_tour or college_counseling.
+      if (requestedService === 'virtual_tour') {
+        return (
+          services.includes('virtual_tour') ||
+          services.includes('college_counseling') ||
+          services.includes('counseling')
+        );
+      }
+
+      // College counseling: accept legacy 'counseling' too.
+      if (requestedService === 'college_counseling') {
+        return services.includes('college_counseling') || services.includes('counseling') || services.includes('virtual_tour');
+      }
+
+      return services.includes(normalizedRequestedService);
     });
 
     const explicitProviderId = String(providerId || '').trim();

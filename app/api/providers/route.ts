@@ -8,6 +8,7 @@ import { ProviderProfile } from '@/lib/models/types';
 import { handleApiError } from '@/lib/errorHandler';
 import crypto from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { normalizeSchoolName } from '@/lib/availability/normalizeSchoolName';
 
 export async function GET(request: NextRequest) {
   try {
@@ -21,6 +22,13 @@ export async function GET(request: NextRequest) {
     const serviceTypeRaw = String(searchParams.get('serviceType') || '').trim().toLowerCase().replace(/-/g, '_');
     const schoolId = String(searchParams.get('schoolId') || '').trim();
     const schoolName = String(searchParams.get('schoolName') || '').trim();
+    const requestedService = serviceTypeRaw;
+    let normalizedRequestedService = requestedService;
+    if (requestedService === 'virtual_tour') {
+      normalizedRequestedService = 'college_counseling';
+    }
+    const requestedSchool = schoolName;
+    const requestedSchoolNorm = normalizeSchoolName(requestedSchool);
 
     if (serviceTypeRaw || schoolId) {
       const supabase = getSupabaseAdmin();
@@ -36,23 +44,55 @@ export async function GET(request: NextRequest) {
           if (!id) return null;
           const servicesRaw: unknown = (data as any)?.services;
           const services = Array.isArray(servicesRaw) ? servicesRaw.map(norm).filter(Boolean) : [];
-          const school_id = typeof (data as any)?.schoolId === 'string' ? String((data as any).schoolId).trim() : (typeof (data as any)?.school_id === 'string' ? String((data as any).school_id).trim() : '');
-          const school_name =
+
+          const school_id =
+            typeof (data as any)?.schoolId === 'string'
+              ? String((data as any).schoolId).trim()
+              : typeof (data as any)?.school_id === 'string'
+                ? String((data as any).school_id).trim()
+                : '';
+
+          const providerSchoolField =
             typeof (data as any)?.school === 'string'
-              ? String((data as any).school).trim()
-              : (typeof (data as any)?.school_name === 'string' ? String((data as any).school_name).trim() : '');
+              ? 'school'
+              : typeof (data as any)?.college === 'string'
+                ? 'college'
+                : typeof (data as any)?.university === 'string'
+                  ? 'university'
+                  : typeof (data as any)?.school_name === 'string'
+                    ? 'school_name'
+                    : '';
+          const providerSchool =
+            typeof (data as any)?.school === 'string'
+              ? String((data as any).school)
+              : typeof (data as any)?.college === 'string'
+                ? String((data as any).college)
+                : typeof (data as any)?.university === 'string'
+                  ? String((data as any).university)
+                  : typeof (data as any)?.school_name === 'string'
+                    ? String((data as any).school_name)
+                    : '';
+
           const offersVirtualTours = (data as any)?.offersVirtualTours === true || services.includes('virtual_tour');
-          return { id, data, services, school_id: school_id || undefined, school_name: school_name || undefined, offersVirtualTours };
+          return { id, data, services, school_id: school_id || undefined, providerSchool, providerSchoolField, offersVirtualTours };
         })
         .filter(Boolean) as any[];
 
       const matchesServiceType = (p: any) => {
         if (!serviceTypeRaw) return true;
         if (serviceTypeRaw === 'virtual_tour' || serviceTypeRaw === 'virtual_tours') {
-          return p?.offersVirtualTours === true || (Array.isArray(p?.services) && p.services.includes('virtual_tour'));
+          // Virtual tours can be offered via virtual_tour OR college_counseling (current internal mapping).
+          return (
+            p?.offersVirtualTours === true ||
+            (Array.isArray(p?.services) &&
+              (p.services.includes('virtual_tour') || p.services.includes('college_counseling') || p.services.includes('counseling')))
+          );
         }
         if (serviceTypeRaw === 'college_counseling' || serviceTypeRaw === 'counseling') {
-          return Array.isArray(p?.services) && (p.services.includes('college_counseling') || p.services.includes('counseling'));
+          return (
+            Array.isArray(p?.services) &&
+            (p.services.includes('college_counseling') || p.services.includes('counseling') || p.services.includes('virtual_tour'))
+          );
         }
         return Array.isArray(p?.services) && p.services.includes(serviceTypeRaw);
       };
@@ -61,8 +101,34 @@ export async function GET(request: NextRequest) {
         if (!schoolId && !schoolName) return true;
         // College counseling: school match is preference-only (ordering + messaging), never a hard filter.
         if (serviceTypeRaw === 'college_counseling' || serviceTypeRaw === 'counseling') return true;
+        if (serviceTypeRaw === 'virtual_tour' || serviceTypeRaw === 'virtual_tours') {
+          // Virtual tours: strict normalized school-name equality only.
+          const providerSchool = String(p?.providerSchool || '').trim();
+          const providerSchoolNorm = normalizeSchoolName(providerSchool);
+          const isSchoolMatch =
+            requestedSchoolNorm.length > 0 &&
+            providerSchoolNorm.length > 0 &&
+            requestedSchoolNorm === providerSchoolNorm;
+
+          console.log('[VIRTUAL_TOUR_SCHOOL_DEBUG]', {
+            requestedService,
+            normalizedRequestedService,
+            requestedSchool,
+            requestedSchoolNorm,
+            providerId: String(p?.id || ''),
+            providerSchool,
+            providerSchoolNorm,
+            isSchoolMatch,
+            providerServices: (p as any)?.data?.services || [],
+            providerSchoolField: String(p?.providerSchoolField || ''),
+          });
+
+          return isSchoolMatch;
+        }
+
+        // Legacy strict matching for other services.
         const primaryId = String(p?.school_id || '').trim();
-        const primaryName = String(p?.school_name || '').trim();
+        const primaryName = String(p?.providerSchool || '').trim();
         if (schoolId) return !!primaryId && primaryId === schoolId;
         if (schoolName) return !!primaryName && primaryName.toLowerCase() === schoolName.toLowerCase();
         return true;
@@ -74,20 +140,20 @@ export async function GET(request: NextRequest) {
         serviceTypeRaw === 'college_counseling' || serviceTypeRaw === 'counseling'
           ? filteredBase
               .map((p: any) => {
-                const providerSchoolId = String(p?.school_id || '').trim();
                 const providerName =
                   typeof p?.data?.displayName === 'string' && p.data.displayName.trim()
                     ? p.data.displayName.trim()
                     : 'Provider';
                 const providerSchoolName =
-                  typeof p?.school_name === 'string' && p.school_name.trim() ? p.school_name.trim() : null;
+                  typeof p?.providerSchool === 'string' && p.providerSchool.trim() ? p.providerSchool.trim() : null;
                 return {
                   id: String(p?.id || ''),
                   providerName,
                   providerSchoolName,
                   matchesRequestedSchool:
-                    (!!schoolId && !!providerSchoolId && providerSchoolId === schoolId) ||
-                    (!!schoolName && !!providerSchoolName && providerSchoolName.toLowerCase() === schoolName.toLowerCase()),
+                    requestedSchoolNorm.length > 0 &&
+                    normalizeSchoolName(providerSchoolName || '').length > 0 &&
+                    normalizeSchoolName(providerSchoolName || '') === requestedSchoolNorm,
                 };
               })
               .sort((a: any, b: any) => {
@@ -99,7 +165,7 @@ export async function GET(request: NextRequest) {
           : filteredBase.map((p: any) => ({
               id: String(p?.id || ''),
               school_id: p.school_id,
-              school_name: p.school_name,
+              school_name: typeof p?.providerSchool === 'string' && p.providerSchool.trim() ? p.providerSchool.trim() : undefined,
               offersVirtualTours: p.offersVirtualTours === true,
               services: Array.isArray(p?.services) ? p.services : undefined,
             }));
