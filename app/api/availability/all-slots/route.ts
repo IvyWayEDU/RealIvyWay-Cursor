@@ -144,6 +144,7 @@ export async function GET(req: NextRequest) {
     const { date, serviceType, subject, language, schoolId, schoolName, providerId, debugOnlyProviderFilter } = parsed.data;
 
     const normalizedServiceType = normalizeServiceType(serviceType);
+    const requestedService = String(normalizedServiceType || '').trim();
     // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
     const availabilityServiceType =
       normalizedServiceType === 'virtual_tour'
@@ -345,6 +346,22 @@ export async function GET(req: NextRequest) {
         noSchoolMatch = true;
       }
     }
+
+    // Defensive guard: ensure provider truly offers the requested service (based on provider.data.services).
+    // Do not refactor existing matching; this only narrows candidates.
+    providerCandidates = providerCandidates.filter((provider) => {
+      const services = Array.isArray(provider?.data?.services)
+        ? provider.data.services.map((s: any) => String(s).trim())
+        : [];
+
+      console.log('[BOOKING_SERVICE_FILTER]', {
+        providerId: provider.id,
+        requestedService,
+        providerServices: services,
+      });
+
+      return services.includes(requestedService);
+    });
 
     const explicitProviderId = String(providerId || '').trim();
 
