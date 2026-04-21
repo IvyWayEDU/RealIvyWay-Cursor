@@ -7,6 +7,11 @@ type StoredSessionTime = { scheduledStart: string; scheduledEnd: string };
 export type CheckoutBookingRecord = {
   id: string;
   createdAt: string;
+  /**
+   * Retry/idempotency key used by /api/checkout to safely reuse an in-flight checkout.
+   * Stored in JSON only (no schema change required).
+   */
+  idempotencyKey?: string | null;
   studentId: string;
   providerId: string;
   serviceType: string;
@@ -66,6 +71,10 @@ export async function readCheckoutBookingRecord(id: string): Promise<CheckoutBoo
   return {
     id: String(found.id),
     createdAt: typeof found.createdAt === 'string' ? found.createdAt : new Date().toISOString(),
+    idempotencyKey:
+      typeof (found as any)?.idempotencyKey === 'string' && String((found as any).idempotencyKey).trim()
+        ? String((found as any).idempotencyKey).trim()
+        : null,
     studentId: typeof found.studentId === 'string' ? found.studentId : '',
     providerId: typeof found.providerId === 'string' ? found.providerId : '',
     serviceType: typeof found.serviceType === 'string' ? found.serviceType : '',

@@ -4,7 +4,6 @@ import crypto from 'crypto';
 import { getAuthContext } from '@/lib/auth/session';
 import { getUserById, getUsers } from '@/lib/auth/storage';
 import { reserveSlotsAtomically, unreserveSlotsAtomically } from '@/lib/availability/store.server';
-import { getSessions } from '@/lib/sessions/storage';
 import { getSessionPricingCents, ServiceType as PricingServiceType, Plan as PricingPlan } from '@/lib/pricing/catalog';
 import {
   debugLogStripePriceIdMapKeysOnce,
@@ -20,6 +19,7 @@ import {
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { assertNoStudentDoubleBooking, DOUBLE_BOOKING_MESSAGE, DoubleBookingError } from '@/lib/sessions/doubleBooking.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -74,6 +74,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
     const bookingState = body?.bookingState;
+    const bodyIdempotencyKey =
+      typeof body?.idempotencyKey === 'string' && String(body.idempotencyKey).trim()
+        ? String(body.idempotencyKey).trim()
+        : '';
 
     // Production safety: avoid logging full request payload (can contain PII).
     if (stripeDebug) {
@@ -448,29 +452,131 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Prevent duplicate bookings (existing session already created)
-    const existing = await getSessions();
-    const isActive = (status: any) => typeof status === 'string' && !status.startsWith('cancelled');
-    const hasExistingSession = sessionPayloads.some((p) => {
-      const scheduledStart = String(p.scheduledStart || '');
-      const scheduledEnd = String(p.scheduledEnd || '');
-      return existing.some((s: any) => {
-        const sStart = s?.scheduledStartTime || s?.scheduledStart;
-        const sEnd = s?.scheduledEndTime || s?.scheduledEnd;
-        return (
-          s?.providerId === providerId &&
-          sStart === scheduledStart &&
-          sEnd === scheduledEnd &&
-          isActive(s?.status)
-        );
-      });
-    });
+    const TEN_MIN_MS = 10 * 60 * 1000;
+    const firstSlotStartTime = String((sessionPayloads?.[0] as any)?.scheduledStart || '').trim();
+    const idempotencyKey =
+      bodyIdempotencyKey || `${providerId}_${firstSlotStartTime}_${normalizedPricingServiceType}`;
 
-    if (hasExistingSession) {
-      return NextResponse.json(
-        { error: 'This time slot is already booked' },
-        { status: 409 }
-      );
+    const supabase = getSupabaseAdmin();
+
+    const normalizeService = (raw: unknown): string => {
+      return String(raw || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s-]+/g, '_');
+    };
+
+    const isBookedSessionRow = (row: any): boolean => {
+      const status = typeof row?.status === 'string' ? String(row.status).trim().toLowerCase() : '';
+      const isPaid = row?.data?.isPaid === true || row?.data?.is_paid === true;
+      const isBooked = row?.data?.is_booked === true || row?.data?.isBooked === true;
+      return status === 'completed' || status === 'confirmed' || isPaid || isBooked;
+    };
+
+    // PART 2/3/4/6: check for existing recent session before proceeding (retry-safe).
+    // We only block TRUE duplicates (already booked/paid/completed).
+    for (const p of sessionPayloads as any[]) {
+      const startTime = String(p?.scheduledStart || '').trim();
+      const endTime = String(p?.scheduledEnd || '').trim();
+      if (!startTime || !endTime) continue;
+
+      const { data: existingSession } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('provider_id', providerId)
+        .eq('datetime', startTime)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const existingServiceType =
+        existingSession?.data?.serviceType ??
+        existingSession?.data?.service_type ??
+        existingSession?.data?.serviceTypeId ??
+        null;
+      const matchesServiceType =
+        existingSession ? normalizeService(existingServiceType) === normalizeService(normalizedAvailabilityServiceType) : false;
+
+      const isRecent =
+        !!existingSession &&
+        matchesServiceType &&
+        new Date(String(existingSession.created_at || '')).getTime() > Date.now() - TEN_MIN_MS;
+
+      console.log('[CHECKOUT_RETRY_DEBUG]', {
+        providerId,
+        startTime,
+        existingSession: !!existingSession && matchesServiceType,
+        reused: isRecent,
+      });
+
+      if (existingSession && matchesServiceType) {
+        if (isBookedSessionRow(existingSession)) {
+          return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
+        }
+
+        if (isRecent) {
+          console.log('[CHECKOUT_RETRY_RECOVERED]', {
+            providerId,
+            startTime,
+            reusedSessionId: existingSession?.id,
+          });
+          // Continue checkout flow (retry-safe): do NOT fail 409 for a recent, non-booked session row.
+        }
+      }
+    }
+
+    // PART 1/5: idempotency via bookings table + Stripe session reuse.
+    // If the user hit "back" and retries, we prefer returning the same in-flight Stripe checkout.
+    const { data: existingBooking } = await supabase
+      .from('bookings')
+      .select('id, checkout_session_id, created_at, data')
+      .eq('data->>idempotencyKey', idempotencyKey)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const bookingMatches =
+      !!existingBooking &&
+      typeof (existingBooking as any)?.data === 'object' &&
+      String((existingBooking as any).data?.studentId || '') === studentId &&
+      String((existingBooking as any).data?.providerId || '') === providerId &&
+      normalizeService((existingBooking as any).data?.serviceType) === normalizeService(normalizedServiceType) &&
+      new Date(String((existingBooking as any).created_at || '')).getTime() > Date.now() - TEN_MIN_MS;
+
+    const existingCheckoutSessionId =
+      bookingMatches && typeof (existingBooking as any)?.checkout_session_id === 'string'
+        ? String((existingBooking as any).checkout_session_id).trim()
+        : '';
+
+    if (existingCheckoutSessionId) {
+      try {
+        const prev = await stripe.checkout.sessions.retrieve(existingCheckoutSessionId);
+        const prevStatus = typeof prev?.status === 'string' ? prev.status : '';
+        const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
+
+        if (prevPaid) {
+          return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
+        }
+
+        if (prev?.url) {
+          console.log('[CHECKOUT_RETRY_RECOVERED]', {
+            providerId,
+            startTime: firstSlotStartTime,
+            reusedSessionId: null,
+            reusedCheckoutSessionId: prev.id,
+            bookingId: (existingBooking as any)?.id,
+          });
+          return NextResponse.json({ sessionId: prev.id, url: prev.url });
+        }
+      } catch (e) {
+        // Non-blocking: if Stripe session can't be retrieved, proceed to create a new one.
+        console.warn('[CHECKOUT_RETRY_STRIPE_RETRIEVE_FAILED]', {
+          providerId,
+          startTime: firstSlotStartTime,
+          checkoutSessionId: existingCheckoutSessionId,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
 
     // Prevent students from double-booking overlapping sessions (across ALL services).
@@ -505,6 +611,25 @@ export async function POST(request: NextRequest) {
 
     const reserveResult = await reserveSlotsAtomically(slotsToReserve);
     if (!reserveResult.ok) {
+      // Retry recovery: if the slot is "reserved" by this user's in-flight checkout, reuse it.
+      if (existingCheckoutSessionId) {
+        try {
+          const prev = await stripe.checkout.sessions.retrieve(existingCheckoutSessionId);
+          const prevStatus = typeof prev?.status === 'string' ? prev.status : '';
+          const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
+          if (!prevPaid && prev?.url) {
+            console.log('[CHECKOUT_RETRY_RECOVERED]', {
+              providerId,
+              startTime: firstSlotStartTime,
+              reusedSessionId: null,
+              reusedCheckoutSessionId: prev.id,
+              bookingId: (existingBooking as any)?.id,
+            });
+            return NextResponse.json({ sessionId: prev.id, url: prev.url });
+          }
+        } catch {}
+      }
+
       return NextResponse.json(
         { error: 'This time slot was just booked by someone else. Please pick another time.' },
         { status: 409 }
@@ -519,6 +644,7 @@ export async function POST(request: NextRequest) {
     await writeCheckoutBookingRecord({
       id: checkoutBookingId,
       createdAt: new Date().toISOString(),
+      idempotencyKey,
       studentId,
       providerId,
       serviceType: normalizedServiceType,
@@ -587,7 +713,8 @@ export async function POST(request: NextRequest) {
             cancelUrl: `${baseUrl}/dashboard/book/summary?canceled=true`,
           });
         }
-        checkoutSession = await stripe.checkout.sessions.create({
+        checkoutSession = await stripe.checkout.sessions.create(
+          {
           payment_method_types: ['card'], // Cards are always enabled
           // Apple Pay, Google Pay, Cash App, Affirm, Klarna, Link, etc. are automatically
           // enabled by Stripe Checkout when available for the customer
@@ -614,6 +741,7 @@ export async function POST(request: NextRequest) {
             studentId,
             providerId,
             checkoutBookingId,
+            idempotencyKey: String(idempotencyKey || '').slice(0, 500),
             // Fallback for serverless runtimes where repo filesystem is read-only (e.g. Vercel):
             // webhook + /api/checkout-session can reconstruct bundle session times from metadata if needed.
             sessionsJson: sessionsJson.length <= 500 ? sessionsJson : '',
@@ -628,7 +756,9 @@ export async function POST(request: NextRequest) {
               request_three_d_secure: 'automatic',
             },
           },
-        });
+          },
+          { idempotencyKey }
+        );
 
         // Link the server-side booking record to the Stripe session id (for diagnostics + support tooling).
         try {
