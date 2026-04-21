@@ -130,30 +130,40 @@ export async function POST(request: NextRequest) {
     // Canonical service type (paid booking services)
     const normalizedService = String(serviceRaw || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     const serviceType = normalizedService;
-    normalizedServiceType = serviceType;
-    if (normalizedServiceType === 'virtual_tour' || normalizedServiceType === 'virtual_tours') {
-      normalizedServiceType = 'college_counseling';
-    }
-    console.log('[CHECKOUT_SERVICE_DEBUG]', {
-      originalServiceType: serviceType,
-      normalizedServiceType,
-    });
+    const originalServiceType = serviceType;
 
-    const canonicalServiceType: PricingServiceType | null =
-      normalizedServiceType === 'tutoring'
+    // Availability normalization (virtual tours reuse counseling availability/booking behavior).
+    let normalizedAvailabilityServiceType = serviceType;
+    if (serviceType === 'virtual_tour' || serviceType === 'virtual_tours') {
+      normalizedAvailabilityServiceType = 'college_counseling';
+    }
+
+    // Pricing normalization (IMPORTANT: virtual_tour must stay virtual_tour for pricing).
+    let normalizedPricingServiceType = serviceType;
+    if (normalizedPricingServiceType === 'virtual_tours') {
+      normalizedPricingServiceType = 'virtual_tour';
+    }
+
+    // Backwards-compatible variable used throughout booking/session logic.
+    normalizedServiceType = normalizedAvailabilityServiceType;
+
+    const canonicalPricingServiceType: PricingServiceType | null =
+      normalizedPricingServiceType === 'tutoring'
         ? 'tutoring'
-        : normalizedServiceType === 'college_counseling' || normalizedServiceType === 'counseling'
+        : normalizedPricingServiceType === 'college_counseling' || normalizedPricingServiceType === 'counseling'
           ? 'counseling'
-          : normalizedServiceType === 'virtual_tour' || normalizedServiceType === 'virtual_tours'
+          : normalizedPricingServiceType === 'virtual_tour' || normalizedPricingServiceType === 'virtual_tours'
             ? 'virtual_tour'
-            : normalizedServiceType === 'test_prep' || normalizedServiceType === 'testprep'
+            : normalizedPricingServiceType === 'test_prep' || normalizedPricingServiceType === 'testprep'
               ? 'test_prep'
               : null;
 
-    if (!canonicalServiceType) {
+    if (!canonicalPricingServiceType) {
       console.error('[CHECKOUT_400_DEBUG]', {
         body,
         normalizedServiceType,
+        normalizedAvailabilityServiceType,
+        normalizedPricingServiceType,
       });
       return NextResponse.json(
         { error: 'Unsupported service type for booking' },
@@ -193,13 +203,33 @@ export async function POST(request: NextRequest) {
           : 'single';
 
     // Counseling is 60 minutes only; duration selection is not allowed.
-    const duration_minutes: 60 | null = canonicalServiceType === 'counseling' ? 60 : null;
+    const duration_minutes: 60 | null = canonicalPricingServiceType === 'counseling' ? 60 : null;
 
     const pricing = getSessionPricingCents({
-      service_type: canonicalServiceType,
+      service_type: canonicalPricingServiceType,
       plan: pricingPlan,
       duration_minutes,
     });
+
+    const expectedPricingKey =
+      pricingPlan === 'single'
+        ? normalizedPricingServiceType === 'tutoring'
+          ? 'tutoring_single'
+          : normalizedPricingServiceType === 'college_counseling' || normalizedPricingServiceType === 'counseling'
+            ? 'counseling_single'
+            : normalizedPricingServiceType === 'virtual_tour' || normalizedPricingServiceType === 'virtual_tours'
+              ? 'virtual_tour_single'
+              : pricing.pricing_key
+        : pricing.pricing_key;
+
+    console.log('[CHECKOUT_SERVICE_SPLIT_DEBUG]', {
+      originalServiceType,
+      normalizedAvailabilityServiceType,
+      normalizedPricingServiceType,
+      pricingKeyInput,
+      expectedPricingKey,
+    });
+
     if (stripeDebug) {
       console.log('CHECKOUT resolved pricing object:', pricing);
       console.log('CHECKOUT pricingKeyInput vs server pricing_key:', {
@@ -209,20 +239,24 @@ export async function POST(request: NextRequest) {
     }
 
     // Client provides pricingKey for validation/debugging only; server pricing is authoritative.
-    if (pricingKeyInput !== pricing.pricing_key) {
-      if (normalizedServiceType === 'college_counseling') {
+    if (pricingKeyInput !== expectedPricingKey) {
+      if (normalizedPricingServiceType === 'college_counseling' || normalizedPricingServiceType === 'counseling') {
         console.warn('[CHECKOUT_PRICING_KEY_MISMATCH_NONBLOCKING]', {
           pricingKeyInput,
-          expectedPricingKey: pricing.pricing_key,
+          expectedPricingKey,
           normalizedServiceType,
+          normalizedAvailabilityServiceType,
+          normalizedPricingServiceType,
         });
       } else {
         console.error('[CHECKOUT_400_DEBUG]', {
           body,
           normalizedServiceType,
+          normalizedAvailabilityServiceType,
+          normalizedPricingServiceType,
         });
         return NextResponse.json(
-          { error: `Invalid pricingKey (expected "${pricing.pricing_key}")` },
+          { error: `Invalid pricingKey (expected "${expectedPricingKey}")` },
           { status: 400 }
         );
       }
@@ -321,8 +355,8 @@ export async function POST(request: NextRequest) {
           studentId,
           providerId,
           serviceType: normalizedServiceType,
-          subject: canonicalServiceType === 'tutoring' || canonicalServiceType === 'test_prep' ? subject : '',
-          school: canonicalServiceType === 'counseling' ? schoolName : '',
+          subject: normalizedAvailabilityServiceType === 'tutoring' || normalizedAvailabilityServiceType === 'test_prep' ? subject : '',
+          school: normalizedAvailabilityServiceType === 'college_counseling' ? schoolName : '',
           schoolId: schoolId || undefined,
           scheduledStart: startEnd.start,
           scheduledEnd: startEnd.end,
@@ -493,10 +527,10 @@ export async function POST(request: NextRequest) {
         scheduledStart: String(p?.scheduledStart || ''),
         scheduledEnd: String(p?.scheduledEnd || ''),
       })),
-      subject: canonicalServiceType === 'tutoring' || canonicalServiceType === 'test_prep' ? (subject || null) : null,
-      topic: canonicalServiceType === 'tutoring' || canonicalServiceType === 'test_prep' ? (topic || null) : null,
-      schoolId: canonicalServiceType === 'counseling' || canonicalServiceType === 'virtual_tour' ? (schoolId || null) : null,
-      schoolName: canonicalServiceType === 'counseling' || canonicalServiceType === 'virtual_tour' ? (schoolName || null) : null,
+      subject: normalizedAvailabilityServiceType === 'tutoring' || normalizedAvailabilityServiceType === 'test_prep' ? (subject || null) : null,
+      topic: normalizedAvailabilityServiceType === 'tutoring' || normalizedAvailabilityServiceType === 'test_prep' ? (topic || null) : null,
+      schoolId: normalizedAvailabilityServiceType === 'college_counseling' ? (schoolId || null) : null,
+      schoolName: normalizedAvailabilityServiceType === 'college_counseling' ? (schoolName || null) : null,
     });
     const sessionTimesForMetadata = sessionPayloads.map((p: any) => ({
       scheduledStart: String(p?.scheduledStart || ''),
