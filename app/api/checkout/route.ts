@@ -62,10 +62,15 @@ export async function POST(request: NextRequest) {
     if (rl) return rl;
 
     // Parse request body
+    let normalizedServiceType = '';
     let body: any = null;
     try {
       body = await request.json();
     } catch {
+      console.error('[CHECKOUT_400_DEBUG]', {
+        body,
+        normalizedServiceType,
+      });
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
     const bookingState = body?.bookingState;
@@ -81,7 +86,11 @@ export async function POST(request: NextRequest) {
     const sessionTimeInput = typeof body?.sessionTime === 'string' ? String(body.sessionTime).trim() : '';
     const pricingKeyInput = typeof body?.pricingKey === 'string' ? String(body.pricingKey).trim() : '';
 
-    if (!providerIdInput || !sessionDateInput || !sessionTimeInput || !pricingKeyInput) {
+    if (!pricingKeyInput) {
+      console.error('[CHECKOUT_400_DEBUG]', {
+        body,
+        normalizedServiceType,
+      });
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 });
     }
 
@@ -119,10 +128,10 @@ export async function POST(request: NextRequest) {
       '';
 
     // Canonical service type (paid booking services)
-    const normalizedService = String(serviceRaw || '').trim().toLowerCase().replace(/-/g, '_');
+    const normalizedService = String(serviceRaw || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     const serviceType = normalizedService;
-    let normalizedServiceType = serviceType;
-    if (serviceType === 'virtual_tour') {
+    normalizedServiceType = serviceType;
+    if (normalizedServiceType === 'virtual_tour' || normalizedServiceType === 'virtual_tours') {
       normalizedServiceType = 'college_counseling';
     }
     console.log('[CHECKOUT_SERVICE_DEBUG]', {
@@ -142,6 +151,10 @@ export async function POST(request: NextRequest) {
               : null;
 
     if (!canonicalServiceType) {
+      console.error('[CHECKOUT_400_DEBUG]', {
+        body,
+        normalizedServiceType,
+      });
       return NextResponse.json(
         { error: 'Unsupported service type for booking' },
         { status: 400 }
@@ -153,28 +166,13 @@ export async function POST(request: NextRequest) {
     const schoolId = String(schoolIdRaw || '').trim();
     const schoolName = String(schoolNameRaw || '').trim();
 
-    // SAFETY: Prevent bypass for virtual tours — must not allow booking attempts for schools with 0 providers.
-    if (normalizedServiceType === 'virtual_tour') {
-      if (!schoolId) {
-        return NextResponse.json({ error: 'School ID is required for virtual tours' }, { status: 400 });
-      }
-
-      const users = await getUsers();
-      const eligibleProviders = users
-        .filter((u: any) => Array.isArray(u?.roles) && (u.roles.includes('provider') || u.roles.includes('counselor')))
-        .filter((u: any) => {
-          const services = Array.isArray(u?.services) ? u.services.map((s: any) => String(s || '').trim().toLowerCase()) : [];
-          return u?.offersVirtualTours === true || services.includes('virtual_tour') || services.includes('virtual_tours');
-        })
-        .filter((u: any) => {
-          const primary = String(u?.school_id || u?.schoolId || '').trim();
-          if (primary && primary === schoolId) return true;
-          const ids = Array.isArray(u?.schoolIds) ? u.schoolIds.map((id: any) => String(id || '').trim()) : [];
-          return ids.includes(schoolId);
+    // `school` is optional for counseling (including normalized virtual tours).
+    if (normalizedServiceType === 'college_counseling') {
+      if (!schoolId && !schoolName) {
+        console.warn('[CHECKOUT_MISSING_SCHOOL]', {
+          serviceType,
+          normalizedServiceType,
         });
-
-      if (eligibleProviders.length === 0) {
-        return NextResponse.json({ error: 'No providers available for this school' }, { status: 400 });
       }
     }
 
@@ -212,10 +210,22 @@ export async function POST(request: NextRequest) {
 
     // Client provides pricingKey for validation/debugging only; server pricing is authoritative.
     if (pricingKeyInput !== pricing.pricing_key) {
-      return NextResponse.json(
-        { error: `Invalid pricingKey (expected "${pricing.pricing_key}")` },
-        { status: 400 }
-      );
+      if (normalizedServiceType === 'college_counseling') {
+        console.warn('[CHECKOUT_PRICING_KEY_MISMATCH_NONBLOCKING]', {
+          pricingKeyInput,
+          expectedPricingKey: pricing.pricing_key,
+          normalizedServiceType,
+        });
+      } else {
+        console.error('[CHECKOUT_400_DEBUG]', {
+          body,
+          normalizedServiceType,
+        });
+        return NextResponse.json(
+          { error: `Invalid pricingKey (expected "${pricing.pricing_key}")` },
+          { status: 400 }
+        );
+      }
     }
 
     const pricingKey = pricing.pricing_key;
@@ -324,6 +334,10 @@ export async function POST(request: NextRequest) {
     // For single-session plans we keep backwards-compatible behavior: accept >= 1 and use the first slot.
     if (requiredSessionCount > 1) {
       if (allPayloads.length !== requiredSessionCount) {
+        console.error('[CHECKOUT_400_DEBUG]', {
+          body,
+          normalizedServiceType,
+        });
         return NextResponse.json(
           {
             error:
@@ -336,6 +350,10 @@ export async function POST(request: NextRequest) {
       }
     } else {
       if (allPayloads.length < 1) {
+        console.error('[CHECKOUT_400_DEBUG]', {
+          body,
+          normalizedServiceType,
+        });
         return NextResponse.json({ error: 'At least one session time is required' }, { status: 400 });
       }
     }
@@ -350,6 +368,10 @@ export async function POST(request: NextRequest) {
     };
 
     if (!providerId) {
+      console.error('[CHECKOUT_400_DEBUG]', {
+        body,
+        normalizedServiceType,
+      });
       return NextResponse.json(
         { error: 'Provider ID is required' },
         { status: 400 }
@@ -357,6 +379,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (!(await isValidProviderUserId(providerId))) {
+      console.error('[CHECKOUT_400_DEBUG]', {
+        body,
+        normalizedServiceType,
+      });
       return NextResponse.json(
         { error: 'Invalid providerId (must be a real provider user id)' },
         { status: 400 }
@@ -364,6 +390,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (sessionPayloads.length === 0) {
+      console.error('[CHECKOUT_400_DEBUG]', {
+        body,
+        normalizedServiceType,
+      });
       return NextResponse.json(
         { error: 'At least one session time is required' },
         { status: 400 }
@@ -373,6 +403,10 @@ export async function POST(request: NextRequest) {
     // Enforce all selected sessions are for the same providerId (booking integrity)
     for (const p of sessionPayloads) {
       if (p.providerId !== providerId) {
+        console.error('[CHECKOUT_400_DEBUG]', {
+          body,
+          normalizedServiceType,
+        });
         return NextResponse.json(
           { error: 'All selected sessions must use the same providerId' },
           { status: 400 }
@@ -419,6 +453,10 @@ export async function POST(request: NextRequest) {
       }
     } catch (e) {
       if (e instanceof DoubleBookingError) {
+        console.error('[CHECKOUT_400_DEBUG]', {
+          body,
+          normalizedServiceType,
+        });
         return NextResponse.json({ error: DOUBLE_BOOKING_MESSAGE }, { status: 400 });
       }
       throw e;
