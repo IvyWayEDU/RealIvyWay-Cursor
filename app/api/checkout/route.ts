@@ -468,9 +468,15 @@ export async function POST(request: NextRequest) {
 
     const isBookedSessionRow = (row: any): boolean => {
       const status = typeof row?.status === 'string' ? String(row.status).trim().toLowerCase() : '';
-      const isPaid = row?.data?.isPaid === true || row?.data?.is_paid === true;
-      const isBooked = row?.data?.is_booked === true || row?.data?.isBooked === true;
-      return status === 'completed' || status === 'confirmed' || isPaid || isBooked;
+      const isPaid =
+        row?.isPaid === true ||
+        row?.data?.isPaid === true ||
+        row?.data?.is_paid === true ||
+        (typeof row?.paidAt === 'string' && String(row.paidAt).trim().length > 0) ||
+        (typeof row?.data?.paidAt === 'string' && String(row.data.paidAt).trim().length > 0);
+      // IMPORTANT: Do NOT treat legacy/auxiliary "is_booked" flags as a true paid/confirmed booking.
+      // True conflict is: completed/confirmed OR paid.
+      return status === 'completed' || status === 'confirmed' || isPaid;
     };
 
     // PART 2/3/4/6: check for existing recent session before proceeding (retry-safe).
@@ -511,6 +517,19 @@ export async function POST(request: NextRequest) {
 
       if (existingSession && matchesServiceType) {
         if (isBookedSessionRow(existingSession)) {
+          console.error('[CHECKOUT_409_PATH_A]', {
+            body,
+            providerId,
+            startTime,
+            normalizedPricingServiceType,
+            normalizedAvailabilityServiceType,
+          });
+          console.error('[CHECKOUT_TRUE_CONFLICT]', {
+            studentId,
+            providerId,
+            startTime,
+            existingRecord: existingSession,
+          });
           return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
         }
 
@@ -535,18 +554,116 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle();
 
+    const existingBookingData: any = (existingBooking as any)?.data && typeof (existingBooking as any).data === 'object'
+      ? (existingBooking as any).data
+      : null;
+    const existingBookingSessionTimes: Array<{ scheduledStart?: string; scheduledEnd?: string }> =
+      existingBookingData && Array.isArray(existingBookingData.sessionTimes) ? existingBookingData.sessionTimes : [];
+    const existingBookingHasStartTime =
+      existingBookingSessionTimes.some((t: any) => String(t?.scheduledStart || '').trim() === firstSlotStartTime);
+    const existingBookingServiceTypeNorm = normalizeService(existingBookingData?.serviceType);
     const bookingMatches =
-      !!existingBooking &&
-      typeof (existingBooking as any)?.data === 'object' &&
-      String((existingBooking as any).data?.studentId || '') === studentId &&
-      String((existingBooking as any).data?.providerId || '') === providerId &&
-      normalizeService((existingBooking as any).data?.serviceType) === normalizeService(normalizedServiceType) &&
-      new Date(String((existingBooking as any).created_at || '')).getTime() > Date.now() - TEN_MIN_MS;
+      !!existingBookingData &&
+      String(existingBookingData?.studentId || '').trim() === studentId &&
+      String(existingBookingData?.providerId || '').trim() === providerId &&
+      existingBookingHasStartTime &&
+      (
+        existingBookingServiceTypeNorm === normalizeService(normalizedServiceType) ||
+        existingBookingServiceTypeNorm === normalizeService(normalizedAvailabilityServiceType) ||
+        existingBookingServiceTypeNorm === normalizeService(normalizedPricingServiceType)
+      );
 
     const existingCheckoutSessionId =
       bookingMatches && typeof (existingBooking as any)?.checkout_session_id === 'string'
         ? String((existingBooking as any).checkout_session_id).trim()
         : '';
+
+    const refreshStaleBookingIfSafe = async (
+      reason: string
+    ): Promise<{ refreshed: true } | { refreshed: false } | { conflictResponse: NextResponse }> => {
+      if (!bookingMatches) return { refreshed: false };
+      const existingId = String((existingBooking as any)?.id || '').trim();
+      if (!existingId) return { refreshed: false };
+
+      console.log('[CHECKOUT_RETRY_ALLOWED]', {
+        studentId,
+        providerId,
+        startTime: firstSlotStartTime,
+        existingId,
+        action: 'reuse_or_refresh',
+      });
+
+      // Only refresh if we can confirm no paid/completed session exists for any of these times.
+      for (const t of existingBookingSessionTimes) {
+        const startTime = String((t as any)?.scheduledStart || '').trim();
+        if (!startTime) continue;
+        const { data: s } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('provider_id', providerId)
+          .eq('datetime', startTime)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const existingServiceType =
+          s?.data?.serviceType ??
+          s?.data?.service_type ??
+          s?.data?.serviceTypeId ??
+          null;
+        const matchesServiceType =
+          s ? normalizeService(existingServiceType) === normalizeService(normalizedAvailabilityServiceType) : false;
+        if (s && matchesServiceType && isBookedSessionRow(s)) {
+          console.error('[CHECKOUT_409_PATH_B]', {
+            body,
+            providerId,
+            startTime,
+            normalizedPricingServiceType,
+            normalizedAvailabilityServiceType,
+          });
+          console.error('[CHECKOUT_TRUE_CONFLICT]', {
+            studentId,
+            providerId,
+            startTime,
+            existingRecord: s,
+          });
+          return { conflictResponse: NextResponse.json({ error: 'Slot already booked' }, { status: 409 }) };
+        }
+      }
+
+      // Safe to refresh: release reserved inventory for these slot(s), delete the stale booking row, proceed cleanly.
+      try {
+        await unreserveSlotsAtomically(
+          existingBookingSessionTimes
+            .map((t) => ({
+              providerId,
+              startTime: String((t as any)?.scheduledStart || '').trim(),
+              endTime: String((t as any)?.scheduledEnd || '').trim(),
+            }))
+            .filter((s) => s.providerId && s.startTime && s.endTime)
+        );
+      } catch (e) {
+        console.warn('[CHECKOUT_RETRY_REFRESH_UNRESERVE_FAILED]', {
+          providerId,
+          startTime: firstSlotStartTime,
+          bookingId: existingId,
+          reason,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      try {
+        await deleteCheckoutBookingRecord(existingId);
+      } catch (e) {
+        console.warn('[CHECKOUT_RETRY_REFRESH_DELETE_BOOKING_FAILED]', {
+          providerId,
+          startTime: firstSlotStartTime,
+          bookingId: existingId,
+          reason,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+      return { refreshed: true };
+    };
 
     if (existingCheckoutSessionId) {
       try {
@@ -555,10 +672,33 @@ export async function POST(request: NextRequest) {
         const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
 
         if (prevPaid) {
+          console.error('[CHECKOUT_409_PATH_C]', {
+            body,
+            providerId,
+            startTime: firstSlotStartTime,
+            normalizedPricingServiceType,
+            normalizedAvailabilityServiceType,
+          });
+          console.error('[CHECKOUT_TRUE_CONFLICT]', {
+            studentId,
+            providerId,
+            startTime: firstSlotStartTime,
+            existingRecord: {
+              booking: existingBooking,
+              stripe: { id: prev?.id, status: prevStatus, payment_status: prev?.payment_status },
+            },
+          });
           return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
         }
 
         if (prev?.url) {
+          console.log('[CHECKOUT_RETRY_ALLOWED]', {
+            studentId,
+            providerId,
+            startTime: firstSlotStartTime,
+            existingId: (existingBooking as any)?.id,
+            action: 'reuse_or_refresh',
+          });
           console.log('[CHECKOUT_RETRY_RECOVERED]', {
             providerId,
             startTime: firstSlotStartTime,
@@ -568,6 +708,10 @@ export async function POST(request: NextRequest) {
           });
           return NextResponse.json({ sessionId: prev.id, url: prev.url });
         }
+
+        // Stripe session exists but can't be reused (no URL, expired, etc). Refresh safely.
+        const refresh = await refreshStaleBookingIfSafe('stripe_session_not_reusable');
+        if (refresh && 'conflictResponse' in refresh) return refresh.conflictResponse;
       } catch (e) {
         // Non-blocking: if Stripe session can't be retrieved, proceed to create a new one.
         console.warn('[CHECKOUT_RETRY_STRIPE_RETRIEVE_FAILED]', {
@@ -576,7 +720,14 @@ export async function POST(request: NextRequest) {
           checkoutSessionId: existingCheckoutSessionId,
           error: e instanceof Error ? e.message : String(e),
         });
+        // If we have a matching booking row but Stripe retrieve failed, try a safe refresh.
+        const refresh = await refreshStaleBookingIfSafe('stripe_retrieve_failed');
+        if (refresh && 'conflictResponse' in refresh) return refresh.conflictResponse;
       }
+    } else if (bookingMatches) {
+      // Matching pending booking row exists but has no Stripe session id yet (stale/incomplete). Refresh safely.
+      const refresh = await refreshStaleBookingIfSafe('missing_checkout_session_id');
+      if (refresh && 'conflictResponse' in refresh) return refresh.conflictResponse;
     }
 
     // Prevent students from double-booking overlapping sessions (across ALL services).
@@ -618,6 +769,13 @@ export async function POST(request: NextRequest) {
           const prevStatus = typeof prev?.status === 'string' ? prev.status : '';
           const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
           if (!prevPaid && prev?.url) {
+            console.log('[CHECKOUT_RETRY_ALLOWED]', {
+              studentId,
+              providerId,
+              startTime: firstSlotStartTime,
+              existingId: (existingBooking as any)?.id,
+              action: 'reuse_or_refresh',
+            });
             console.log('[CHECKOUT_RETRY_RECOVERED]', {
               providerId,
               startTime: firstSlotStartTime,
@@ -630,6 +788,23 @@ export async function POST(request: NextRequest) {
         } catch {}
       }
 
+      console.error('[CHECKOUT_409_PATH_D]', {
+        body,
+        providerId,
+        startTime: firstSlotStartTime,
+        normalizedPricingServiceType,
+        normalizedAvailabilityServiceType,
+      });
+      console.error('[CHECKOUT_TRUE_CONFLICT]', {
+        studentId,
+        providerId,
+        startTime: firstSlotStartTime,
+        existingRecord: {
+          reserveConflict: (reserveResult as any)?.conflict ?? null,
+          booking: existingBooking ?? null,
+          checkoutSessionId: existingCheckoutSessionId || null,
+        },
+      });
       return NextResponse.json(
         { error: 'This time slot was just booked by someone else. Please pick another time.' },
         { status: 409 }
