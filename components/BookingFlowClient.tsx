@@ -2262,6 +2262,29 @@ function Step5SelectProvider({
   const [providersError, setProvidersError] = useState<string | null>(null);
   const selectedProviderId = bookingState.provider;
 
+  // Canonical service type used across availability APIs + display labels.
+  const selectedService =
+    bookingState.service === 'tutoring'
+      ? 'tutoring'
+      : bookingState.service === 'test-prep'
+        ? 'test_prep'
+        : bookingState.service === 'counseling'
+          ? 'college_counseling'
+          : bookingState.service === 'virtual-tour'
+            ? 'virtual_tour'
+            : null;
+
+  const displayService =
+    selectedService === 'test_prep'
+      ? 'Test Prep'
+      : selectedService === 'virtual_tour'
+        ? 'Virtual Tour'
+        : selectedService === 'college_counseling'
+          ? 'College Counseling'
+          : selectedService === 'tutoring'
+            ? 'Tutoring'
+            : String(selectedService || '');
+
   const selectedSchool = String(bookingState.school?.name || bookingState.schoolName || '').trim();
   const selectedSchoolKey = schoolKeyForMatch(selectedSchool);
   const hasMatchingSchoolProvider =
@@ -2299,19 +2322,7 @@ function Step5SelectProvider({
           return;
         }
 
-        // Determine serviceType for provider availability query (backend expects canonical types).
-        const serviceType =
-          bookingState.service === 'tutoring'
-            ? 'tutoring'
-            : bookingState.service === 'test-prep'
-              ? 'test_prep'
-              : bookingState.service === 'counseling'
-                ? 'college_counseling'
-                : bookingState.service === 'virtual-tour'
-                  ? 'virtual_tour'
-                  : null;
-
-        if (!serviceType) {
+        if (!selectedService) {
           setProvidersError('Service type not set. Please go back and try again.');
           return;
         }
@@ -2326,7 +2337,7 @@ function Step5SelectProvider({
           const startTimeUTC = String((s as any)?.startTimeUTC || '').trim();
           if (!startTimeUTC) continue;
 
-          const params = new URLSearchParams({ startTimeUTC, serviceType });
+          const params = new URLSearchParams({ startTimeUTC, serviceType: selectedService });
           if (subject) params.set('subject', subject);
           if (subject === 'languages') {
             const lang = String(bookingState.selectedLanguage || bookingState.topic || '').trim();
@@ -2351,8 +2362,6 @@ function Step5SelectProvider({
             providers = providers.filter((p) => eligibleProviderIds.includes(String(p?.providerId || '').trim()));
           }
 
-          console.log("ALL PROVIDERS", providers);
-          console.log("ELIGIBLE IDS", eligibleProviderIds);
           const current = new Map<string, (typeof eligibleProviders)[number]>();
           for (const p of providers) {
             const providerId = String(p?.providerId || '').trim();
@@ -2376,20 +2385,46 @@ function Step5SelectProvider({
         }
 
         const providersOut = intersection ? Array.from(intersection.values()) : [];
-        const providerIds = providersOut.map((p) => p.providerId);
+        const validProviderIds = providersOut.map((p) => p.providerId);
+
+        // Safety: enforce the requested service context again on the client.
+        const selectedSubjectCanonical = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) : null;
+        const filteredProviders = providersOut.filter((p) => validProviderIds.includes(p.providerId));
+        const finalProviders = filteredProviders.filter((provider) => {
+          const subjects = Array.isArray(provider?.subjects)
+            ? provider.subjects.map((s) => String(s).trim().toLowerCase().replace(/-/g, '_')).filter(Boolean)
+            : [];
+
+          // Strictly prevent tutoring providers from appearing in Test Prep unless they explicitly include test_prep.
+          if (selectedService === 'test_prep') return subjects.includes('test_prep');
+
+          // Tutoring: keep subject consistency when we have a canonical subject.
+          if (selectedService === 'tutoring' && selectedSubjectCanonical) {
+            const key = String(selectedSubjectCanonical).trim().toLowerCase().replace(/-/g, '_');
+            if (key && key !== 'test_prep') return subjects.includes(key);
+          }
+
+          return true;
+        });
 
         console.log('[BOOKING_FLOW]', {
-          selectedService: serviceType,
+          selectedService,
           selectedTime: selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((s) => s.startTimeUTC),
-          providerIds,
+          providerIds: validProviderIds,
+        });
+
+        console.log('[CONFIRM_PROVIDER_DEBUG]', {
+          selectedService,
+          validProviderIds,
+          shownProviders: finalProviders.map((p) => p.providerId),
         });
 
         if (!cancelled) {
-          if (providersOut.length === 0) {
+          if (finalProviders.length === 0) {
             setProvidersError('No providers are available for all selected times. Please go back and adjust your times.');
             return;
           }
-          setEligibleProviders(providersOut);
+          setEligibleProviders(finalProviders);
         }
       } catch {
         if (!cancelled) setProvidersError('Unable to load providers. Please try again.');
@@ -2423,6 +2458,11 @@ function Step5SelectProvider({
         <p className="mt-1 text-sm text-gray-600">
           We’ll use the provider attached to your selected time{bookingState.selectedSessions.length === 1 ? '' : 's'}.
         </p>
+        {displayService ? (
+          <div className="mt-2 text-sm text-gray-700">
+            <span className="font-semibold">Service:</span> {displayService}
+          </div>
+        ) : null}
       </div>
 
       {shouldShowSchoolWarning ? (
@@ -2486,6 +2526,11 @@ function Step5SelectProvider({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-base font-semibold text-gray-900">{p.name}</div>
+                        {displayService ? (
+                          <span className="service-label mt-1 inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                            {displayService}
+                          </span>
+                        ) : null}
                         {showProviderSchool && typeof p.schoolName === 'string' && p.schoolName.trim() ? (
                           <div className="mt-0.5 text-sm text-gray-500">{p.schoolName.trim()}</div>
                         ) : null}
