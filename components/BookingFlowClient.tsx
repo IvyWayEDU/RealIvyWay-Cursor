@@ -2507,6 +2507,11 @@ function Step5SelectProvider({
             const uniqueSubjectKeys = Array.from(new Set(normalizedSubjectKeys));
 
             const priorityKeys: string[] = [];
+            const selectedSubject = bookingState.subject;
+            const selectedSubjectCanonical =
+              typeof selectedSubject === 'string'
+                ? selectedSubject.trim().toLowerCase().replace(/-/g, '_')
+                : null;
             if (selectedService === 'tutoring' && selectedSubjectCanonical && selectedSubjectCanonical !== 'test_prep') {
               priorityKeys.push(String(selectedSubjectCanonical).trim().toLowerCase().replace(/-/g, '_'));
             }
