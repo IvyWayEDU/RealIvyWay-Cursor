@@ -458,6 +458,18 @@ export async function POST(request: NextRequest) {
       bodyIdempotencyKey || `${providerId}_${firstSlotStartTime}_${normalizedPricingServiceType}`;
 
     const supabase = getSupabaseAdmin();
+    // SINGLE-SOURCE conflict state: collect evidence throughout flow,
+    // but ONLY decide to block in one final check before Stripe creation.
+    let existingRecord: any = null;
+    const mergeExistingRecord = (partial: any) => {
+      if (!partial || typeof partial !== 'object') return;
+      const next: any = { ...(existingRecord ?? {}) };
+      for (const [k, v] of Object.entries(partial)) {
+        if (v === null || v === undefined) continue;
+        next[k] = v;
+      }
+      existingRecord = next;
+    };
 
     const normalizeService = (raw: unknown): string => {
       return String(raw || '')
@@ -517,20 +529,7 @@ export async function POST(request: NextRequest) {
 
       if (existingSession && matchesServiceType) {
         if (isBookedSessionRow(existingSession)) {
-          console.error('[CHECKOUT_409_PATH_A]', {
-            body,
-            providerId,
-            startTime,
-            normalizedPricingServiceType,
-            normalizedAvailabilityServiceType,
-          });
-          console.error('[CHECKOUT_TRUE_CONFLICT]', {
-            studentId,
-            providerId,
-            startTime,
-            existingRecord: existingSession,
-          });
-          return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
+          mergeExistingRecord({ booking: existingSession });
         }
 
         if (isRecent) {
@@ -580,7 +579,7 @@ export async function POST(request: NextRequest) {
 
     const refreshStaleBookingIfSafe = async (
       reason: string
-    ): Promise<{ refreshed: true } | { refreshed: false } | { conflictResponse: NextResponse }> => {
+    ): Promise<{ refreshed: true } | { refreshed: false }> => {
       if (!bookingMatches) return { refreshed: false };
       const existingId = String((existingBooking as any)?.id || '').trim();
       if (!existingId) return { refreshed: false };
@@ -613,20 +612,8 @@ export async function POST(request: NextRequest) {
         const matchesServiceType =
           s ? normalizeService(existingServiceType) === normalizeService(normalizedAvailabilityServiceType) : false;
         if (s && matchesServiceType && isBookedSessionRow(s)) {
-          console.error('[CHECKOUT_409_PATH_B]', {
-            body,
-            providerId,
-            startTime,
-            normalizedPricingServiceType,
-            normalizedAvailabilityServiceType,
-          });
-          console.error('[CHECKOUT_TRUE_CONFLICT]', {
-            studentId,
-            providerId,
-            startTime,
-            existingRecord: s,
-          });
-          return { conflictResponse: NextResponse.json({ error: 'Slot already booked' }, { status: 409 }) };
+          mergeExistingRecord({ booking: s });
+          return { refreshed: false };
         }
       }
 
@@ -672,23 +659,12 @@ export async function POST(request: NextRequest) {
         const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
 
         if (prevPaid) {
-          console.error('[CHECKOUT_409_PATH_C]', {
-            body,
-            providerId,
-            startTime: firstSlotStartTime,
-            normalizedPricingServiceType,
-            normalizedAvailabilityServiceType,
-          });
-          console.error('[CHECKOUT_TRUE_CONFLICT]', {
-            studentId,
-            providerId,
-            startTime: firstSlotStartTime,
-            existingRecord: {
+          mergeExistingRecord({
+            booking: {
               booking: existingBooking,
               stripe: { id: prev?.id, status: prevStatus, payment_status: prev?.payment_status },
             },
           });
-          return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
         }
 
         if (prev?.url) {
@@ -711,7 +687,6 @@ export async function POST(request: NextRequest) {
 
         // Stripe session exists but can't be reused (no URL, expired, etc). Refresh safely.
         const refresh = await refreshStaleBookingIfSafe('stripe_session_not_reusable');
-        if (refresh && 'conflictResponse' in refresh) return refresh.conflictResponse;
       } catch (e) {
         // Non-blocking: if Stripe session can't be retrieved, proceed to create a new one.
         console.warn('[CHECKOUT_RETRY_STRIPE_RETRIEVE_FAILED]', {
@@ -722,12 +697,10 @@ export async function POST(request: NextRequest) {
         });
         // If we have a matching booking row but Stripe retrieve failed, try a safe refresh.
         const refresh = await refreshStaleBookingIfSafe('stripe_retrieve_failed');
-        if (refresh && 'conflictResponse' in refresh) return refresh.conflictResponse;
       }
     } else if (bookingMatches) {
       // Matching pending booking row exists but has no Stripe session id yet (stale/incomplete). Refresh safely.
       const refresh = await refreshStaleBookingIfSafe('missing_checkout_session_id');
-      if (refresh && 'conflictResponse' in refresh) return refresh.conflictResponse;
     }
 
     // Prevent students from double-booking overlapping sessions (across ALL services).
@@ -837,48 +810,22 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      const existingRecord = {
+      mergeExistingRecord({
         reserveConflict,
         booking: conflictBookedSession,
         checkoutSessionId: activeReservationCheckoutSessionId,
-      };
+      });
 
-      const isReserved = !!existingRecord?.reserveConflict;
-      const isBooked = !!existingRecord?.booking;
-      const hasCheckout = !!existingRecord?.checkoutSessionId;
+      const isReserved = !!reserveConflict;
+      const isBooked = !!conflictBookedSession;
+      const hasCheckout = !!activeReservationCheckoutSessionId;
 
-      if (isBooked) {
-        console.error('[CHECKOUT_BLOCK_BOOKED]', existingRecord);
-        return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
-      }
-
-      if (isReserved && hasCheckout) {
-        console.error('[CHECKOUT_BLOCK_ACTIVE_RESERVATION]', existingRecord);
-        return NextResponse.json({ error: 'Slot reserved by another user' }, { status: 409 });
-      }
-
-      // SAFE CASE: stale or incomplete reservation (bug fix). Clear and retry reservation.
+      // If this is a stale/incomplete reservation, attempt best-effort cleanup and retry reservation.
+      // IMPORTANT: never block checkout here; final conflict decision is made once, later.
       if (isReserved && !isBooked && !hasCheckout) {
-        console.log('[CHECKOUT_STALE_RESERVATION_CLEARED]', {
-          providerId: conflictProviderId,
-          startTime: conflictStartTime,
-        });
         try {
-          await unreserveSlotsAtomically([
-            {
-              providerId: conflictProviderId,
-              startTime: conflictStartTime,
-              endTime: conflictEndTime,
-            },
-          ]);
-        } catch (e) {
-          console.warn('[CHECKOUT_STALE_RESERVATION_CLEAR_FAILED]', {
-            providerId: conflictProviderId,
-            startTime: conflictStartTime,
-            error: e instanceof Error ? e.message : String(e),
-          });
-        }
-
+          await unreserveSlotsAtomically(slotsToReserve);
+        } catch {}
         reserveResult = await reserveSlotsAtomically(slotsToReserve);
       }
 
@@ -908,28 +855,8 @@ export async function POST(request: NextRequest) {
             }
           } catch {}
         }
-
-        console.error('[CHECKOUT_409_PATH_D]', {
-          body,
-          providerId,
-          startTime: firstSlotStartTime,
-          normalizedPricingServiceType,
-          normalizedAvailabilityServiceType,
-        });
-        console.error('[CHECKOUT_TRUE_CONFLICT]', {
-          studentId,
-          providerId,
-          startTime: firstSlotStartTime,
-          existingRecord: {
-            reserveConflict: (reserveResult as any)?.conflict ?? reserveConflict ?? null,
-            booking: conflictBookedSession ?? null,
-            checkoutSessionId: activeReservationCheckoutSessionId ?? null,
-          },
-        });
-        return NextResponse.json(
-          { error: 'This time slot was just booked by someone else. Please pick another time.' },
-          { status: 409 }
-        );
+        // Preserve the most recent conflict evidence for the single final conflict evaluator.
+        mergeExistingRecord({ reserveConflict: (reserveResult as any)?.conflict ?? reserveConflict ?? null });
       }
     }
 
@@ -970,9 +897,43 @@ export async function POST(request: NextRequest) {
     // when available based on customer location and device capabilities
     let checkoutSession: Stripe.Checkout.Session;
     try {
-      console.log('[CHECKOUT_PROCEED]', {
+      const startTime = firstSlotStartTime;
+      const isReserved = !!existingRecord?.reserveConflict;
+      const isBooked = !!existingRecord?.booking;
+      const hasCheckout = !!existingRecord?.checkoutSessionId;
+
+      console.log('[CHECKOUT_CONFLICT_EVAL]', {
+        isReserved,
+        isBooked,
+        hasCheckout,
+        existingRecord,
+      });
+
+      // ONLY REAL BLOCK CONDITIONS:
+      if (isBooked) {
+        console.error('[BLOCK_BOOKED]', existingRecord);
+        return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
+      }
+
+      if (isReserved && hasCheckout) {
+        console.error('[BLOCK_ACTIVE_RESERVATION]', existingRecord);
+        return NextResponse.json({ error: 'Slot reserved by another user' }, { status: 409 });
+      }
+
+      // IMPORTANT: DO NOT BLOCK HERE
+      // This is the bug fix
+      if (isReserved && !isBooked && !hasCheckout) {
+        console.warn('[ALLOW_STALE_RESERVATION]', {
+          providerId,
+          startTime,
+        });
+
+        // continue execution
+      }
+
+      console.log('[CHECKOUT_CONTINUES_TO_STRIPE]', {
         providerId,
-        startTime: firstSlotStartTime,
+        startTime,
         studentId,
       });
 
