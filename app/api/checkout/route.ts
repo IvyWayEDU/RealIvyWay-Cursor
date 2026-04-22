@@ -760,55 +760,177 @@ export async function POST(request: NextRequest) {
       endTime: String(p.scheduledEnd || ''),
     }));
 
-    const reserveResult = await reserveSlotsAtomically(slotsToReserve);
+    let reserveResult = await reserveSlotsAtomically(slotsToReserve);
     if (!reserveResult.ok) {
-      // Retry recovery: if the slot is "reserved" by this user's in-flight checkout, reuse it.
-      if (existingCheckoutSessionId) {
-        try {
-          const prev = await stripe.checkout.sessions.retrieve(existingCheckoutSessionId);
-          const prevStatus = typeof prev?.status === 'string' ? prev.status : '';
-          const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
-          if (!prevPaid && prev?.url) {
-            console.log('[CHECKOUT_RETRY_ALLOWED]', {
-              studentId,
-              providerId,
-              startTime: firstSlotStartTime,
-              existingId: (existingBooking as any)?.id,
-              action: 'reuse_or_refresh',
-            });
-            console.log('[CHECKOUT_RETRY_RECOVERED]', {
-              providerId,
-              startTime: firstSlotStartTime,
-              reusedSessionId: null,
-              reusedCheckoutSessionId: prev.id,
-              bookingId: (existingBooking as any)?.id,
-            });
-            return NextResponse.json({ sessionId: prev.id, url: prev.url });
-          }
-        } catch {}
+      const reserveConflict = (reserveResult as any)?.conflict ?? null;
+      const conflictProviderId =
+        typeof reserveConflict?.providerId === 'string' && reserveConflict.providerId.trim()
+          ? String(reserveConflict.providerId).trim()
+          : providerId;
+      const conflictStartTime =
+        typeof reserveConflict?.startTime === 'string' && reserveConflict.startTime.trim()
+          ? String(reserveConflict.startTime).trim()
+          : firstSlotStartTime;
+      const conflictEndTime =
+        typeof reserveConflict?.endTime === 'string' && reserveConflict.endTime.trim()
+          ? String(reserveConflict.endTime).trim()
+          : String((sessionPayloads?.[0] as any)?.scheduledEnd || '').trim();
+
+      // If a true booked/paid session exists, block checkout (true conflict).
+      let conflictBookedSession: any = null;
+      try {
+        const { data: existingSession } = await supabase
+          .from('sessions')
+          .select('*')
+          .eq('provider_id', conflictProviderId)
+          .eq('datetime', conflictStartTime)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const existingServiceType =
+          existingSession?.data?.serviceType ??
+          existingSession?.data?.service_type ??
+          existingSession?.data?.serviceTypeId ??
+          null;
+        const matchesServiceType =
+          existingSession ? normalizeService(existingServiceType) === normalizeService(normalizedAvailabilityServiceType) : false;
+        if (existingSession && matchesServiceType && isBookedSessionRow(existingSession)) {
+          conflictBookedSession = existingSession;
+        }
+      } catch (e) {
+        console.warn('[CHECKOUT_CONFLICT_SESSION_LOOKUP_FAILED]', {
+          providerId: conflictProviderId,
+          startTime: conflictStartTime,
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
 
-      console.error('[CHECKOUT_409_PATH_D]', {
-        body,
-        providerId,
-        startTime: firstSlotStartTime,
-        normalizedPricingServiceType,
-        normalizedAvailabilityServiceType,
-      });
-      console.error('[CHECKOUT_TRUE_CONFLICT]', {
-        studentId,
-        providerId,
-        startTime: firstSlotStartTime,
-        existingRecord: {
-          reserveConflict: (reserveResult as any)?.conflict ?? null,
-          booking: existingBooking ?? null,
-          checkoutSessionId: existingCheckoutSessionId || null,
-        },
-      });
-      return NextResponse.json(
-        { error: 'This time slot was just booked by someone else. Please pick another time.' },
-        { status: 409 }
-      );
+      // If another in-flight checkout exists for this provider/time, treat it as an active reservation.
+      // (We cannot rely on reserved_slots alone; it has no checkout/session metadata.)
+      let activeReservationCheckoutSessionId: string | null = null;
+      try {
+        const { data: recentProviderBookings } = await supabase
+          .from('bookings')
+          .select('id, checkout_session_id, created_at, data')
+          .eq('data->>providerId', conflictProviderId)
+          .order('created_at', { ascending: false })
+          .limit(25);
+
+        const nowMs = Date.now();
+        for (const b of (recentProviderBookings ?? []) as any[]) {
+          const createdAtMs = new Date(String(b?.created_at || '')).getTime();
+          const isRecent = Number.isFinite(createdAtMs) && createdAtMs > nowMs - TEN_MIN_MS;
+          if (!isRecent) continue;
+          const sid = typeof b?.checkout_session_id === 'string' ? String(b.checkout_session_id).trim() : '';
+          if (!sid) continue;
+          const times: any[] = Array.isArray(b?.data?.sessionTimes) ? b.data.sessionTimes : [];
+          const matchesStart = times.some((t) => String(t?.scheduledStart || '').trim() === conflictStartTime);
+          if (!matchesStart) continue;
+          activeReservationCheckoutSessionId = sid;
+          break;
+        }
+      } catch (e) {
+        console.warn('[CHECKOUT_CONFLICT_BOOKING_LOOKUP_FAILED]', {
+          providerId: conflictProviderId,
+          startTime: conflictStartTime,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      const existingRecord = {
+        reserveConflict,
+        booking: conflictBookedSession,
+        checkoutSessionId: activeReservationCheckoutSessionId,
+      };
+
+      const isReserved = !!existingRecord?.reserveConflict;
+      const isBooked = !!existingRecord?.booking;
+      const hasCheckout = !!existingRecord?.checkoutSessionId;
+
+      if (isBooked) {
+        console.error('[CHECKOUT_BLOCK_BOOKED]', existingRecord);
+        return NextResponse.json({ error: 'Slot already booked' }, { status: 409 });
+      }
+
+      if (isReserved && hasCheckout) {
+        console.error('[CHECKOUT_BLOCK_ACTIVE_RESERVATION]', existingRecord);
+        return NextResponse.json({ error: 'Slot reserved by another user' }, { status: 409 });
+      }
+
+      // SAFE CASE: stale or incomplete reservation (bug fix). Clear and retry reservation.
+      if (isReserved && !isBooked && !hasCheckout) {
+        console.log('[CHECKOUT_STALE_RESERVATION_CLEARED]', {
+          providerId: conflictProviderId,
+          startTime: conflictStartTime,
+        });
+        try {
+          await unreserveSlotsAtomically([
+            {
+              providerId: conflictProviderId,
+              startTime: conflictStartTime,
+              endTime: conflictEndTime,
+            },
+          ]);
+        } catch (e) {
+          console.warn('[CHECKOUT_STALE_RESERVATION_CLEAR_FAILED]', {
+            providerId: conflictProviderId,
+            startTime: conflictStartTime,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+
+        reserveResult = await reserveSlotsAtomically(slotsToReserve);
+      }
+
+      if (!reserveResult.ok) {
+        // Retry recovery: if the slot is "reserved" by this user's in-flight checkout, reuse it.
+        if (existingCheckoutSessionId) {
+          try {
+            const prev = await stripe.checkout.sessions.retrieve(existingCheckoutSessionId);
+            const prevStatus = typeof prev?.status === 'string' ? prev.status : '';
+            const prevPaid = prev?.payment_status === 'paid' || prevStatus === 'complete';
+            if (!prevPaid && prev?.url) {
+              console.log('[CHECKOUT_RETRY_ALLOWED]', {
+                studentId,
+                providerId,
+                startTime: firstSlotStartTime,
+                existingId: (existingBooking as any)?.id,
+                action: 'reuse_or_refresh',
+              });
+              console.log('[CHECKOUT_RETRY_RECOVERED]', {
+                providerId,
+                startTime: firstSlotStartTime,
+                reusedSessionId: null,
+                reusedCheckoutSessionId: prev.id,
+                bookingId: (existingBooking as any)?.id,
+              });
+              return NextResponse.json({ sessionId: prev.id, url: prev.url });
+            }
+          } catch {}
+        }
+
+        console.error('[CHECKOUT_409_PATH_D]', {
+          body,
+          providerId,
+          startTime: firstSlotStartTime,
+          normalizedPricingServiceType,
+          normalizedAvailabilityServiceType,
+        });
+        console.error('[CHECKOUT_TRUE_CONFLICT]', {
+          studentId,
+          providerId,
+          startTime: firstSlotStartTime,
+          existingRecord: {
+            reserveConflict: (reserveResult as any)?.conflict ?? reserveConflict ?? null,
+            booking: conflictBookedSession ?? null,
+            checkoutSessionId: activeReservationCheckoutSessionId ?? null,
+          },
+        });
+        return NextResponse.json(
+          { error: 'This time slot was just booked by someone else. Please pick another time.' },
+          { status: 409 }
+        );
+      }
     }
 
     const single = sessionPayloads[0] as any;
@@ -848,6 +970,12 @@ export async function POST(request: NextRequest) {
     // when available based on customer location and device capabilities
     let checkoutSession: Stripe.Checkout.Session;
     try {
+      console.log('[CHECKOUT_PROCEED]', {
+        providerId,
+        startTime: firstSlotStartTime,
+        studentId,
+      });
+
       // Validate the Stripe price exists BEFORE creating checkout session.
       // This prevents confusing "No such price" failures later and helps ensure live env
       // isn't accidentally using stale/test price IDs.
