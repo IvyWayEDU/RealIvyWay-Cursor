@@ -480,19 +480,34 @@ export async function GET(req: NextRequest) {
       normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
         ? providersAfterLanguage
             .filter((p) => {
+              let passesSubjectFilter = true;
+
               // SINGLE SOURCE OF TRUTH:
               // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
               const rawSubjects = (p as any).data?.subjects;
 
-              // HARD REQUIREMENT:
-              // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
-              if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
+              // Test prep is a tutoring MODE, not a strict subject filter.
+              if (selectedSubject && selectedSubject !== 'test_prep') {
+                // HARD REQUIREMENT (non-test_prep only):
+                // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
+                if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) {
+                  passesSubjectFilter = false;
+                } else {
+                  const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
+                  passesSubjectFilter = subjects.includes(selectedSubject);
+                }
+              }
 
-              const subjects = (rawSubjects as any[])
-                .map(normalizeSubject)
-                .filter(Boolean) as string[];
+              if (selectedSubject === 'test_prep') {
+                console.log('[TEST_PREP_SUBJECT_BYPASS]', {
+                  selectedSubject,
+                  providerId: (p as any).providerId ?? (p as any).id,
+                  subjects: rawSubjects,
+                  passesSubjectFilter,
+                });
+              }
 
-              return !!selectedSubject && subjects.includes(selectedSubject);
+              return passesSubjectFilter;
             })
             .map((p) => p.providerId)
         : providersAfterLanguage.map((p) => p.providerId);

@@ -79,8 +79,12 @@ export function getCanonicalTopicLabel(session: unknown): string | null {
     // Example: "Math — Quadratic Equations"
     return topic ? `${subject} — ${topic}` : subject;
   }
-  if (type === 'college_counseling') {
-    return resolveSchoolLabel((session as any)?.school);
+  if (type === 'college_counseling' || type === 'virtual_tour') {
+    return (
+      resolveSchoolLabel((session as any)?.school) ??
+      resolveSchoolLabel((session as any)?.selectedSchool) ??
+      resolveSchoolLabel((session as any)?.metadata?.school)
+    );
   }
   return null;
 }

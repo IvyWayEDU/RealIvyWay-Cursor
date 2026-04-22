@@ -358,19 +358,34 @@ export async function GET(req: NextRequest) {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
 
+      let passesSubjectFilter = true;
+
       // SINGLE SOURCE OF TRUTH:
       // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
       const rawSubjects = (p as any).data?.subjects;
 
-      // HARD REQUIREMENT:
-      // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
-      if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
+      // Test prep is a tutoring MODE, not a strict subject filter.
+      if (requestedSubjectKey !== 'test_prep') {
+        // HARD REQUIREMENT (non-test_prep only):
+        // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
+        if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) {
+          passesSubjectFilter = false;
+        } else {
+          const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
+          passesSubjectFilter = subjects.includes(requestedSubjectKey);
+        }
+      }
 
-      const subjects = (rawSubjects as any[])
-        .map(normalizeSubject)
-        .filter(Boolean) as string[];
+      if (requestedSubjectKey === 'test_prep') {
+        console.log('[TEST_PREP_SUBJECT_BYPASS]', {
+          selectedSubject: requestedSubjectKey,
+          providerId: p.providerId,
+          subjects: rawSubjects,
+          passesSubjectFilter,
+        });
+      }
 
-      if (!subjects.includes(requestedSubjectKey)) return false;
+      if (!passesSubjectFilter) return false;
 
       // Language tutoring: require a concrete language match (providers without languages are excluded).
       if (requestedSubjectKey === 'languages') {
