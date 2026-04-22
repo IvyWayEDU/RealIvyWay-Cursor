@@ -358,34 +358,19 @@ export async function GET(req: NextRequest) {
       if (!(normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep')) return true;
       if (!requestedSubjectKey) return false;
 
-      let passesSubjectFilter = true;
+      // STRICT SUBJECT MATCHING:
+      // - Test Prep behaves like a strict tutoring subject ("test_prep" must be explicitly present).
+      // - We read subjects from providers.data.subjects when present, otherwise fall back to users.data.subjects
+      //   (some profile writes still land there depending on migration state).
+      const rawSubjects =
+        Array.isArray((p as any)?.data?.subjects) && (p as any).data.subjects.length > 0
+          ? (p as any).data.subjects
+          : (p as any)?.userData?.subjects;
 
-      // SINGLE SOURCE OF TRUTH:
-      // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
-      const rawSubjects = (p as any).data?.subjects;
+      if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
 
-      // Test prep is a tutoring MODE, not a strict subject filter.
-      if (requestedSubjectKey !== 'test_prep') {
-        // HARD REQUIREMENT (non-test_prep only):
-        // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
-        if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) {
-          passesSubjectFilter = false;
-        } else {
-          const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
-          passesSubjectFilter = subjects.includes(requestedSubjectKey);
-        }
-      }
-
-      if (requestedSubjectKey === 'test_prep') {
-        console.log('[TEST_PREP_SUBJECT_BYPASS]', {
-          selectedSubject: requestedSubjectKey,
-          providerId: p.providerId,
-          subjects: rawSubjects,
-          passesSubjectFilter,
-        });
-      }
-
-      if (!passesSubjectFilter) return false;
+      const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
+      if (!subjects.includes(requestedSubjectKey)) return false;
 
       // Language tutoring: require a concrete language match (providers without languages are excluded).
       if (requestedSubjectKey === 'languages') {

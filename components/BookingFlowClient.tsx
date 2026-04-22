@@ -2331,7 +2331,8 @@ function Step5SelectProvider({
         const schoolName = bookingState.school?.name || bookingState.schoolName || '';
         const subject = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) || bookingState.subject : '';
 
-        let intersection: Map<string, (typeof eligibleProviders)[number]> | null = null;
+        let intersectionIds: Set<string> | null = null;
+        const providerDetailsById = new Map<string, (typeof eligibleProviders)[number]>();
 
         for (const s of selectedSlots) {
           const startTimeUTC = String((s as any)?.startTimeUTC || '').trim();
@@ -2352,21 +2353,20 @@ function Step5SelectProvider({
           if (!res.ok) throw new Error('Failed to load providers');
           const json = await res.json();
 
-          let providers: any[] = Array.isArray(json?.providers) ? json.providers : [];
+          const providers: any[] = Array.isArray(json?.providers) ? json.providers : [];
           const eligibleProviderIds: string[] = Array.isArray(json?.providerIds)
             ? (json.providerIds as any[]).map((id) => String(id || '').trim()).filter(Boolean)
             : [];
 
-          // FIX 4 — HARD GUARD BEFORE RENDER (and before any downstream intersection logic).
-          if (eligibleProviderIds.length > 0) {
-            providers = providers.filter((p) => eligibleProviderIds.includes(String(p?.providerId || '').trim()));
-          }
+          // STRICT ID MATCH ONLY:
+          // The confirm-provider screen must render only the providerIds returned by the availability API.
+          const eligibleSet = new Set(eligibleProviderIds);
 
-          const current = new Map<string, (typeof eligibleProviders)[number]>();
           for (const p of providers) {
             const providerId = String(p?.providerId || '').trim();
             if (!providerId) continue;
-            current.set(providerId, {
+            if (!eligibleSet.has(providerId)) continue;
+            providerDetailsById.set(providerId, {
               providerId,
               name: typeof p?.name === 'string' && p.name.trim() ? p.name.trim() : 'Provider',
               profileImageUrl: typeof p?.profileImageUrl === 'string' && p.profileImageUrl.trim() ? p.profileImageUrl.trim() : null,
@@ -2375,66 +2375,46 @@ function Step5SelectProvider({
             });
           }
 
-          if (intersection === null) {
-            intersection = current;
+          if (intersectionIds === null) {
+            intersectionIds = new Set(eligibleProviderIds);
           } else {
-            for (const id of Array.from(intersection.keys())) {
-              if (!current.has(id)) intersection.delete(id);
+            for (const id of Array.from(intersectionIds)) {
+              if (!eligibleSet.has(id)) intersectionIds.delete(id);
             }
           }
         }
 
-        const providersOut = intersection ? Array.from(intersection.values()) : [];
-        const providerIdsFromAvailability = providersOut.map((p) => p.providerId);
+        const providerIdsFromAvailability = intersectionIds ? Array.from(intersectionIds) : [];
+        const providersOut = providerIdsFromAvailability.map((id) => {
+          return (
+            providerDetailsById.get(id) || {
+              providerId: id,
+              name: 'Provider',
+              profileImageUrl: null,
+              schoolName: null,
+              subjects: [],
+            }
+          );
+        });
 
-        // Safety: enforce the requested service context again on the client.
         const selectedSubjectCanonical = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) : null;
-        const filteredProviders = providersOut.filter((p) => providerIdsFromAvailability.includes(p.providerId));
-        const finalProviders = filteredProviders.filter((provider) => {
-          const subjects = Array.isArray(provider?.subjects)
-            ? provider.subjects.map((s) => String(s).trim().toLowerCase().replace(/-/g, '_')).filter(Boolean)
-            : [];
+        const selectedTime = selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((ss) => ss.startTimeUTC);
 
-          // IMPORTANT: For Test Prep, trust availability providerIds as the source of truth.
-          // Provider profiles may store test_prep as a tutoring subject and not always return it here,
-          // so we must not accidentally drop providers that already passed availability checks.
-          if (selectedService === 'test_prep') return true;
-
-          // Tutoring: keep subject consistency when we have a canonical subject.
-          if (selectedService === 'tutoring' && selectedSubjectCanonical) {
-            const key = String(selectedSubjectCanonical).trim().toLowerCase().replace(/-/g, '_');
-            if (key && key !== 'test_prep') return subjects.includes(key);
-          }
-
-          return true;
-        });
-
-        console.log('[BOOKING_FLOW]', {
+        // Temporary debug log for strict matching verification.
+        console.log('[STRICT_PROVIDER_MATCH]', {
           selectedService,
-          selectedTime: selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((s) => s.startTimeUTC),
-          providerIds: providerIdsFromAvailability,
-        });
-
-        console.log('[CONFIRM_PROVIDER_DEBUG]', {
-          selectedService,
-          validProviderIds: providerIdsFromAvailability,
-          shownProviders: finalProviders.map((p) => p.providerId),
-        });
-
-        console.log('[TEST_PREP_PROVIDER_CONFIRM]', {
-          selectedService,
-          selectedSubject: bookingState.subject,
-          selectedSubjectCanonical,
+          selectedSubject: selectedSubjectCanonical,
+          selectedTime,
           providerIdsFromAvailability,
-          finalProvidersShown: finalProviders.map((p) => p.providerId),
+          finalRenderedProviderIds: providersOut.map((p) => p.providerId),
         });
 
         if (!cancelled) {
-          if (finalProviders.length === 0) {
+          if (providersOut.length === 0) {
             setProvidersError('No providers are available for all selected times. Please go back and adjust your times.');
             return;
           }
-          setEligibleProviders(finalProviders);
+          setEligibleProviders(providersOut);
         }
       } catch {
         if (!cancelled) setProvidersError('Unable to load providers. Please try again.');

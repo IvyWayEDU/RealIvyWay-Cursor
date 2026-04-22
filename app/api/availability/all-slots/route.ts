@@ -480,34 +480,19 @@ export async function GET(req: NextRequest) {
       normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep'
         ? providersAfterLanguage
             .filter((p) => {
-              let passesSubjectFilter = true;
+              // STRICT SUBJECT MATCHING:
+              // - Test Prep behaves like a strict tutoring subject ("test_prep" must be explicitly present).
+              // - Prefer providers.data.subjects when present; otherwise fall back to users.data.subjects.
+              const rawSubjects =
+                Array.isArray((p as any)?.data?.subjects) && (p as any).data.subjects.length > 0
+                  ? (p as any).data.subjects
+                  : (p as any)?.userData?.subjects;
 
-              // SINGLE SOURCE OF TRUTH:
-              // Subjects must come ONLY from providers.data.subjects (no specialties, no users.data, no fallbacks).
-              const rawSubjects = (p as any).data?.subjects;
+              if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
+              if (!selectedSubject) return false;
 
-              // Test prep is a tutoring MODE, not a strict subject filter.
-              if (selectedSubject && selectedSubject !== 'test_prep') {
-                // HARD REQUIREMENT (non-test_prep only):
-                // If provider.data.subjects is missing/null/empty array -> exclude provider completely.
-                if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) {
-                  passesSubjectFilter = false;
-                } else {
-                  const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
-                  passesSubjectFilter = subjects.includes(selectedSubject);
-                }
-              }
-
-              if (selectedSubject === 'test_prep') {
-                console.log('[TEST_PREP_SUBJECT_BYPASS]', {
-                  selectedSubject,
-                  providerId: (p as any).providerId ?? (p as any).id,
-                  subjects: rawSubjects,
-                  passesSubjectFilter,
-                });
-              }
-
-              return passesSubjectFilter;
+              const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
+              return subjects.includes(selectedSubject);
             })
             .map((p) => p.providerId)
         : providersAfterLanguage.map((p) => p.providerId);
