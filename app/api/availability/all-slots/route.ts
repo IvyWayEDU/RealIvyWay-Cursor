@@ -10,21 +10,17 @@ import { checkBookingRateLimit, createRateLimitHeaders } from '@/lib/rate-limiti
 import { languageTutoringMatches } from '@/lib/models/languageTutoring';
 import { getNYDateKey } from '@/lib/booking/nyDate';
 import { normalizeSchoolName } from '@/lib/availability/normalizeSchoolName';
+import { computeSubjectEligibility, normalizeSubject } from '@/lib/availability/subjectEligibility';
 
-function normalizeSubject(s: unknown): string | null {
-  if (!s) return null;
-  const val = String(s).toLowerCase().trim();
-
-  if (val === 'math') return 'math';
-  if (val === 'english') return 'english';
-  if (val === 'science') return 'science';
-  if (val === 'history') return 'history';
-  if (val === 'languages') return 'languages';
-  if (val === 'computer science') return 'computer_science';
-  if (val === 'test prep') return 'test_prep';
-
-  return null;
-}
+const SUPPORTED_TUTORING_SUBJECTS = new Set([
+  'math',
+  'english',
+  'science',
+  'history',
+  'languages',
+  'computer_science',
+  'test_prep',
+]);
 
 const QuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
@@ -454,11 +450,13 @@ export async function GET(req: NextRequest) {
 
     // Language tutoring is special-case: require a concrete language match.
     const subjectKeyRaw = String(selectedSubjectsRaw?.[0] || subject || '').trim();
-    const selectedSubject =
-      normalizedServiceType === 'test_prep' ? 'test_prep' : normalizeSubject(subjectKeyRaw);
+    const selectedSubjectRaw = normalizedServiceType === 'test_prep' ? 'test_prep' : subjectKeyRaw;
+    const selectedSubject = normalizeSubject(selectedSubjectRaw);
 
-    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !selectedSubject) {
-      return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
+    if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
+      if (!selectedSubject || !SUPPORTED_TUTORING_SUBJECTS.has(selectedSubject)) {
+        return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
+      }
     }
 
     const shouldApplyLanguageFilter =
@@ -489,10 +487,19 @@ export async function GET(req: NextRequest) {
                   : (p as any)?.userData?.subjects;
 
               if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
-              if (!selectedSubject) return false;
 
-              const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
-              return subjects.includes(selectedSubject);
+              const { matched, log } = computeSubjectEligibility({
+                selectedSubjectRaw,
+                providerId: (p as any).providerId,
+                providerSubjectsRaw: rawSubjects,
+                providerServicesRaw: (p as any).services,
+              });
+
+              if (log.selectedSubjectNormalized === 'test_prep') {
+                console.log('[TEST_PREP_NORMALIZED_MATCH]', log);
+              }
+
+              return matched;
             })
             .map((p) => p.providerId)
         : providersAfterLanguage.map((p) => p.providerId);

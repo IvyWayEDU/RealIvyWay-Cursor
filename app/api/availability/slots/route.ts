@@ -7,23 +7,19 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 import { getBookedSessionWindowsForProviders } from '@/lib/sessions/bookedWindows.server';
 import { normalizeSubjectId } from '@/lib/models/subjects';
 import { getNYDateKey } from '@/lib/booking/nyDate';
+import { computeSubjectEligibility, normalizeSubject } from '@/lib/availability/subjectEligibility';
 
 type SlotOut = { start: string; end: string; providerId: string };
 
-function normalizeSubject(s: unknown): string | null {
-  if (!s) return null;
-  const val = String(s).toLowerCase().trim();
-
-  if (val === 'math') return 'math';
-  if (val === 'english') return 'english';
-  if (val === 'science') return 'science';
-  if (val === 'history') return 'history';
-  if (val === 'languages') return 'languages';
-  if (val === 'computer science') return 'computer_science';
-  if (val === 'test prep') return 'test_prep';
-
-  return null;
-}
+const SUPPORTED_TUTORING_SUBJECTS = new Set([
+  'math',
+  'english',
+  'science',
+  'history',
+  'languages',
+  'computer_science',
+  'test_prep',
+]);
 
 function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
@@ -180,11 +176,13 @@ export async function GET(request: NextRequest) {
     if (provErr) throw provErr;
 
     const subjectKeyRaw = String(subject || '').trim();
-    const selectedSubject =
-      normalizedServiceType === 'test_prep' ? 'test_prep' : normalizeSubject(subjectKeyRaw);
+    const selectedSubjectRaw = normalizedServiceType === 'test_prep' ? 'test_prep' : subjectKeyRaw;
+    const selectedSubject = normalizeSubject(selectedSubjectRaw);
 
-    if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !selectedSubject) {
-      return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
+    if (normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') {
+      if (!selectedSubject || !SUPPORTED_TUTORING_SUBJECTS.has(selectedSubject)) {
+        return NextResponse.json({ error: `Unrecognized subject: "${subjectKeyRaw || subject || ''}"` }, { status: 400 });
+      }
     }
 
     const providers = (providerRows ?? [])
@@ -200,9 +198,19 @@ export async function GET(request: NextRequest) {
         // Test Prep behaves like a strict tutoring subject ("test_prep" must be explicitly present).
         const rawSubjects = (p as any).data?.subjects;
         if (!Array.isArray(rawSubjects) || rawSubjects.length === 0) return false;
-        if (!selectedSubject) return false;
-        const subjects = (rawSubjects as any[]).map(normalizeSubject).filter(Boolean) as string[];
-        return subjects.includes(selectedSubject);
+
+        const { matched, log } = computeSubjectEligibility({
+          selectedSubjectRaw,
+          providerId: (p as any).id,
+          providerSubjectsRaw: rawSubjects,
+          providerServicesRaw: (p as any)?.data?.services,
+        });
+
+        if (log.selectedSubjectNormalized === 'test_prep') {
+          console.log('[TEST_PREP_NORMALIZED_MATCH]', log);
+        }
+
+        return matched;
       })
       .map((p: any) => p.id);
 
