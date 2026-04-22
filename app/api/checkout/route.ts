@@ -132,21 +132,23 @@ export async function POST(request: NextRequest) {
       '';
 
     // Canonical service type (paid booking services)
+    // IMPORTANT:
+    // - `originalServiceType` is what the user selected (used for UI + session records)
+    // - `normalizedServiceType` (below) is for backend slot/availability logic only
     const normalizedService = String(serviceRaw || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-    const serviceType = normalizedService;
-    const originalServiceType = serviceType;
+    let originalServiceType = normalizedService;
+    if (originalServiceType === 'virtual_tours') originalServiceType = 'virtual_tour';
+    if (originalServiceType === 'counseling') originalServiceType = 'college_counseling';
+    const serviceType = originalServiceType;
 
     // Availability normalization (virtual tours reuse counseling availability/booking behavior).
     let normalizedAvailabilityServiceType = serviceType;
-    if (serviceType === 'virtual_tour' || serviceType === 'virtual_tours') {
+    if (serviceType === 'virtual_tour') {
       normalizedAvailabilityServiceType = 'college_counseling';
     }
 
     // Pricing normalization (IMPORTANT: virtual_tour must stay virtual_tour for pricing).
-    let normalizedPricingServiceType = serviceType;
-    if (normalizedPricingServiceType === 'virtual_tours') {
-      normalizedPricingServiceType = 'virtual_tour';
-    }
+    const normalizedPricingServiceType = serviceType;
 
     // Backwards-compatible variable used throughout booking/session logic.
     normalizedServiceType = normalizedAvailabilityServiceType;
@@ -871,7 +873,7 @@ export async function POST(request: NextRequest) {
       idempotencyKey,
       studentId,
       providerId,
-      serviceType: normalizedServiceType,
+      serviceType,
       plan: pricingPlan,
       sessionTimes: sessionPayloads.map((p: any) => ({
         scheduledStart: String(p?.scheduledStart || ''),
@@ -997,11 +999,13 @@ export async function POST(request: NextRequest) {
           customer_email: user.email,
           success_url: `${baseUrl}/dashboard/book/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${baseUrl}/dashboard/book/summary?canceled=true`,
-          client_reference_id: `ivyway|${normalizedServiceType}|${studentId}|${providerId}|${String(single?.scheduledStart || '')}|${String(single?.scheduledEnd || '')}|${checkoutBookingId}`.slice(0, 500),
+          client_reference_id: `ivyway|${serviceType}|${studentId}|${providerId}|${String(single?.scheduledStart || '')}|${String(single?.scheduledEnd || '')}|${checkoutBookingId}`.slice(0, 500),
           metadata: {
             // Keep Stripe metadata minimal; webhook primarily uses client_reference_id + checkout store.
-            serviceType: normalizedServiceType,
-            service_type: normalizedServiceType,
+            serviceType,
+            service_type: serviceType,
+            normalized_service_type: normalizedServiceType,
+            normalizedServiceType,
             studentId,
             providerId,
             checkoutBookingId,

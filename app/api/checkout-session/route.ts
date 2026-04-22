@@ -153,6 +153,12 @@ export async function GET(request: NextRequest) {
       (isNonEmptyString((md as any).service_type) ? String((md as any).service_type).trim() : '') ||
       (ref?.serviceType || '');
     const serviceType = normalizeServiceType(serviceTypeRaw);
+    const normalizedServiceType =
+      serviceType === 'virtual_tour'
+        ? 'college_counseling'
+        : serviceType === 'test_prep'
+          ? 'tutoring'
+          : serviceType;
 
     const providerId =
       (checkoutBooking && isNonEmptyString(checkoutBooking.providerId) ? checkoutBooking.providerId : '') ||
@@ -411,6 +417,7 @@ export async function GET(request: NextRequest) {
             serviceType,
             serviceTypeId: serviceType,
             service_type: pricingServiceType,
+            normalized_service_type: normalizedServiceType || undefined,
             status: 'confirmed',
             stripeCheckoutSessionId: checkoutSession.id,
             stripePaymentIntentId: stripePaymentIntentId || undefined,

@@ -144,19 +144,15 @@ export async function GET(req: NextRequest) {
 
     const { date, serviceType, subject, language, schoolId, schoolName, providerId, debugOnlyProviderFilter } = parsed.data;
 
-    const normalizedServiceType = normalizeServiceType(serviceType);
-    const requestedService = String(normalizedServiceType || '').trim();
-    let normalizedRequestedService = requestedService;
-    if (requestedService === 'virtual_tour') {
-      normalizedRequestedService = 'college_counseling';
-    }
-    // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
-    const availabilityServiceType =
-      normalizedServiceType === 'virtual_tour'
-        ? 'college_counseling'
-        : normalizedServiceType === 'test_prep'
-          ? 'tutoring'
-          : normalizedServiceType;
+    const requestedService = normalizeServiceType(serviceType);
+    const normalizedServiceType = requestedService;
+    const normalizedRequestedService =
+      requestedService === 'virtual_tour' ? 'college_counseling' : requestedService === 'test_prep' ? 'tutoring' : requestedService;
+
+    console.log('[SERVICE_NORMALIZATION]', {
+      requestedService,
+      normalizedRequestedService,
+    });
 
     // Tutoring requires subject selection; Test Prep is a service UX that maps to tutoring + subject=test_prep.
     const rawSubjectParams = url.searchParams.getAll('subject').map((s) => String(s || '').trim()).filter(Boolean);
@@ -540,7 +536,7 @@ export async function GET(req: NextRequest) {
         .from('availability_slots')
         .select('*')
         .in('provider_id', batch)
-        .eq('service_type', availabilityServiceType)
+        .eq('service_type', normalizedRequestedService)
         .eq('is_booked', false)
         .order('start_time', { ascending: true });
       if (error) throw error;

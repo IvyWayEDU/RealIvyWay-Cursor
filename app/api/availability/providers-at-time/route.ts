@@ -157,19 +157,15 @@ export async function GET(req: NextRequest) {
     const selectedDate = formatDateKeyInTimeZone(startD, bookingTimeZone);
     const selectedTime = formatTimeHHMMInTimeZone(startD, bookingTimeZone);
 
-    const normalizedServiceType = normalizeServiceType(serviceType);
-    const requestedService = String(normalizedServiceType || '').trim();
-    let normalizedRequestedService = requestedService;
-    if (requestedService === 'virtual_tour') {
-      normalizedRequestedService = 'college_counseling';
-    }
-    // Booking rule: virtual tours reuse college counseling availability; test prep reuses tutoring.
-    const inventoryServiceType =
-      normalizedServiceType === 'virtual_tour'
-        ? 'college_counseling'
-        : normalizedServiceType === 'test_prep'
-          ? 'tutoring'
-          : normalizedServiceType;
+    const requestedService = normalizeServiceType(serviceType);
+    const normalizedServiceType = requestedService;
+    const normalizedRequestedService =
+      requestedService === 'virtual_tour' ? 'college_counseling' : requestedService === 'test_prep' ? 'tutoring' : requestedService;
+
+    console.log('[SERVICE_NORMALIZATION]', {
+      requestedService,
+      normalizedRequestedService,
+    });
 
     if ((normalizedServiceType === 'tutoring' || normalizedServiceType === 'test_prep') && !String(subject || '').trim()) {
       return NextResponse.json({ error: 'subject is required for tutoring and test prep services' }, { status: 400 });
@@ -458,7 +454,7 @@ export async function GET(req: NextRequest) {
         .from('availability_slots')
         .select('provider_id, start_time, end_time')
         .in('provider_id', batch)
-        .eq('service_type', inventoryServiceType)
+        .eq('service_type', normalizedRequestedService)
         .eq('is_booked', false)
         .order('provider_id', { ascending: true });
       if (error) throw error;

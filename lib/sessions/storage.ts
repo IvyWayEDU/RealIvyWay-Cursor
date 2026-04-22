@@ -105,6 +105,31 @@ function mergeDbRowIntoSession(row: SessionDbRow): Session | null {
   s.provider_joined_at = providerJoinedAtRow || providerJoinedAtData || null;
   s.student_joined_at = studentJoinedAtRow || studentJoinedAtData || null;
 
+  // Backward safety: if normalized_service_type is missing, derive it from persisted service fields.
+  // This keeps internal logic stable across older session rows.
+  const normExisting =
+    typeof s.normalized_service_type === 'string' ? String(s.normalized_service_type).trim() : '';
+  if (!normExisting) {
+    const raw =
+      (typeof s.service_type === 'string' && String(s.service_type).trim()
+        ? String(s.service_type)
+        : typeof s.serviceType === 'string' && String(s.serviceType).trim()
+          ? String(s.serviceType)
+          : '');
+    const v = raw.trim().toLowerCase().replace(/-/g, '_');
+    let canonical = v;
+    if (canonical === 'virtual_tours') canonical = 'virtual_tour';
+    if (canonical === 'counseling') canonical = 'college_counseling';
+    if (canonical === 'testprep') canonical = 'test_prep';
+    const normalized =
+      canonical === 'virtual_tour'
+        ? 'college_counseling'
+        : canonical === 'test_prep'
+          ? 'tutoring'
+          : canonical;
+    if (normalized) s.normalized_service_type = normalized;
+  }
+
   return s as Session;
 }
 

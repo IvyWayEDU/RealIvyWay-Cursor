@@ -134,13 +134,14 @@ export async function GET(request: NextRequest) {
     }
     
     // Fetch concrete slots from Supabase (excludes reserved slots + booked sessions defensively)
-    const normalized = normalizeServiceType(serviceTypePrimary);
-    const availabilityServiceType =
-      normalized === 'virtual_tour'
-        ? 'college_counseling'
-        : normalized === 'test_prep'
-          ? 'tutoring'
-          : normalized;
+    const requestedService = normalizeServiceType(serviceTypePrimary);
+    const normalizedRequestedService =
+      requestedService === 'virtual_tour' ? 'college_counseling' : requestedService === 'test_prep' ? 'tutoring' : requestedService;
+
+    console.log('[SERVICE_NORMALIZATION]', {
+      requestedService,
+      normalizedRequestedService,
+    });
 
     // Normalize serviceType(s) for inventory querying (DB service_type values)
     let normalizedServiceTypes: string[] = [];
@@ -166,7 +167,7 @@ export async function GET(request: NextRequest) {
     // We filter by comparing NY date keys only (see getNYDateKey usage below).
     const selectedDate = date;
 
-    const leadTimeHours = normalized === 'virtual_tour' ? 2 : 0;
+    const leadTimeHours = requestedService === 'virtual_tour' ? 2 : 0;
     const minStartMs = Date.now() + leadTimeHours * 60 * 60 * 1000;
 
     const supabase = getSupabaseAdmin();
@@ -235,7 +236,7 @@ export async function GET(request: NextRequest) {
         .from('availability_slots')
         .select('provider_id, start_time, end_time, service_type, is_booked')
         .in('provider_id', batch)
-        .eq('service_type', availabilityServiceType)
+        .eq('service_type', normalizedRequestedService)
         .eq('is_booked', false)
         .order('start_time', { ascending: true });
       if (error) throw error;

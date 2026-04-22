@@ -218,6 +218,17 @@ export async function POST(request: NextRequest) {
         return '';
       };
 
+      // Normalized service type for backend slot logic.
+      // - virtual_tour uses college_counseling availability
+      // - test_prep uses tutoring availability
+      const normalizeBackendServiceType = (raw: unknown): string => {
+        const canonical = normalizeServiceType(raw);
+        if (!canonical) return '';
+        if (canonical === 'virtual_tour') return 'college_counseling';
+        if (canonical === 'test_prep') return 'tutoring';
+        return canonical;
+      };
+
       const parseClientReferenceId = (raw: unknown): {
         serviceType: string;
         studentId: string;
@@ -249,6 +260,7 @@ export async function POST(request: NextRequest) {
         normalizeServiceType(metadata.service) ||
         ctx?.serviceType ||
         '';
+      const normalizedServiceType = normalizeBackendServiceType(canonicalServiceType);
       const studentId = (isNonEmpty(metadata.studentId) ? String(metadata.studentId).trim() : '') || (ctx?.studentId || '');
       const providerId =
         (isNonEmpty(metadata.providerId) ? String(metadata.providerId).trim() : '') || (ctx?.providerId || '');
@@ -629,6 +641,7 @@ export async function POST(request: NextRequest) {
           serviceType: service_type === 'counseling' ? 'college_counseling' : service_type,
           serviceTypeId: service_type === 'counseling' ? 'college_counseling' : service_type,
           service_type,
+          normalized_service_type: normalizedServiceType || undefined,
           plan,
           // 1-based index for bundled session creation (monthly plans create 4 sessions).
           session_index: i + 1,

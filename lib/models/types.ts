@@ -357,6 +357,11 @@ export interface Session {
    * We keep those for backwards compatibility while migrating.
    */
   service_type?: 'tutoring' | 'counseling' | 'test_prep' | 'virtual_tour' | 'ivyway_ai' | string;
+  /**
+   * Backend normalization used for slot matching / availability logic.
+   * Example: virtual_tour -> college_counseling, test_prep -> tutoring.
+   */
+  normalized_service_type?: string;
   plan?: 'single' | 'monthly' | 'yearly' | string | null;
   // Counseling is 60 minutes only (no 30-minute counseling sessions).
   duration_minutes?: 60 | null;
