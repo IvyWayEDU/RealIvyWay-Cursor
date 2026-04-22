@@ -564,7 +564,12 @@ export async function GET(req: NextRequest) {
 
     const normalizedSubjectsMap: Record<string, string[]> = Object.fromEntries(
       shownProviders.map((p) => {
-        const rawSubjects = (p as any)?.data?.subjects;
+        // Subjects may exist on either providers.data or users.data depending on migration state.
+        // Prefer providers.data.subjects when present; fall back to users.data.subjects.
+        const rawSubjects =
+          Array.isArray((p as any)?.data?.subjects) && (p as any).data.subjects.length > 0
+            ? (p as any).data.subjects
+            : (p as any)?.userData?.subjects;
         const subjects =
           Array.isArray(rawSubjects) && rawSubjects.length > 0
             ? (rawSubjects as any[]).map(normalizeSubject).filter(Boolean)

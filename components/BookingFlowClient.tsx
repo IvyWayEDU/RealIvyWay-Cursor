@@ -2385,18 +2385,20 @@ function Step5SelectProvider({
         }
 
         const providersOut = intersection ? Array.from(intersection.values()) : [];
-        const validProviderIds = providersOut.map((p) => p.providerId);
+        const providerIdsFromAvailability = providersOut.map((p) => p.providerId);
 
         // Safety: enforce the requested service context again on the client.
         const selectedSubjectCanonical = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) : null;
-        const filteredProviders = providersOut.filter((p) => validProviderIds.includes(p.providerId));
+        const filteredProviders = providersOut.filter((p) => providerIdsFromAvailability.includes(p.providerId));
         const finalProviders = filteredProviders.filter((provider) => {
           const subjects = Array.isArray(provider?.subjects)
             ? provider.subjects.map((s) => String(s).trim().toLowerCase().replace(/-/g, '_')).filter(Boolean)
             : [];
 
-          // Strictly prevent tutoring providers from appearing in Test Prep unless they explicitly include test_prep.
-          if (selectedService === 'test_prep') return subjects.includes('test_prep');
+          // IMPORTANT: For Test Prep, trust availability providerIds as the source of truth.
+          // Provider profiles may store test_prep as a tutoring subject and not always return it here,
+          // so we must not accidentally drop providers that already passed availability checks.
+          if (selectedService === 'test_prep') return true;
 
           // Tutoring: keep subject consistency when we have a canonical subject.
           if (selectedService === 'tutoring' && selectedSubjectCanonical) {
@@ -2410,13 +2412,21 @@ function Step5SelectProvider({
         console.log('[BOOKING_FLOW]', {
           selectedService,
           selectedTime: selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((s) => s.startTimeUTC),
-          providerIds: validProviderIds,
+          providerIds: providerIdsFromAvailability,
         });
 
         console.log('[CONFIRM_PROVIDER_DEBUG]', {
           selectedService,
-          validProviderIds,
+          validProviderIds: providerIdsFromAvailability,
           shownProviders: finalProviders.map((p) => p.providerId),
+        });
+
+        console.log('[TEST_PREP_PROVIDER_CONFIRM]', {
+          selectedService,
+          selectedSubject: bookingState.subject,
+          selectedSubjectCanonical,
+          providerIdsFromAvailability,
+          finalProvidersShown: finalProviders.map((p) => p.providerId),
         });
 
         if (!cancelled) {
@@ -2490,7 +2500,22 @@ function Step5SelectProvider({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {eligibleProviders.map((p) => {
             const selected = selectedProviderId === p.providerId;
-            const subjects = Array.isArray(p.subjects) ? p.subjects.filter((s) => typeof s === 'string' && s.trim()) : [];
+            const rawSubjects = Array.isArray(p.subjects) ? p.subjects.filter((s) => typeof s === 'string' && s.trim()) : [];
+            const normalizedSubjectKeys = rawSubjects
+              .map((s) => String(s).trim().toLowerCase().replace(/-/g, '_'))
+              .filter(Boolean);
+            const uniqueSubjectKeys = Array.from(new Set(normalizedSubjectKeys));
+
+            const priorityKeys: string[] = [];
+            if (selectedService === 'tutoring' && selectedSubjectCanonical && selectedSubjectCanonical !== 'test_prep') {
+              priorityKeys.push(String(selectedSubjectCanonical).trim().toLowerCase().replace(/-/g, '_'));
+            }
+            if (uniqueSubjectKeys.includes('test_prep')) {
+              // Always show Test Prep specialization when present.
+              priorityKeys.push('test_prep');
+            }
+
+            const subjectsToShow = Array.from(new Set([...priorityKeys, ...uniqueSubjectKeys])).slice(0, 3);
             return (
               <button
                 key={p.providerId}
@@ -2535,9 +2560,9 @@ function Step5SelectProvider({
                           <div className="mt-0.5 text-sm text-gray-500">{p.schoolName.trim()}</div>
                         ) : null}
 
-                        {subjects.length > 0 ? (
+                        {subjectsToShow.length > 0 ? (
                           <div className="mt-2 flex flex-wrap gap-2">
-                            {subjects.slice(0, 3).map((s) => (
+                            {subjectsToShow.map((s) => (
                               <span
                                 key={s}
                                 className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700"
