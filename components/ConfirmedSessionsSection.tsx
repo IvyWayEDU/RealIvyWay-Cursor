@@ -4,13 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
-import ZoomJoinModal from './ZoomJoinModal';
 
 export default function ConfirmedSessionsSection() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
-  const [joinConfirm, setJoinConfirm] = useState<{ joinUrl: string; sessionId: string } | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const lastJsonRef = useRef<string>('');
   const didInitialLoadRef = useRef<boolean>(false);
   const router = useRouter();
@@ -72,11 +69,6 @@ export default function ConfirmedSessionsSection() {
     // Refresh periodically to catch webhook updates
     const interval = setInterval(fetchSessions, 20000);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(id);
   }, []);
 
   const formatDate = (date: Date): string => {
@@ -247,57 +239,31 @@ export default function ConfirmedSessionsSection() {
 
                       {(() => {
                         const joinUrl = getJoinUrl(session as any);
-                        const sessionDatetime = (session as any)?.datetime;
-
-                        if (process.env.NODE_ENV !== 'production') {
-                          console.log({
-                            sessionDatetime: sessionDatetime,
-                            now: new Date().toISOString(),
-                            startTime: new Date(sessionDatetime).getTime(),
-                            nowTime: Date.now(),
-                            canJoin: Date.now() >= (new Date(sessionDatetime).getTime() - 10 * 60 * 1000),
-                          });
-                        }
-
-                        const sessionStart = new Date(sessionDatetime).getTime();
-                        const now = nowMs;
-
-                        const canJoinSession =
-                          Number.isFinite(sessionStart) &&
-                          now >= sessionStart - 10 * 60 * 1000 &&
-                          now <= sessionStart + 60 * 60 * 1000;
+                        const status = String((session as any)?.status || '');
+                        const canShowJoinNow = !!joinUrl && (status === 'confirmed' || status === 'upcoming');
                         return (
                           <>
-                            {joinUrl ? (
-                              <button
-                                type="button"
-                                disabled={!canJoinSession}
+                            {canShowJoinNow ? (
+                              <a
+                                href={joinUrl as string}
+                                target="_blank"
+                                rel="noopener noreferrer"
                                 onClick={() => {
-                                  // Early clicks are blocked via disabled button only.
-                                  setJoinConfirm({ joinUrl, sessionId: session.id });
+                                  // Best-effort: track student join, but never block opening Zoom.
+                                  void fetch('/api/sessions/track-student-join', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ sessionId: session.id }),
+                                  }).catch(() => {});
                                 }}
-                                className={`inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                  canJoinSession
-                                    ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
-                                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                }`}
+                                className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors bg-[#0088CB] text-white hover:bg-[#0077B3]"
                                 title="Join Now"
                               >
                                 Join Now
-                              </button>
+                              </a>
                             ) : (
                               <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
                                 Zoom link pending
-                              </div>
-                            )}
-
-                            {process.env.NODE_ENV !== 'production' && (
-                              <div className="mt-1 max-w-[360px] text-[10px] leading-snug text-gray-500 break-words">
-                                {JSON.stringify({
-                                  datetime: sessionDatetime,
-                                  now: new Date().toISOString(),
-                                  canJoin: canJoinSession,
-                                })}
                               </div>
                             )}
                           </>
@@ -311,28 +277,6 @@ export default function ConfirmedSessionsSection() {
           </div>
         )}
       </div>
-
-      {joinConfirm && (
-        <ZoomJoinModal
-          isOpen={!!joinConfirm}
-          onClose={() => setJoinConfirm(null)}
-          message="Please allow up to 10 minutes for the provider to join"
-          confirmLabel="Join Zoom Session"
-          onConfirm={async () => {
-            const { joinUrl, sessionId } = joinConfirm;
-            setJoinConfirm(null);
-            // Best-effort: track student join, but do not block redirect after confirmation.
-            try {
-              await fetch('/api/sessions/track-student-join', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionId }),
-              });
-            } catch {}
-            window.location.href = joinUrl;
-          }}
-        />
-      )}
     </div>
   );
 }

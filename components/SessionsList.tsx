@@ -4,11 +4,10 @@ import { useState, useEffect } from 'react';
 import { Session } from '@/lib/models/types';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { getCurrentUserId } from '@/lib/sessions/actions';
-import { getSessionEndDatetimeMs, normalizeZoomJoinUrl } from '@/lib/sessions/uiHelpers';
+import { getSessionEndDatetimeMs } from '@/lib/sessions/uiHelpers';
 import { useProviderSessionHeartbeat } from '@/lib/sessions/useProviderSessionHeartbeat';
 import { getReviewBySessionId, hasReviewForSession } from '@/lib/reviewStore';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
-import ZoomJoinModal from './ZoomJoinModal';
 import ReviewModal from './ReviewModal';
 
 // Extended session type with provider and student information
@@ -57,11 +56,6 @@ export default function SessionsList({ role }: SessionsListProps) {
   const [sessions, setSessions] = useState<SessionWithProvider[]>([]);
   const [loading, setLoading] = useState(true);
   const [displayRole, setDisplayRole] = useState<'student' | 'provider'>('provider');
-  const [zoomConfirm, setZoomConfirm] = useState<{
-    session: Session;
-    joinUrl: string;
-    message: string;
-  } | null>(null);
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [reviewModalSession, setReviewModalSession] = useState<Session | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -552,75 +546,64 @@ export default function SessionsList({ role }: SessionsListProps) {
                           if (!Number.isFinite(sessionEnd)) return null;
                           if (sessionEnd <= nowMs) return null; // Don't show after session window ends
                           
-                          const normalizedZoomUrl = normalizeZoomJoinUrl(session);
-                          // Per spec: always navigate to session.zoom_join_url (participants join link).
-                          const joinUrl = normalizedZoomUrl;
-
-                          const sessionDatetime = (session as any)?.datetime;
-
-                          if (process.env.NODE_ENV !== 'production') {
-                            console.log({
-                              sessionDatetime: sessionDatetime,
-                              now: new Date().toISOString(),
-                              startTime: new Date(sessionDatetime).getTime(),
-                              nowTime: Date.now(),
-                              canJoin: Date.now() >= (new Date(sessionDatetime).getTime() - 10 * 60 * 1000),
-                            });
-                          }
-
-                          const now = nowMs;
-                          const canJoin =
-                            Number.isFinite(sessionStart) &&
-                            now >= sessionStart - 10 * 60 * 1000 &&
-                            now <= sessionStart + 60 * 60 * 1000;
+                          const joinUrlRaw = (session as any)?.zoom_join_url;
+                          const joinUrl =
+                            typeof joinUrlRaw === 'string' && joinUrlRaw.trim().length > 0 ? joinUrlRaw.trim() : '';
+                          const status = String((session as any)?.status || '');
+                          const canShowJoinNow = !!joinUrl && (status === 'confirmed' || status === 'upcoming');
                           
                           return (
                             <>
-                              <button
-                                type="button"
-                                disabled={!canJoin}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!joinUrl) return;
-                                  // Time gating is enforced via disabled button only.
-                                  setZoomConfirm({
-                                    session,
-                                    joinUrl,
-                                    message:
-                                      displayRole === 'provider'
-                                        ? 'Please allow up to 10 minutes for the student to join'
-                                        : 'Please allow up to 10 minutes for the provider to join',
-                                  });
-                                }}
-                                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                                  !canJoin
-                                    ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                                    : 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
-                                }`}
-                              >
-                                <svg
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                                  />
-                                </svg>
-                                Join Session
-                              </button>
+                              {canShowJoinNow ? (
+                                <a
+                                  href={joinUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Best-effort: record join + enable heartbeat, but never block opening Zoom.
+                                    void fetch('/api/sessions/heartbeat', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ sessionId: session.id, role: displayRole, event: 'join' }),
+                                    }).catch(() => {});
+                                    setActiveSessionId(session.id);
 
-                              {process.env.NODE_ENV !== 'production' && (
-                                <div className="mt-1 max-w-[360px] text-[10px] leading-snug text-gray-500 break-words">
-                                  {JSON.stringify({
-                                    datetime: sessionDatetime,
-                                    now: new Date().toISOString(),
-                                    canJoin,
-                                  })}
+                                    if (displayRole === 'provider') {
+                                      void fetch('/api/sessions/track-provider-join', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ sessionId: session.id }),
+                                      }).catch(() => {});
+                                    } else {
+                                      void fetch('/api/sessions/track-student-join', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ sessionId: session.id }),
+                                      }).catch(() => {});
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-[#0088CB] text-white hover:bg-[#0077B3]"
+                                  title="Join Now"
+                                >
+                                  <svg
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      strokeWidth={2}
+                                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                    />
+                                  </svg>
+                                  Join Now
+                                </a>
+                              ) : (
+                                <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                                  Zoom link pending
                                 </div>
                               )}
                             </>
@@ -1015,50 +998,6 @@ export default function SessionsList({ role }: SessionsListProps) {
           )}
         </div>
       </div>
-
-      {/* Zoom Join Confirm Modal */}
-      {zoomConfirm && (
-        <ZoomJoinModal
-          isOpen={!!zoomConfirm}
-          onClose={() => setZoomConfirm(null)}
-          message={zoomConfirm.message}
-          confirmLabel="Join Zoom Session"
-          onConfirm={async () => {
-            const { session, joinUrl } = zoomConfirm;
-            setZoomConfirm(null);
-
-            // Best-effort: record join + enable heartbeat, but do not block redirect on failures.
-            try {
-              await fetch('/api/sessions/heartbeat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionId: session.id, role: displayRole, event: 'join' }),
-              });
-              setActiveSessionId(session.id);
-            } catch {}
-
-            if (displayRole === 'provider') {
-              try {
-                await fetch('/api/sessions/track-provider-join', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ sessionId: session.id }),
-                });
-              } catch {}
-            } else {
-              try {
-                await fetch('/api/sessions/track-student-join', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ sessionId: session.id }),
-                });
-              } catch {}
-            }
-
-            window.location.href = joinUrl;
-          }}
-        />
-      )}
 
       {/* Review Modal */}
       {reviewModalSession && (

@@ -10,7 +10,6 @@ import ReviewModal from '@/components/ReviewModal';
 import { getCurrentUserId } from '@/lib/sessions/actions';
 import { ensureConversationExistsForPair } from '@/lib/messages/actions';
 import { getReviewForSessionByReviewer } from '@/lib/reviewStore';
-import { canJoinSessionNow } from '@/lib/sessions/uiHelpers';
 
 interface SessionCardProps {
   session: Session;
@@ -128,7 +127,10 @@ function SessionCard({
     typeof (session as any)?.zoom_join_url === 'string' && (session as any).zoom_join_url.trim()
       ? String((session as any).zoom_join_url).trim()
       : null;
-  const joinEnabled = !isCompleted && !!zoomJoinUrl && typeof nowMs === 'number' ? canJoinSessionNow(session as any, nowMs) : false;
+  const canShowJoinNow =
+    !isCompleted &&
+    !!zoomJoinUrl &&
+    (String((session as any)?.status || '') === 'confirmed' || String((session as any)?.status || '') === 'upcoming');
 
   const Stars = ({ count }: { count: number }) => (
     <span className="inline-flex items-center gap-0.5">
@@ -238,18 +240,12 @@ function SessionCard({
 
         {/* Join Now (upcoming sessions only) */}
         {!isCompleted && (
-          zoomJoinUrl ? (
-            <button
-              type="button"
-              disabled={!joinEnabled}
-              onClick={() => {
-                if (!zoomJoinUrl) return;
-                if (!joinEnabled) return;
-                window.location.href = zoomJoinUrl;
-              }}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                joinEnabled ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]' : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-              }`}
+          canShowJoinNow ? (
+            <a
+              href={zoomJoinUrl as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-[#0088CB] text-white hover:bg-[#0077B3]"
               title="Join Now"
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -261,7 +257,7 @@ function SessionCard({
                 />
               </svg>
               Join Now
-            </button>
+            </a>
           ) : (
             <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
               Zoom link pending
