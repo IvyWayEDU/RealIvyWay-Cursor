@@ -255,9 +255,49 @@ export async function GET(request: NextRequest) {
       return Boolean(a || b);
     };
     const ensureZoomForSession = async (s: any, startIso: string) => {
-      if (!isZoomConfigured()) return;
-      if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) return; // idempotency: never create duplicates
+      const sessionId = String(s?.id || '').trim();
+      const providerId = String(s?.providerId || '').trim();
+      console.log('[ZOOM_DEBUG_START]', {
+        sessionId: sessionId || null,
+        providerId: providerId || null,
+        startTime: startIso,
+      });
+      console.log('[ZOOM_DEBUG_ENV]', {
+        hasAccountId: !!process.env.ZOOM_ACCOUNT_ID,
+        hasClientId: !!process.env.ZOOM_CLIENT_ID,
+        hasClientSecret: !!process.env.ZOOM_CLIENT_SECRET,
+      });
+
+      if (!sessionId) {
+        console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
+          reason: 'missing_session_id',
+          providerId: providerId || null,
+          startTime: startIso,
+        });
+        return;
+      }
+
+      if (!isZoomConfigured()) {
+        console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
+          reason: 'zoom_not_configured',
+          sessionId,
+          providerId: providerId || null,
+          startTime: startIso,
+        });
+        return;
+      }
+
+      if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) {
+        console.log('[ZOOM_SKIPPED]', {
+          reason: hasZoomJoinUrl(s) ? 'already_has_join_url' : 'already_has_meeting_id',
+          sessionId,
+          providerId: providerId || null,
+          startTime: startIso,
+        });
+        return; // idempotency: never create duplicates
+      }
       try {
+        console.log('[ZOOM_DEBUG_BEFORE_CREATE]', 'Attempting Zoom meeting creation');
         console.log("Creating Zoom meeting for session:", String(s?.id || ''), (s as any)?.datetime ?? startIso);
         const zoom = await createZoomMeeting({
           topic: 'IvyWay Session',
@@ -296,6 +336,7 @@ export async function GET(request: NextRequest) {
           sessionId: String(s?.id || ''),
           error: error instanceof Error ? error.message : String(error),
         });
+        console.error('[ZOOM_MEETING_CREATE_FAILED_RAW]', error);
         // Best-effort: persist failure state, but never block booking.
         try {
           await updateSession(String(s?.id || ''), { zoomStatus: 'failed' } as any);

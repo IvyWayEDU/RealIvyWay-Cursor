@@ -91,7 +91,11 @@ async function getZoomAccessToken(): Promise<string> {
     }
 
     const data: ZoomAccessToken = await response.json();
-    console.log('Zoom token:', data.access_token);
+    console.log('[ZOOM_TOKEN_OK]', {
+      expires_in: data.expires_in,
+      scope_present: typeof data.scope === 'string' && data.scope.trim().length > 0,
+      token_type: data.token_type,
+    });
 
     // Cache the token (expire 5 minutes before actual expiry for safety)
     cachedToken = {
@@ -116,7 +120,6 @@ export async function createZoomMeeting(
   params: CreateZoomMeetingParams
 ): Promise<{ joinUrl: string; startUrl: string; meetingId: string }> {
   const accessToken = await getZoomAccessToken();
-  console.log('Zoom token:', accessToken);
 
   const meetingData = {
     topic: params.topic,
@@ -166,7 +169,10 @@ export async function createZoomMeeting(
       meetingId: responseData.id.toString(),
     };
   } catch (err: any) {
-    console.error("Zoom API error:", err?.response?.data || err?.message);
+    console.error('[ZOOM_API_ERROR]', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    console.error('[ZOOM_API_ERROR_RAW]', err);
     throw err;
   }
 }

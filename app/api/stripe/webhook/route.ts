@@ -445,60 +445,84 @@ export async function POST(request: NextRequest) {
       // If sessions already exist for this payment intent, we still may need to backfill Zoom URLs
       // (e.g., a previous attempt created the session but failed before persisting Zoom).
       if (alreadyForPayment.length >= sessionTimes.length) {
-        if (isZoomConfigured()) {
-          for (const s of alreadyForPayment) {
-            if (!s?.id) continue;
-            if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) continue; // idempotency: never create duplicates
-            const startIso =
-              toIsoOrNull((s as any)?.datetime) ||
-              toIsoOrNull((s as any)?.startTime) ||
-              toIsoOrNull((s as any)?.scheduledStartTime) ||
-              toIsoOrNull((s as any)?.scheduledStart) ||
-              null;
-            if (!startIso) continue;
+        for (const s of alreadyForPayment) {
+          if (!s?.id) continue;
+          if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) continue; // idempotency: never create duplicates
+          const startIso =
+            toIsoOrNull((s as any)?.datetime) ||
+            toIsoOrNull((s as any)?.startTime) ||
+            toIsoOrNull((s as any)?.scheduledStartTime) ||
+            toIsoOrNull((s as any)?.scheduledStart) ||
+            null;
+          if (!startIso) continue;
+
+          console.log('[ZOOM_DEBUG_START]', {
+            sessionId: String(s.id),
+            providerId: String((s as any)?.providerId || providerId || ''),
+            startTime: startIso,
+          });
+          console.log('[ZOOM_DEBUG_ENV]', {
+            hasAccountId: !!process.env.ZOOM_ACCOUNT_ID,
+            hasClientId: !!process.env.ZOOM_CLIENT_ID,
+            hasClientSecret: !!process.env.ZOOM_CLIENT_SECRET,
+          });
+
+          if (!isZoomConfigured()) {
+            console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
+              reason: 'zoom_not_configured',
+              stripeSessionId: session.id,
+              paymentIntentId,
+              sessionId: String(s.id),
+              providerId: String((s as any)?.providerId || providerId || ''),
+              startTime: startIso,
+            });
+            continue;
+          }
+
+          try {
+            console.log('[ZOOM_DEBUG_BEFORE_CREATE]', 'Attempting Zoom meeting creation');
+            console.log("Creating Zoom meeting for session:", String(s.id), (s as any)?.datetime ?? startIso);
+            const zoom = await createZoomMeeting({
+              topic: 'IvyWay Session',
+              startTime: startIso,
+              duration: 60,
+            });
+            const join_url = zoom.joinUrl;
+            await updateSession(String(s.id), {
+              zoomMeetingId: zoom.meetingId,
+              zoom_meeting_id: zoom.meetingId,
+              zoom_join_url: join_url,
+              zoomStartUrl: zoom.startUrl,
+              zoom_start_url: zoom.startUrl,
+              zoomStatus: 'created',
+            } as any);
+            // Persist to dedicated DB column (source-of-truth for `sessions.zoom_join_url`)
             try {
-              console.log("Creating Zoom meeting for session:", String(s.id), (s as any)?.datetime ?? startIso);
-              const zoom = await createZoomMeeting({
-                topic: 'IvyWay Session',
-                startTime: startIso,
-                duration: 60,
-              });
-              const join_url = zoom.joinUrl;
-              await updateSession(String(s.id), {
-                zoomMeetingId: zoom.meetingId,
-                zoom_meeting_id: zoom.meetingId,
-                zoom_join_url: join_url,
-                zoomStartUrl: zoom.startUrl,
-                zoom_start_url: zoom.startUrl,
-                zoomStatus: 'created',
-              } as any);
-              // Persist to dedicated DB column (source-of-truth for `sessions.zoom_join_url`)
-              try {
-                const supabase = getSupabaseAdmin();
-                const { error } = await supabase
-                  .from('sessions')
-                  .update({ zoom_join_url: join_url })
-                  .eq('id', String(s.id));
-                if (error) throw error;
-                console.log("Saved to DB:", join_url);
-              } catch (e) {
-                console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
-                  sessionId: String(s.id),
-                  error: e instanceof Error ? e.message : String(e),
-                });
-              }
-            } catch (error) {
-              console.error("Zoom meeting creation failed");
-              console.error('[ZOOM_MEETING_CREATE_FAILED]', {
-                stripeSessionId: session.id,
-                paymentIntentId,
+              const supabase = getSupabaseAdmin();
+              const { error } = await supabase
+                .from('sessions')
+                .update({ zoom_join_url: join_url })
+                .eq('id', String(s.id));
+              if (error) throw error;
+              console.log("Saved to DB:", join_url);
+            } catch (e) {
+              console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
                 sessionId: String(s.id),
-                error: error instanceof Error ? error.message : String(error),
+                error: e instanceof Error ? e.message : String(e),
               });
-              try {
-                await updateSession(String(s.id), { zoomStatus: 'failed' } as any);
-              } catch {}
             }
+          } catch (error) {
+            console.error("Zoom meeting creation failed");
+            console.error('[ZOOM_MEETING_CREATE_FAILED]', {
+              stripeSessionId: session.id,
+              paymentIntentId,
+              sessionId: String(s.id),
+              error: error instanceof Error ? error.message : String(error),
+            });
+            console.error('[ZOOM_MEETING_CREATE_FAILED_RAW]', error);
+            try {
+              await updateSession(String(s.id), { zoomStatus: 'failed' } as any);
+            } catch {}
           }
         }
         return NextResponse.json({ received: true });
@@ -716,8 +740,29 @@ export async function POST(request: NextRequest) {
         }
 
         // Best-effort Zoom meeting creation (must NOT block booking).
-        if (isZoomConfigured()) {
+        console.log('[ZOOM_DEBUG_START]', {
+          sessionId: created.id,
+          providerId,
+          startTime: startIso,
+        });
+        console.log('[ZOOM_DEBUG_ENV]', {
+          hasAccountId: !!process.env.ZOOM_ACCOUNT_ID,
+          hasClientId: !!process.env.ZOOM_CLIENT_ID,
+          hasClientSecret: !!process.env.ZOOM_CLIENT_SECRET,
+        });
+
+        if (!isZoomConfigured()) {
+          console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
+            reason: 'zoom_not_configured',
+            stripeSessionId: session.id,
+            paymentIntentId,
+            sessionId: created.id,
+            providerId,
+            startTime: startIso,
+          });
+        } else {
           try {
+            console.log('[ZOOM_DEBUG_BEFORE_CREATE]', 'Attempting Zoom meeting creation');
             console.log("Creating Zoom meeting for session:", created.id, (created as any)?.datetime ?? startIso);
             const zoom = await createZoomMeeting({
               topic: 'IvyWay Session',
@@ -764,6 +809,7 @@ export async function POST(request: NextRequest) {
               sessionId: created.id,
               error: error instanceof Error ? error.message : String(error),
             });
+            console.error('[ZOOM_MEETING_CREATE_FAILED_RAW]', error);
             // Persist failure state, but never block booking.
             try {
               await updateSession(created.id, { zoomStatus: 'failed' } as any);
