@@ -465,6 +465,53 @@ function formatSubjectLabel(subject: string): string {
     .join(' ');
 }
 
+const normalizeSubjectKey = (value: unknown): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/-/g, '_');
+
+const providerSupportsSelectedOffering = (
+  provider: any,
+  selectedService: string | null | undefined,
+  selectedSubject: string | null | undefined
+): boolean => {
+  const services = Array.isArray(provider?.services)
+    ? provider.services.map((s: any) => String(s).trim().toLowerCase())
+    : Array.isArray(provider?.data?.services)
+      ? provider.data.services.map((s: any) => String(s).trim().toLowerCase())
+      : [];
+
+  const subjectsRaw = Array.isArray(provider?.subjects)
+    ? provider.subjects
+    : Array.isArray(provider?.data?.subjects)
+      ? provider.data.subjects
+      : [];
+
+  const subjects = subjectsRaw.map((s: any) => normalizeSubjectKey(s));
+  const selectedSubjectKey = normalizeSubjectKey(selectedSubject);
+
+  if (selectedService === 'test_prep' || selectedSubjectKey === 'test_prep') {
+    return services.includes('tutoring') && subjects.includes('test_prep');
+  }
+
+  if (selectedService === 'tutoring') {
+    if (!selectedSubjectKey) return services.includes('tutoring');
+    return services.includes('tutoring') && subjects.includes(selectedSubjectKey);
+  }
+
+  if (selectedService === 'virtual_tour') {
+    return services.includes('virtual_tour') || services.includes('college_counseling');
+  }
+
+  if (selectedService === 'college_counseling') {
+    return services.includes('college_counseling');
+  }
+
+  return selectedService ? services.includes(String(selectedService).trim().toLowerCase()) : true;
+};
+
 // Check if at least one active tutor is available for a given subject or test
 // STRICT MATCHING: Only Tutors with exact subject/test match
 // For tutoring: subject-only matching (except Foreign Languages and Computer Science which require topic-level matching)
@@ -2261,6 +2308,7 @@ function Step5SelectProvider({
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [providersError, setProvidersError] = useState<string | null>(null);
   const selectedProviderId = bookingState.provider;
+  const [debugProviderIdsFromAvailability, setDebugProviderIdsFromAvailability] = useState<string[]>([]);
 
   // Canonical service type used across availability APIs + display labels.
   const selectedService =
@@ -2313,6 +2361,7 @@ function Step5SelectProvider({
     const load = async () => {
       setProvidersError(null);
       setEligibleProviders([]);
+      setDebugProviderIdsFromAvailability([]);
 
       setLoadingProviders(true);
       try {
@@ -2324,6 +2373,176 @@ function Step5SelectProvider({
 
         if (!selectedService) {
           setProvidersError('Service type not set. Please go back and try again.');
+          return;
+        }
+
+        const selectedSubjectCanonical = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) : null;
+        const selectedSubjectForMatch =
+          typeof selectedSubjectCanonical === 'string' && selectedSubjectCanonical.trim()
+            ? selectedSubjectCanonical
+            : bookingState.subject;
+        const isTestPrepFlow = selectedService === 'test_prep' || normalizeSubjectKey(selectedSubjectForMatch) === 'test_prep';
+
+        // TEST PREP CONFIRM-PROVIDER PATH:
+        // Use the same subject eligibility logic as time-slot availability (via /api/availability/slots),
+        // then filter provider profiles with a normalized matcher (services=tutoring + subjects=test_prep).
+        if (isTestPrepFlow) {
+          const uniqStrings = (arr: string[]) => Array.from(new Set(arr));
+
+          const providerIdsPerSession: string[][] = [];
+          for (const s of selectedSlots) {
+            const startTimeUTC = String((s as any)?.startTimeUTC || '').trim();
+            const endTimeUTC = String((s as any)?.endTimeUTC || '').trim();
+            if (!startTimeUTC || !endTimeUTC) {
+              providerIdsPerSession.push([]);
+              continue;
+            }
+
+            const dateKey = getNYDateKey(new Date(startTimeUTC));
+            const params = new URLSearchParams({
+              date: String(dateKey || '').trim(),
+              serviceType: 'test_prep',
+              // Required by the API, but Test Prep is normalized to subject=test_prep server-side.
+              subject: 'test_prep',
+            });
+
+            const res = await fetch(`/api/availability/slots?${params.toString()}`, { cache: 'no-store' });
+            if (!res.ok) throw new Error('Failed to load providers');
+            const json = await res.json();
+            const slots: any[] = Array.isArray(json?.slots) ? json.slots : [];
+
+            const targetStart = new Date(startTimeUTC).toISOString();
+            const targetEnd = new Date(endTimeUTC).toISOString();
+            const ids = uniqStrings(
+              slots
+                .filter((slot) => {
+                  const sIso = slot?.start ? new Date(String(slot.start)).toISOString() : '';
+                  const eIso = slot?.end ? new Date(String(slot.end)).toISOString() : '';
+                  return sIso === targetStart && eIso === targetEnd;
+                })
+                .map((slot) => String(slot?.providerId || '').trim())
+                .filter(Boolean)
+            );
+
+            providerIdsPerSession.push(ids);
+          }
+
+          // Intersection across sessions (must be available for ALL selected times)
+          let intersection: Set<string> | null = null;
+          for (const ids of providerIdsPerSession) {
+            const set = new Set(ids);
+            if (intersection === null) intersection = set;
+            else {
+              for (const id of Array.from(intersection)) {
+                if (!set.has(id)) intersection.delete(id);
+              }
+            }
+          }
+          const providerIdsFromAvailability = intersection ? Array.from(intersection) : [];
+          setDebugProviderIdsFromAvailability(providerIdsFromAvailability);
+
+          const provRes = await fetch('/api/providers', { cache: 'no-store' });
+          if (!provRes.ok) throw new Error('Failed to load providers');
+          const provJson = await provRes.json();
+          const allProviders: any[] = Array.isArray(provJson?.providers)
+            ? provJson.providers
+            : Array.isArray(provJson)
+              ? provJson
+              : [];
+
+          const confirmProvidersRaw = allProviders.filter((p: any) => {
+            const id = String(p?.id || p?.providerId || '').trim();
+            return !!id && providerIdsFromAvailability.includes(id);
+          });
+
+          const shouldDebug = selectedService === 'test_prep' || normalizeSubjectKey(selectedSubjectForMatch) === 'test_prep';
+
+          const confirmProviders = confirmProvidersRaw.filter((provider: any) => {
+            const providerId = String(provider?.id || provider?.providerId || '').trim();
+            const supports = providerSupportsSelectedOffering(provider, selectedService, selectedSubjectForMatch);
+            if (shouldDebug) {
+              console.log('[TEST_PREP_PROVIDER_MATCH]', {
+                providerId,
+                selectedService,
+                selectedSubject: selectedSubjectForMatch,
+                services: Array.isArray(provider?.services) ? provider.services : provider?.data?.services,
+                subjects: Array.isArray(provider?.subjects) ? provider.subjects : provider?.data?.subjects,
+                supports,
+              });
+            }
+            return supports;
+          });
+
+          if (shouldDebug) {
+            console.log('[TEST_PREP_CONFIRM_DEBUG]', {
+              selectedService,
+              selectedSubject: selectedSubjectForMatch,
+              providerIdsFromAvailability,
+              allProviderIds: Array.isArray(allProviders) ? allProviders.map((p: any) => String(p?.id || p?.providerId || '').trim()).filter(Boolean) : [],
+              finalConfirmProviderIds: confirmProviders.map((p: any) => String(p?.id || p?.providerId || '').trim()).filter(Boolean),
+            });
+          }
+
+          if (!cancelled) {
+            if (providerIdsFromAvailability.length === 0) {
+              setProvidersError('No providers are available for all selected times. Please go back and adjust your times.');
+              return;
+            }
+
+            if (confirmProviders.length === 0) {
+              setProvidersError(
+                'Providers were found for your selected time(s), but none match Test Prep eligibility. Please go back and try a different time.'
+              );
+              return;
+            }
+
+            const providersOut = confirmProviders.map((p: any) => {
+              const id = String(p?.id || p?.providerId || '').trim();
+              const data = p?.data && typeof p.data === 'object' ? p.data : {};
+              const rawSubjects = Array.isArray(p?.subjects)
+                ? p.subjects
+                : Array.isArray((data as any)?.subjects)
+                  ? (data as any).subjects
+                  : [];
+
+              const schoolName =
+                typeof (data as any)?.school === 'string'
+                  ? String((data as any).school).trim()
+                  : typeof (data as any)?.college === 'string'
+                    ? String((data as any).college).trim()
+                    : typeof (data as any)?.university === 'string'
+                      ? String((data as any).university).trim()
+                      : typeof (data as any)?.school_name === 'string'
+                        ? String((data as any).school_name).trim()
+                        : null;
+
+              const profileImageUrl =
+                typeof (data as any)?.profileImageUrl === 'string' && String((data as any).profileImageUrl).trim()
+                  ? String((data as any).profileImageUrl).trim()
+                  : typeof (data as any)?.avatar === 'string' && String((data as any).avatar).trim()
+                    ? String((data as any).avatar).trim()
+                    : typeof p?.profileImageUrl === 'string' && String(p.profileImageUrl).trim()
+                      ? String(p.profileImageUrl).trim()
+                      : null;
+
+              const displayName =
+                typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
+                  ? String((data as any).displayName).trim()
+                  : typeof p?.name === 'string' && p.name.trim()
+                    ? p.name.trim()
+                    : 'Provider';
+
+              return {
+                providerId: id,
+                name: displayName,
+                profileImageUrl,
+                schoolName: schoolName || null,
+                subjects: Array.isArray(rawSubjects) ? rawSubjects.map((s: any) => String(s ?? '')).filter((s: string) => !!s.trim()) : [],
+              };
+            });
+
+            setEligibleProviders(providersOut);
+          }
           return;
         }
 
@@ -2385,6 +2604,7 @@ function Step5SelectProvider({
         }
 
         const providerIdsFromAvailability = intersectionIds ? Array.from(intersectionIds) : [];
+        setDebugProviderIdsFromAvailability(providerIdsFromAvailability);
         const providersOut = providerIdsFromAvailability.map((id) => {
           return (
             providerDetailsById.get(id) || {
@@ -2397,7 +2617,6 @@ function Step5SelectProvider({
           );
         });
 
-        const selectedSubjectCanonical = bookingState.subject ? normalizeBookingSubjectId(bookingState.subject) : null;
         const selectedTime = selectedSlots.length === 1 ? selectedSlots[0]?.startTimeUTC : selectedSlots.map((ss) => ss.startTimeUTC);
 
         // Temporary debug log for strict matching verification.
@@ -2482,18 +2701,15 @@ function Step5SelectProvider({
             const selected = selectedProviderId === p.providerId;
             const rawSubjects = Array.isArray(p.subjects) ? p.subjects.filter((s) => typeof s === 'string' && s.trim()) : [];
             const normalizedSubjectKeys = rawSubjects
-              .map((s) => String(s).trim().toLowerCase().replace(/-/g, '_'))
+              .map((s) => normalizeSubjectKey(s))
               .filter(Boolean);
             const uniqueSubjectKeys = Array.from(new Set(normalizedSubjectKeys));
 
             const priorityKeys: string[] = [];
             const selectedSubject = bookingState.subject;
-            const selectedSubjectCanonical =
-              typeof selectedSubject === 'string'
-                ? selectedSubject.trim().toLowerCase().replace(/-/g, '_')
-                : null;
+            const selectedSubjectCanonical = typeof selectedSubject === 'string' ? normalizeSubjectKey(selectedSubject) : null;
             if (selectedService === 'tutoring' && selectedSubjectCanonical && selectedSubjectCanonical !== 'test_prep') {
-              priorityKeys.push(String(selectedSubjectCanonical).trim().toLowerCase().replace(/-/g, '_'));
+              priorityKeys.push(selectedSubjectCanonical);
             }
             if (uniqueSubjectKeys.includes('test_prep')) {
               // Always show Test Prep specialization when present.
