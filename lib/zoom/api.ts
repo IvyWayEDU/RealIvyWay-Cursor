@@ -57,6 +57,7 @@ function base64Encode(input: string): string {
 async function getZoomAccessToken(): Promise<string> {
   // Check if we have a valid cached token
   if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    console.log('[ZOOM_TOKEN_REQUEST]', { cacheHit: true });
     return cachedToken.token;
   }
 
@@ -71,6 +72,7 @@ async function getZoomAccessToken(): Promise<string> {
   }
 
   try {
+    console.log('[ZOOM_TOKEN_REQUEST]', { cacheHit: false });
     const body = new URLSearchParams({
       grant_type: 'account_credentials',
       account_id: accountId,
@@ -161,7 +163,13 @@ export async function createZoomMeeting(
     }
 
     const responseData: ZoomMeeting = await response.json();
-    console.log('Zoom meeting created:', responseData);
+    console.log('[ZOOM_MEETING_CREATED]', {
+      meetingId: String(responseData.id),
+      hasJoinUrl: typeof responseData.join_url === 'string' && responseData.join_url.trim().length > 0,
+      hasStartUrl: typeof responseData.start_url === 'string' && responseData.start_url.trim().length > 0,
+      startTime: responseData.start_time,
+      duration: responseData.duration,
+    });
 
     return {
       joinUrl: responseData.join_url,

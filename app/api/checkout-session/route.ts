@@ -257,6 +257,18 @@ export async function GET(request: NextRequest) {
     const ensureZoomForSession = async (s: any, startIso: string) => {
       const sessionId = String(s?.id || '').trim();
       const providerId = String(s?.providerId || '').trim();
+      const alreadyHasZoom = hasZoomJoinUrl(s) || hasZoomMeetingId(s);
+      const zoomConfigured = isZoomConfigured();
+
+      // This log MUST appear whenever Zoom creation is attempted/considered for a session.
+      console.log('[ZOOM_CREATE_START]', {
+        sessionId: sessionId || null,
+        stripeSessionId: checkoutSession.id,
+        providerId: providerId || null,
+        startTime: startIso,
+        alreadyHasZoom,
+        zoomConfigured,
+      });
 
       if (!sessionId) {
         console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
@@ -267,7 +279,7 @@ export async function GET(request: NextRequest) {
         return;
       }
 
-      if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) {
+      if (alreadyHasZoom) {
         console.log('[ZOOM_SKIPPED]', {
           reason: hasZoomJoinUrl(s) ? 'already_has_join_url' : 'already_has_meeting_id',
           sessionId,
@@ -277,7 +289,7 @@ export async function GET(request: NextRequest) {
         return; // idempotency: never create duplicates
       }
 
-      if (!isZoomConfigured()) {
+      if (!zoomConfigured) {
         console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
           reason: 'zoom_not_configured',
           sessionId,
@@ -310,6 +322,12 @@ export async function GET(request: NextRequest) {
           startTime: startIso,
           duration: 60,
         });
+        console.log('[ZOOM_MEETING_CREATED]', {
+          sessionId,
+          stripeSessionId: checkoutSession.id,
+          providerId: providerId || null,
+          zoomMeetingId: zoom.meetingId,
+        });
         console.log('[ZOOM_SUCCESS_CONFIRMED]', {
           sessionId,
           joinUrl: zoom.joinUrl,
@@ -324,6 +342,12 @@ export async function GET(request: NextRequest) {
           zoom_start_url: zoom.startUrl,
           zoomStatus: 'created',
         } as any);
+        console.log('[ZOOM_LINK_SAVED]', {
+          where: 'session_storage',
+          sessionId,
+          stripeSessionId: checkoutSession.id,
+          zoomMeetingId: zoom.meetingId,
+        });
         // Persist to dedicated DB column (source-of-truth for `sessions.zoom_join_url`)
         try {
           const supabase = getSupabaseAdmin();
@@ -333,6 +357,12 @@ export async function GET(request: NextRequest) {
             .eq('id', String(s?.id || ''));
           if (error) throw error;
           console.log("Saved to DB:", join_url);
+          console.log('[ZOOM_LINK_SAVED]', {
+            where: 'db_column',
+            sessionId,
+            stripeSessionId: checkoutSession.id,
+            zoomMeetingId: zoom.meetingId,
+          });
         } catch (e) {
           console.error('[ZOOM_JOIN_URL_DB_SAVE_FAILED]', {
             sessionId: String(s?.id || ''),
