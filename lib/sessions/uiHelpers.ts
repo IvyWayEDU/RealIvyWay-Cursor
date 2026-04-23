@@ -40,7 +40,23 @@ export function getSessionStartTimeMs(session: Session & { [key: string]: any })
  * Source of truth: `session.datetime` (NOT legacy `startTime`).
  */
 export function getSessionDatetimeMs(session: Session & { [key: string]: any }): number | null {
-  return parseUtcEpochMs((session as any)?.datetime);
+  const primary = parseUtcEpochMs((session as any)?.datetime);
+  if (primary !== null) return primary;
+
+  // Fallbacks for legacy/session shapes used in older UI surfaces.
+  const candidates = [
+    (session as any)?.scheduledStartTime,
+    (session as any)?.scheduledStart,
+    (session as any)?.startTimeISO,
+    (session as any)?.startTime,
+  ];
+
+  for (const c of candidates) {
+    const t = parseUtcEpochMs(c);
+    if (t !== null) return t;
+  }
+
+  return null;
 }
 
 /**
@@ -52,6 +68,9 @@ export function getSessionDatetimeMs(session: Session & { [key: string]: any }):
 export function getSessionEndDatetimeMs(session: Session & { [key: string]: any }): number | null {
   const explicitEnd = parseUtcEpochMs((session as any)?.end_datetime);
   if (explicitEnd !== null) return explicitEnd;
+
+  const legacyEnd = parseUtcEpochMs((session as any)?.scheduledEndTime ?? (session as any)?.scheduledEnd);
+  if (legacyEnd !== null) return legacyEnd;
 
   const startMs = getSessionDatetimeMs(session);
   if (startMs === null) return null;

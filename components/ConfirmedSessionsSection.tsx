@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
+import { canJoinSessionNow } from '@/lib/sessions/uiHelpers';
 
 export default function ConfirmedSessionsSection() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -11,6 +12,7 @@ export default function ConfirmedSessionsSection() {
   const lastJsonRef = useRef<string>('');
   const didInitialLoadRef = useRef<boolean>(false);
   const router = useRouter();
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   function UserAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
     const [imageError, setImageError] = useState(false);
@@ -69,6 +71,11 @@ export default function ConfirmedSessionsSection() {
     // Refresh periodically to catch webhook updates
     const interval = setInterval(fetchSessions, 20000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
   }, []);
 
   const formatDate = (date: Date): string => {
@@ -240,10 +247,14 @@ export default function ConfirmedSessionsSection() {
                       {(() => {
                         const joinUrl = getJoinUrl(session as any);
                         const status = String((session as any)?.status || '');
-                        const canShowJoinNow = !!joinUrl && (status === 'confirmed' || status === 'upcoming');
+                        const hasJoinUrl = !!joinUrl;
+                        const isJoinEligibleStatus = status === 'confirmed' || status === 'upcoming';
+                        const canJoinNow =
+                          hasJoinUrl && isJoinEligibleStatus && canJoinSessionNow(session as any, nowMs);
                         return (
                           <>
-                            {canShowJoinNow ? (
+                            {hasJoinUrl && isJoinEligibleStatus ? (
+                              canJoinNow ? (
                               <a
                                 href={joinUrl as string}
                                 target="_blank"
@@ -261,6 +272,16 @@ export default function ConfirmedSessionsSection() {
                               >
                                 Join Now
                               </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled
+                                  className="inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors bg-gray-200 text-gray-500 cursor-not-allowed"
+                                  title="Join becomes available 10 minutes before start"
+                                >
+                                  Join Now
+                                </button>
+                              )
                             ) : (
                               <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
                                 Zoom link pending

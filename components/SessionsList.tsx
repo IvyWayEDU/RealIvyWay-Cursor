@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Session } from '@/lib/models/types';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { getCurrentUserId } from '@/lib/sessions/actions';
-import { getSessionEndDatetimeMs } from '@/lib/sessions/uiHelpers';
+import { canJoinSessionNow, getSessionEndDatetimeMs } from '@/lib/sessions/uiHelpers';
 import { useProviderSessionHeartbeat } from '@/lib/sessions/useProviderSessionHeartbeat';
 import { getReviewBySessionId, hasReviewForSession } from '@/lib/reviewStore';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
@@ -550,11 +550,14 @@ export default function SessionsList({ role }: SessionsListProps) {
                           const joinUrl =
                             typeof joinUrlRaw === 'string' && joinUrlRaw.trim().length > 0 ? joinUrlRaw.trim() : '';
                           const status = String((session as any)?.status || '');
-                          const canShowJoinNow = !!joinUrl && (status === 'confirmed' || status === 'upcoming');
+                          const hasJoinUrl = !!joinUrl;
+                          const isJoinEligibleStatus = status === 'confirmed' || status === 'upcoming';
+                          const canJoinNow = hasJoinUrl && isJoinEligibleStatus && canJoinSessionNow(session as any, nowMs);
                           
                           return (
                             <>
-                              {canShowJoinNow ? (
+                              {hasJoinUrl && isJoinEligibleStatus ? (
+                                canJoinNow ? (
                                 <a
                                   href={joinUrl}
                                   target="_blank"
@@ -601,6 +604,30 @@ export default function SessionsList({ role }: SessionsListProps) {
                                   </svg>
                                   Join Now
                                 </a>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-gray-200 text-gray-500 cursor-not-allowed"
+                                    title="Join becomes available 10 minutes before start"
+                                  >
+                                    <svg
+                                      className="h-4 w-4"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                      />
+                                    </svg>
+                                    Join Now
+                                  </button>
+                                )
                               ) : (
                                 <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
                                   Zoom link pending
