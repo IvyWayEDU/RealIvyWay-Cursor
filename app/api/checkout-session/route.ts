@@ -257,30 +257,10 @@ export async function GET(request: NextRequest) {
     const ensureZoomForSession = async (s: any, startIso: string) => {
       const sessionId = String(s?.id || '').trim();
       const providerId = String(s?.providerId || '').trim();
-      console.log('[ZOOM_DEBUG_START]', {
-        sessionId: sessionId || null,
-        providerId: providerId || null,
-        startTime: startIso,
-      });
-      console.log('[ZOOM_DEBUG_ENV]', {
-        hasAccountId: !!process.env.ZOOM_ACCOUNT_ID,
-        hasClientId: !!process.env.ZOOM_CLIENT_ID,
-        hasClientSecret: !!process.env.ZOOM_CLIENT_SECRET,
-      });
 
       if (!sessionId) {
         console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
           reason: 'missing_session_id',
-          providerId: providerId || null,
-          startTime: startIso,
-        });
-        return;
-      }
-
-      if (!isZoomConfigured()) {
-        console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
-          reason: 'zoom_not_configured',
-          sessionId,
           providerId: providerId || null,
           startTime: startIso,
         });
@@ -296,13 +276,44 @@ export async function GET(request: NextRequest) {
         });
         return; // idempotency: never create duplicates
       }
+
+      if (!isZoomConfigured()) {
+        console.error('[ZOOM_SKIPPED_UNEXPECTEDLY]', {
+          reason: 'zoom_not_configured',
+          sessionId,
+          providerId: providerId || null,
+          startTime: startIso,
+        });
+        return;
+      }
       try {
+        console.log('[ZOOM_PATH_REACHED]', {
+          sessionId,
+          stripeSessionId: checkoutSession.id,
+          providerId,
+          startTime: startIso,
+        });
+        console.log('[ZOOM_DEBUG_START]', {
+          sessionId: sessionId || null,
+          providerId: providerId || null,
+          startTime: startIso,
+        });
+        console.log('[ZOOM_DEBUG_ENV]', {
+          hasAccountId: !!process.env.ZOOM_ACCOUNT_ID,
+          hasClientId: !!process.env.ZOOM_CLIENT_ID,
+          hasClientSecret: !!process.env.ZOOM_CLIENT_SECRET,
+        });
         console.log('[ZOOM_DEBUG_BEFORE_CREATE]', 'Attempting Zoom meeting creation');
         console.log("Creating Zoom meeting for session:", String(s?.id || ''), (s as any)?.datetime ?? startIso);
         const zoom = await createZoomMeeting({
           topic: 'IvyWay Session',
           startTime: startIso,
           duration: 60,
+        });
+        console.log('[ZOOM_SUCCESS_CONFIRMED]', {
+          sessionId,
+          joinUrl: zoom.joinUrl,
+          hostUrl: zoom.startUrl,
         });
         const join_url = zoom.joinUrl;
         await updateSession(String(s?.id || ''), {
@@ -551,18 +562,16 @@ export async function GET(request: NextRequest) {
 
     // If the webhook created sessions but Zoom is missing (or sessions were created here),
     // ensure each session gets a join URL (best-effort, idempotent).
-    if (isZoomConfigured()) {
-      for (const s of sessionsToReturn as any[]) {
-        if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) continue;
-        const startIso =
-          toIsoOrNull((s as any)?.datetime) ||
-          toIsoOrNull((s as any)?.startTime) ||
-          toIsoOrNull((s as any)?.scheduledStartTime) ||
-          toIsoOrNull((s as any)?.scheduledStart) ||
-          null;
-        if (!startIso) continue;
-        await ensureZoomForSession(s, startIso);
-      }
+    for (const s of sessionsToReturn as any[]) {
+      if (hasZoomJoinUrl(s) || hasZoomMeetingId(s)) continue;
+      const startIso =
+        toIsoOrNull((s as any)?.datetime) ||
+        toIsoOrNull((s as any)?.startTime) ||
+        toIsoOrNull((s as any)?.scheduledStartTime) ||
+        toIsoOrNull((s as any)?.scheduledStart) ||
+        null;
+      if (!startIso) continue;
+      await ensureZoomForSession(s, startIso);
     }
 
     // Transactional email: booking confirmation (idempotent per-session)

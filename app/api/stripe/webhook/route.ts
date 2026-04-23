@@ -480,12 +480,23 @@ export async function POST(request: NextRequest) {
           }
 
           try {
+            console.log('[ZOOM_PATH_REACHED]', {
+              sessionId: String(s.id),
+              stripeSessionId: session.id,
+              providerId: String((s as any)?.providerId || providerId || ''),
+              startTime: startIso,
+            });
             console.log('[ZOOM_DEBUG_BEFORE_CREATE]', 'Attempting Zoom meeting creation');
             console.log("Creating Zoom meeting for session:", String(s.id), (s as any)?.datetime ?? startIso);
             const zoom = await createZoomMeeting({
               topic: 'IvyWay Session',
               startTime: startIso,
               duration: 60,
+            });
+            console.log('[ZOOM_SUCCESS_CONFIRMED]', {
+              sessionId: String(s.id),
+              joinUrl: zoom.joinUrl,
+              hostUrl: zoom.startUrl,
             });
             const join_url = zoom.joinUrl;
             await updateSession(String(s.id), {
@@ -762,12 +773,23 @@ export async function POST(request: NextRequest) {
           });
         } else {
           try {
+            console.log('[ZOOM_PATH_REACHED]', {
+              sessionId: created.id,
+              stripeSessionId: session.id,
+              providerId,
+              startTime: startIso,
+            });
             console.log('[ZOOM_DEBUG_BEFORE_CREATE]', 'Attempting Zoom meeting creation');
             console.log("Creating Zoom meeting for session:", created.id, (created as any)?.datetime ?? startIso);
             const zoom = await createZoomMeeting({
               topic: 'IvyWay Session',
               startTime: startIso,
               duration: 60,
+            });
+            console.log('[ZOOM_SUCCESS_CONFIRMED]', {
+              sessionId: created.id,
+              joinUrl: zoom.joinUrl,
+              hostUrl: zoom.startUrl,
             });
 
             const join_url = zoom.joinUrl;
