@@ -2303,6 +2303,7 @@ function Step5SelectProvider({
       profileImageUrl: string | null;
       schoolName?: string | null;
       subjects?: string[];
+      rawProvider?: any;
     }>
   >([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
@@ -2526,11 +2527,18 @@ function Step5SelectProvider({
                       : null;
 
               const displayName =
-                typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
+                p?.full_name ||
+                p?.fullName ||
+                p?.display_name ||
+                p?.displayName ||
+                (p?.first_name && p?.last_name ? `${p.first_name} ${p.last_name}`.trim() : null) ||
+                (data as any)?.full_name ||
+                (data as any)?.display_name ||
+                (typeof (data as any)?.displayName === 'string' && String((data as any).displayName).trim()
                   ? String((data as any).displayName).trim()
-                  : typeof p?.name === 'string' && p.name.trim()
-                    ? p.name.trim()
-                    : 'Provider';
+                  : null) ||
+                (typeof p?.name === 'string' && p.name.trim() ? p.name.trim() : null) ||
+                'Provider';
 
               return {
                 providerId: id,
@@ -2538,6 +2546,7 @@ function Step5SelectProvider({
                 profileImageUrl,
                 schoolName: schoolName || null,
                 subjects: Array.isArray(rawSubjects) ? rawSubjects.map((s: any) => String(s ?? '')).filter((s: string) => !!s.trim()) : [],
+                rawProvider: p,
               };
             });
 
@@ -2591,6 +2600,7 @@ function Step5SelectProvider({
               profileImageUrl: typeof p?.profileImageUrl === 'string' && p.profileImageUrl.trim() ? p.profileImageUrl.trim() : null,
               schoolName: typeof p?.school === 'string' && p.school.trim() ? p.school.trim() : null,
               subjects: Array.isArray(p?.subjects) ? p.subjects : [],
+              rawProvider: p,
             });
           }
 
@@ -2613,6 +2623,7 @@ function Step5SelectProvider({
               profileImageUrl: null,
               schoolName: null,
               subjects: [],
+              rawProvider: null,
             }
           );
         });
@@ -2699,24 +2710,56 @@ function Step5SelectProvider({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {eligibleProviders.map((p) => {
             const selected = selectedProviderId === p.providerId;
+            const provider = (p as any)?.rawProvider ?? p;
+
+            const providerDisplayName =
+              provider?.full_name ||
+              provider?.fullName ||
+              provider?.display_name ||
+              provider?.displayName ||
+              (provider?.first_name && provider?.last_name
+                ? `${provider.first_name} ${provider.last_name}`.trim()
+                : null) ||
+              provider?.data?.full_name ||
+              provider?.data?.display_name ||
+              provider?.name ||
+              'Provider';
+
+            console.log('[PROVIDER_NAME_DEBUG]', {
+              providerId: provider?.id ?? provider?.providerId ?? p?.providerId,
+              full_name: provider?.full_name,
+              display_name: provider?.display_name,
+              first_name: provider?.first_name,
+              last_name: provider?.last_name,
+              rawProvider: provider,
+              finalName: providerDisplayName,
+            });
+
             const rawSubjects = Array.isArray(p.subjects) ? p.subjects.filter((s) => typeof s === 'string' && s.trim()) : [];
             const normalizedSubjectKeys = rawSubjects
               .map((s) => normalizeSubjectKey(s))
               .filter(Boolean);
-            const uniqueSubjectKeys = Array.from(new Set(normalizedSubjectKeys));
+            const normalizedSubjects = Array.from(new Set(normalizedSubjectKeys));
 
-            const priorityKeys: string[] = [];
+            const hasTestPrep = normalizedSubjects.includes('test_prep');
+            const badgeSubjects = normalizedSubjects.filter((subject) => subject !== 'test_prep');
+
             const selectedSubject = bookingState.subject;
             const selectedSubjectCanonical = typeof selectedSubject === 'string' ? normalizeSubjectKey(selectedSubject) : null;
-            if (selectedService === 'tutoring' && selectedSubjectCanonical && selectedSubjectCanonical !== 'test_prep') {
-              priorityKeys.push(selectedSubjectCanonical);
-            }
-            if (uniqueSubjectKeys.includes('test_prep')) {
-              // Always show Test Prep specialization when present.
-              priorityKeys.push('test_prep');
-            }
+            const orderedBadgeSubjects =
+              selectedService === 'tutoring' && selectedSubjectCanonical && selectedSubjectCanonical !== 'test_prep'
+                ? Array.from(
+                    new Set([
+                      selectedSubjectCanonical,
+                      ...badgeSubjects.filter((s) => s !== selectedSubjectCanonical),
+                    ])
+                  )
+                : badgeSubjects;
 
-            const subjectsToShow = Array.from(new Set([...priorityKeys, ...uniqueSubjectKeys])).slice(0, 3);
+            const subjectsToShow = [
+              ...(hasTestPrep ? (['test_prep'] as const) : []),
+              ...orderedBadgeSubjects,
+            ].slice(0, 3);
             return (
               <button
                 key={p.providerId}
@@ -2738,12 +2781,12 @@ function Step5SelectProvider({
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={p.profileImageUrl}
-                        alt={p.name}
+                        alt={providerDisplayName}
                         className="w-12 h-12 rounded-full object-cover border border-gray-200"
                       />
                     ) : (
                       <div className="w-12 h-12 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-sm font-semibold text-gray-600">
-                        {p.name.slice(0, 1).toUpperCase()}
+                        {(providerDisplayName || 'P').slice(0, 1).toUpperCase()}
                       </div>
                     )}
                   </div>
@@ -2751,8 +2794,8 @@ function Step5SelectProvider({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-base font-semibold text-gray-900">{p.name}</div>
-                        {displayService ? (
+                        <div className="text-base font-semibold text-gray-900">{providerDisplayName}</div>
+                        {displayService && selectedService !== 'test_prep' ? (
                           <span className="service-label mt-1 inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700">
                             {displayService}
                           </span>
