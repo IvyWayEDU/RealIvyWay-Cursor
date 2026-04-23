@@ -10,12 +10,14 @@ import ReviewModal from '@/components/ReviewModal';
 import { getCurrentUserId } from '@/lib/sessions/actions';
 import { ensureConversationExistsForPair } from '@/lib/messages/actions';
 import { getReviewForSessionByReviewer } from '@/lib/reviewStore';
+import { canJoinSessionNow } from '@/lib/sessions/uiHelpers';
 
 interface SessionCardProps {
   session: Session;
   isCompleted?: boolean;
   viewerRole?: 'student' | 'provider';
   currentUserId?: string | null;
+  nowMs?: number;
   statusBadgeOverride?: { label: string; className: string } | null;
   onMessage?: (session: Session) => void;
   onLeaveReview?: (session: Session) => void;
@@ -26,6 +28,7 @@ function SessionCard({
   isCompleted = false,
   viewerRole = 'provider',
   currentUserId,
+  nowMs,
   statusBadgeOverride = null,
   onMessage,
   onLeaveReview,
@@ -120,6 +123,12 @@ function SessionCard({
   const existingReview =
     viewerRole === 'student' && currentUserId ? getReviewForSessionByReviewer(session.id, currentUserId) : null;
   const reviewedStars = existingReview?.rating || 0;
+
+  const zoomJoinUrl =
+    typeof (session as any)?.zoom_join_url === 'string' && (session as any).zoom_join_url.trim()
+      ? String((session as any).zoom_join_url).trim()
+      : null;
+  const joinEnabled = !isCompleted && !!zoomJoinUrl && typeof nowMs === 'number' ? canJoinSessionNow(session as any, nowMs) : false;
 
   const Stars = ({ count }: { count: number }) => (
     <span className="inline-flex items-center gap-0.5">
@@ -227,6 +236,39 @@ function SessionCard({
           Message
         </button>
 
+        {/* Join Now (upcoming sessions only) */}
+        {!isCompleted && (
+          zoomJoinUrl ? (
+            <button
+              type="button"
+              disabled={!joinEnabled}
+              onClick={() => {
+                if (!zoomJoinUrl) return;
+                if (!joinEnabled) return;
+                window.location.href = zoomJoinUrl;
+              }}
+              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                joinEnabled ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]' : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+              }`}
+              title="Join Now"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                />
+              </svg>
+              Join Now
+            </button>
+          ) : (
+            <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
+              Zoom link pending
+            </div>
+          )
+        )}
+
         {/* Book Again (students, completed only) */}
         {viewerRole === 'student' && isCompleted && (
           <button
@@ -295,6 +337,7 @@ export default function ProviderSessionsClient({
   const didInitialLoadRef = useRef<boolean>(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [reviewModalSession, setReviewModalSession] = useState<Session | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const refreshSessionsRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -371,6 +414,11 @@ export default function ProviderSessionsClient({
   }, []);
 
   useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
     getCurrentUserId().then(({ userId }) => setCurrentUserId(userId));
   }, []);
 
@@ -440,6 +488,7 @@ export default function ProviderSessionsClient({
                       isCompleted={false}
                       viewerRole={role}
                       currentUserId={currentUserId}
+                      nowMs={nowMs}
                       onMessage={handleMessage}
                     />
                   ))}
@@ -479,6 +528,7 @@ export default function ProviderSessionsClient({
                         isCompleted={false}
                         viewerRole={role}
                         currentUserId={currentUserId}
+                        nowMs={nowMs}
                         statusBadgeOverride={badge}
                         onMessage={handleMessage}
                       />
@@ -522,6 +572,7 @@ export default function ProviderSessionsClient({
                       isCompleted={true}
                       viewerRole={role}
                       currentUserId={currentUserId}
+                      nowMs={nowMs}
                       onMessage={handleMessage}
                       onLeaveReview={role === 'student' ? handleLeaveReview : undefined}
                     />

@@ -90,6 +90,21 @@ function mergeDbRowIntoSession(row: SessionDbRow): Session | null {
   if (typeof row?.zoom_join_url === 'string' && row.zoom_join_url.trim()) {
     s.zoom_join_url = row.zoom_join_url.trim();
   }
+  // Back-compat: ensure `zoom_join_url` is populated in the returned payload even when
+  // older records stored it under alternative keys inside `data`.
+  if (!(typeof s?.zoom_join_url === 'string' && s.zoom_join_url.trim())) {
+    const candidate =
+      (typeof s?.zoom_join_url === 'string' && s.zoom_join_url.trim()
+        ? s.zoom_join_url.trim()
+        : typeof s?.joinUrl === 'string' && s.joinUrl.trim()
+          ? s.joinUrl.trim()
+          : typeof s?.zoom_url === 'string' && s.zoom_url.trim()
+            ? s.zoom_url.trim()
+            : typeof s?.meeting?.join_url === 'string' && s.meeting.join_url.trim()
+              ? s.meeting.join_url.trim()
+              : '');
+    if (candidate) s.zoom_join_url = candidate;
+  }
 
   // Ensure providerId/studentId are present even when legacy rows stored them only in DB columns.
   const providerIdRow = typeof row?.provider_id === 'string' ? row.provider_id.trim() : '';
