@@ -5,6 +5,7 @@ import { getSessions } from '@/lib/sessions/storage';
 import { getUsers } from '@/lib/auth/storage';
 import { listAllPayoutRequests } from '@/lib/payouts/payout-requests.server';
 import { handleApiError } from '@/lib/errorHandler';
+import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 
 function money(cents: number): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
@@ -17,13 +18,21 @@ function safeInt(n: unknown): number {
 }
 
 function getProviderPayoutCents(session: any): number {
-  const n = safeInt(session?.provider_payout_cents ?? session?.providerPayoutCents ?? 0);
-  return Math.max(0, n);
+  try {
+    const n = calculateProviderPayoutCentsFromSession(session as any);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function getGrossCents(session: any): number {
-  const n = safeInt(session?.session_price_cents ?? session?.priceCents ?? session?.amountChargedCents ?? session?.grossCents ?? 0);
-  return Math.max(0, n);
+  try {
+    const n = getSessionGrossCents(session as any);
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function getPlatformRevenueCents(session: any): number {
@@ -223,17 +232,10 @@ export async function GET(request: NextRequest) {
       ];
 
       for (const s of sessions) {
-        const grossCents = (() => {
-          try {
-            const n = Number(s?.session_price_cents ?? s?.priceCents ?? s?.amountChargedCents ?? 0);
-            return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-          } catch {
-            return 0;
-          }
-        })();
+        const grossCents = getGrossCents(s);
         const providerPayoutCents = (() => {
           try {
-            const n = Number(s?.provider_payout_cents ?? s?.providerPayoutCents ?? 0);
+            const n = calculateProviderPayoutCentsFromSession(s as any);
             return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
           } catch {
             return 0;

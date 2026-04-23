@@ -354,7 +354,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
       : null;
 
   return (
-    <div className="h-[calc(100vh-16rem)] flex rounded-lg bg-white shadow-sm border border-gray-200 overflow-hidden">
+    <div className="h-[calc(100dvh-7rem)] flex rounded-lg bg-white shadow-sm border border-gray-200 overflow-hidden">
       {/* Left Panel - Conversations List */}
       <div className="w-80 border-r border-gray-200 flex flex-col">
         {/* Header */}

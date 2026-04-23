@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { logout } from '@/lib/auth/actions';
 import { Session } from '@/lib/auth/types';
@@ -9,6 +8,8 @@ import { Session } from '@/lib/auth/types';
 interface SidebarProps {
   role: 'student' | 'provider' | 'admin';
   session: Session;
+  onNavigate?: () => void;
+  className?: string;
 }
 
 interface NavItem {
@@ -134,26 +135,14 @@ const getNavigationItems = (role: 'student' | 'provider' | 'admin'): NavItem[] =
   return baseItems;
 };
 
-export default function Sidebar({ role, session }: SidebarProps) {
+export default function Sidebar({ role, session, onNavigate, className }: SidebarProps) {
   const pathname = usePathname();
   const navItems = getNavigationItems(role);
   const dashboardRoute = `/dashboard/${role}`;
 
   return (
-    <div className="flex h-full w-64 flex-col bg-white border-r border-gray-200">
-      <div className="flex h-16 items-center border-b border-gray-200 px-6">
-        <Link href={dashboardRoute} className="flex items-center">
-          <Image
-            src="/ivyway-wordmark.png"
-            alt="IvyWay"
-            width={120}
-            height={40}
-            className="h-8 w-auto"
-            priority
-          />
-        </Link>
-      </div>
-      <nav className="flex-1 space-y-1 px-3 py-4">
+    <div className={`flex h-full flex-col bg-white ${className || ''}`}>
+      <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
         {navItems.map((item) => {
           // For Dashboard item, only highlight when exactly on the role-specific dashboard route
           // For other items, highlight when on the exact path or sub-paths
@@ -165,6 +154,7 @@ export default function Sidebar({ role, session }: SidebarProps) {
             <Link
               key={item.name}
               href={item.href}
+              onClick={() => onNavigate?.()}
               className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 isActive
                   ? 'bg-[#0088CB] text-white'
@@ -181,6 +171,7 @@ export default function Sidebar({ role, session }: SidebarProps) {
         <button
           onClick={async () => {
             await logout();
+            onNavigate?.();
           }}
           className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors"
         >

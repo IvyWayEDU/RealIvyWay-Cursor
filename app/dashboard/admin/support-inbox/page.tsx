@@ -153,11 +153,6 @@ export default function SupportInboxPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Support</h1>
-        <p className="mt-2 text-sm text-gray-600">View and respond to support tickets.</p>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Threads */}
         <div className="lg:col-span-1 overflow-hidden rounded-lg bg-white shadow border border-gray-200">

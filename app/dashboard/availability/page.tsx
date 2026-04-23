@@ -15,13 +15,7 @@ export default async function AvailabilityPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Availability</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Set your weekly availability for Sunday through Saturday.
-        </p>
-      </div>
+    <div className="min-h-0">
       <AvailabilityManagementClient />
     </div>
   );

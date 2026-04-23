@@ -14,6 +14,55 @@ export function getSessionGrossCents(session: Session): number {
   return Math.max(0, Math.floor(gross));
 }
 
+function isProviderNoShow(session: Session): boolean {
+  const s: any = session as any;
+  const status = String(s?.status || '').trim().toLowerCase();
+  const noShowParty = String(s?.noShowParty || '').trim().toLowerCase();
+  const attendanceFlag = String(s?.attendanceFlag || '').trim().toLowerCase();
+  const flag = String(s?.flag || '').trim().toLowerCase();
+  const explicitFlag = s?.flagNoShowProvider === true;
+  return (
+    status === 'provider_no_show' ||
+    status === 'no_show_provider' ||
+    status === 'expired_provider_no_show' ||
+    status === 'no_show_both' ||
+    flag === 'provider_no_show' ||
+    attendanceFlag === 'provider_no_show' ||
+    attendanceFlag === 'full_no_show' ||
+    noShowParty === 'provider' ||
+    noShowParty === 'both' ||
+    explicitFlag
+  );
+}
+
+function isCancelledOrRefunded(session: Session): boolean {
+  const s: any = session as any;
+  const status = String(s?.status || '').trim().toLowerCase();
+  if (status === 'cancelled' || status === 'canceled' || status === 'cancelled-late' || status === 'refunded') return true;
+  const refunded = toFiniteNumber(s?.amountRefundedCents) ?? 0;
+  return refunded > 0;
+}
+
+function providerShouldBePaid(session: Session): boolean {
+  const s: any = session as any;
+
+  // Hard blocks: provider no-show, cancellations, and refunds.
+  if (isProviderNoShow(session)) return false;
+  if (isCancelledOrRefunded(session)) return false;
+
+  // Explicit overrides win.
+  if (typeof s?.providerEarned === 'boolean') return s.providerEarned === true;
+  if (typeof s?.providerEligibleForPayout === 'boolean') return s.providerEligibleForPayout === true;
+
+  // Best-effort fallback for legacy records: pay only if provider joined at some point.
+  const providerJoinedAtRaw = s?.providerJoinedAt;
+  const joinedMs =
+    typeof providerJoinedAtRaw === 'string' && providerJoinedAtRaw.trim()
+      ? new Date(providerJoinedAtRaw).getTime()
+      : NaN;
+  return Number.isFinite(joinedMs);
+}
+
 /**
  * Canonical provider payout calculation (integer cents).
  *
@@ -25,23 +74,10 @@ export function getSessionGrossCents(session: Session): number {
 export function calculateProviderPayoutCentsFromSession(
   session: Session
 ): number {
-  // Payout eligibility gate (canonical):
-  // Provider gets paid ONLY if:
-  // - providerJoinedAt is NOT NULL
-  // - providerJoinedAt <= scheduledStart + 10 minutes
-  const providerJoinedAtRaw = (session as any)?.providerJoinedAt;
-  const scheduledStartIso =
-    (session as any)?.startTime ||
-    (session as any)?.scheduledStartTime ||
-    (session as any)?.scheduledStart ||
-    null;
-  const startMs = scheduledStartIso ? new Date(scheduledStartIso).getTime() : NaN;
-  const joinedMs =
-    typeof providerJoinedAtRaw === 'string' && providerJoinedAtRaw.trim()
-      ? new Date(providerJoinedAtRaw).getTime()
-      : NaN;
-  if (!Number.isFinite(startMs) || !Number.isFinite(joinedMs)) return 0;
-  if (joinedMs > startMs + 10 * 60 * 1000) return 0;
+  // Canonical payout eligibility: derived from the session lifecycle resolver.
+  // Student attendance must NEVER block provider payout.
+  // Provider no-show / cancelled / refunded sessions MUST pay $0.
+  if (!providerShouldBePaid(session)) return 0;
 
   // 1) If already persisted on the session record, trust it (immutable once booked).
   const persistedDollars = toFiniteNumber((session as any)?.providerPayout);

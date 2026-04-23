@@ -170,20 +170,13 @@ export default function SupportCenterClient(props: {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">Support</h1>
-            <p className="mt-2 text-sm text-gray-600">Need help? We’ve got you covered.</p>
-          </div>
-          <Link
-            href="/dashboard/support/tickets"
-            className="shrink-0 inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            My Support Tickets
-          </Link>
-        </div>
+      <div className="flex items-center justify-end">
+        <Link
+          href="/dashboard/support/tickets"
+          className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          My Support Tickets
+        </Link>
       </div>
 
       {/* FAQ Section (FIRST) */}

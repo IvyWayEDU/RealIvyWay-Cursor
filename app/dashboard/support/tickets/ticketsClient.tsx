@@ -147,11 +147,6 @@ export default function MySupportTicketsClient() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">My Support Tickets</h1>
-        <p className="mt-2 text-sm text-gray-600">View replies from the IvyWay team and send follow-ups.</p>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
         {/* Left: Ticket list */}
         <div className="overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200">

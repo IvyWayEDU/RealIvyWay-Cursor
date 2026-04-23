@@ -26,14 +26,8 @@ export default async function EarningsPage() {
   const payoutSummary = await getProviderPayoutSummaryFromLedger(providerId);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <EarningsDebugPanelClient />
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Earnings</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Track your earnings and manage payouts.
-        </p>
-      </div>
       <ProviderEarningsClient
         totalEarningsCents={payoutSummary.totalEarningsCents}
         availableBalanceCents={payoutSummary.availableBalanceCents}

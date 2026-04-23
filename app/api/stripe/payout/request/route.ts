@@ -9,6 +9,7 @@ import { getProviderPayoutRequestTotals } from '@/lib/payouts/payout-requests.se
 import Stripe from 'stripe';
 import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
+import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 
 export const runtime = 'nodejs';
 
@@ -87,8 +88,7 @@ export async function POST(request: NextRequest) {
           (s?.providerEligibleForPayout === true || s?.provider_eligible_for_payout === true)
       )
       .reduce((sum: number, s: any) => {
-        const earningsCents = s?.providerPayoutCents || s?.provider_payout_cents || 0;
-        return sum + Math.max(0, Math.floor(Number(earningsCents || 0)));
+        return sum + Math.max(0, Math.floor(calculateProviderPayoutCentsFromSession(s as any)));
       }, 0);
     const totals = await getProviderPayoutRequestTotals(session.userId);
     const totalWithdrawnCents = totals.withdrawnCents;

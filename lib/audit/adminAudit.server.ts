@@ -7,7 +7,8 @@ export type AdminAuditAction =
   | 'FORCE_COMPLETE_SESSION'
   | 'CANCEL_SESSION'
   | 'FLAG_SESSION'
-  | 'SET_PAYOUT_STATUS';
+  | 'SET_PAYOUT_STATUS'
+  | 'UPDATE_SESSION_NOTES';
 
 export type AdminAuditEntry = {
   action: AdminAuditAction;

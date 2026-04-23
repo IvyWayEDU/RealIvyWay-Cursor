@@ -8,6 +8,7 @@
 import { getSessionsByProviderId } from '@/lib/sessions/storage';
 import { getProviderPayoutRequestTotals } from '@/lib/payouts/payout-requests.server';
 import { computeProviderEarningsTotals } from '@/lib/earnings/providerEarningsSummary';
+import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 
 /**
  * Canonical provider earnings + payout-request summary (single source of truth).
@@ -42,8 +43,8 @@ export async function getProviderEarningsSummary(providerId: string): Promise<{
   const totals = await getProviderPayoutRequestTotals(providerId);
 
   const earningsRowAmountsCents = completedSessions.map((session: any) => {
-    const earningsCents = session?.providerPayoutCents || session?.provider_payout_cents || 0;
-    return Math.max(0, Math.floor(Number(earningsCents || 0)));
+    // Derive from canonical payout logic to prevent stale/incorrect stored fields.
+    return Math.max(0, Math.floor(calculateProviderPayoutCentsFromSession(session as any)));
   });
   const positiveEarningsRows = earningsRowAmountsCents.filter((c) => Number(c || 0) > 0).length;
 

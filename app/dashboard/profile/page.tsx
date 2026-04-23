@@ -20,13 +20,7 @@ export default async function ProfilePage() {
   const isProviderOrAdmin = session.roles.includes('provider') || session.roles.includes('admin');
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Profile</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Manage your profile information and preferences.
-        </p>
-      </div>
+    <div className="min-h-0">
       {isProviderOrAdmin ? (
         <ProviderProfileClient initialUser={user} />
       ) : (

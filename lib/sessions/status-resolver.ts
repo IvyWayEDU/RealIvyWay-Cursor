@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { Session } from '@/lib/models/types';
+import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 
 /**
  * Centralized session status resolver (canonical lifecycle).
@@ -169,6 +170,23 @@ export function resolveSessionStatusByTime(
       attendanceCheckedAt: nowISO,
       attendanceSource: hasZoomMeetingId ? 'zoom' : 'missing_zoom_meeting_id',
     };
+
+    // Financials: ensure admin dashboards never display stale payout values.
+    // Provider gets paid when they showed up (student absence does not block).
+    const providerPayoutCents = Math.max(0, calculateProviderPayoutCentsFromSession({ ...(session as any), ...(patch as any) } as any));
+    const grossCents = Math.max(0, getSessionGrossCents(session as any));
+    const platformFeeCents = Math.max(0, Math.floor(grossCents - providerPayoutCents));
+    patch.providerPayoutCents = providerPayoutCents;
+    patch.providerPayoutAmount = providerPayoutCents / 100;
+    patch.providerPayout = providerPayoutCents / 100;
+    patch.platformFeeCents = platformFeeCents;
+
+    // Keep payoutStatus consistent (never overwrite paid).
+    const prevPayoutStatus = String((session as any)?.payoutStatus || '').trim().toLowerCase();
+    if (prevPayoutStatus !== 'paid' && prevPayoutStatus !== 'paid_out') {
+      patch.payoutStatus = providerPayoutCents > 0 ? ((session as any)?.payoutStatus || 'available') : 'none';
+    }
+
     return patch as Partial<Session>;
   }
 
@@ -195,6 +213,18 @@ export function resolveSessionStatusByTime(
         attendanceCheckedAt: nowISO,
         attendanceSource: hasZoomMeetingId ? 'zoom' : 'missing_zoom_meeting_id',
       };
+
+      // Financials: provider payout MUST be $0 on provider no-show.
+      const grossCents = Math.max(0, getSessionGrossCents(session as any));
+      patch.providerPayoutCents = 0;
+      patch.providerPayoutAmount = 0;
+      patch.providerPayout = 0;
+      patch.platformFeeCents = Math.max(0, Math.floor(grossCents));
+
+      // Admin review requirements.
+      patch.requiresAdminReview = true;
+      patch.payoutStatus = 'unpaid';
+
       return patch as Partial<Session>;
     }
   }

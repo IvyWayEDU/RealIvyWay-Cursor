@@ -4,6 +4,7 @@ import { getUsers } from '@/lib/auth/storage';
 import { getSessions } from '@/lib/sessions/storage';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { getAllSupportTickets } from '@/lib/support/ticketingStorage';
+import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 
 function safeNumber(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -53,17 +54,15 @@ export async function getAdminOverviewStats(): Promise<AdminOverviewStats> {
   for (const s of sessions as any[]) {
     if ((s?.status ?? '') !== 'completed') continue;
 
-    // Preferred canonical fields in this repo's session JSON.
-    const ivywayTake = safeNumber(s?.ivyway_take_cents);
-    const providerPayout = safeNumber(s?.provider_payout_cents);
+    // Canonical financials MUST be derived from current business rules (never stale stored fields).
+    const providerPayoutCents = calculateProviderPayoutCentsFromSession(s as any);
+    const ivywayTakeCents = safeNumber(s?.ivyway_take_cents);
+    const platformFeeFallbackCents = safeNumber(s?.platformFeeCents);
+    const grossCents = getSessionGrossCents(s as any);
+    const platformRevenueCents = ivywayTakeCents || platformFeeFallbackCents || Math.max(0, Math.floor(grossCents - providerPayoutCents));
 
-    // Fallbacks used across older records.
-    const platformFeeFallback = safeNumber(s?.platformFeeCents);
-    const providerPayoutFallback = safeNumber(s?.providerPayoutCents);
-    const providerPayoutDollar = safeNumber(s?.providerPayout) * 100;
-
-    totalPlatformRevenueCents += ivywayTake || platformFeeFallback;
-    totalProviderPayoutsCents += providerPayout || providerPayoutFallback || providerPayoutDollar;
+    totalPlatformRevenueCents += platformRevenueCents;
+    totalProviderPayoutsCents += providerPayoutCents;
   }
 
   const openSupportTickets = supportTickets.filter((t: any) => t?.status === 'open' || t?.status === 'admin_replied').length;

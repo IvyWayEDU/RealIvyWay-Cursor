@@ -22,13 +22,7 @@ export default async function StudentSessionsPage() {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Sessions</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          View your upcoming and completed sessions.
-        </p>
-      </div>
+    <div className="min-h-0">
       <ProviderSessionsClient role="student" />
     </div>
   );

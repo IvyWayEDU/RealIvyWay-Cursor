@@ -6,6 +6,7 @@ import { Session } from '@/lib/models/types';
 import { getCurrentUserId } from '@/lib/sessions/actions';
 import { getEarningsServiceLabel } from '@/lib/earnings/serviceLabel';
 import { getCanonicalServiceType } from '@/lib/sessions/sessionDisplay';
+import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 
 interface Booking {
   id: string;
@@ -146,8 +147,7 @@ export default function ProviderEarningsClient(props: {
 
   // Convert sessions to bookings format for the graph
   const bookings: Booking[] = sessions.map((session) => {
-    const earningsCents =
-      (session as any).providerPayoutCents || (session as any).provider_payout_cents || 0;
+    const earningsCents = Math.max(0, Math.floor(calculateProviderPayoutCentsFromSession(session as any)));
     const earnings = earningsCents / 100;
 
     console.log('Earnings display:', {

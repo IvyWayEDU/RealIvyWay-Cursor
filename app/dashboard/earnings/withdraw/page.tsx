@@ -24,14 +24,7 @@ export default async function WithdrawPage() {
   ]);
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Withdraw Earnings</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          Request a withdrawal of your available earnings.
-        </p>
-      </div>
-
+    <div className="min-h-0">
       <WithdrawFormClient
         availableBalanceCents={payoutSummary.availableBalanceCents}
         bankAccount={bankAccount}

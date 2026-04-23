@@ -345,7 +345,6 @@ export default function SessionDetailsPage() {
               </svg>
               Back to Dashboard
             </button>
-            <h1 className="text-3xl font-bold text-gray-900">Session Details</h1>
           </div>
         </div>
 
