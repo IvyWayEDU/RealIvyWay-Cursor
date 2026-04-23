@@ -55,32 +55,37 @@ export default async function ProviderDashboard() {
         </Link>
       </div>
 
-      <IvyWayAICard
-        entryPoint="provider_dashboard"
-        description="Use AI to generate study materials, quizzes, explanations, and prep for tutoring sessions."
-      />
-
-      {/* Upcoming Sessions Section */}
-      <UpcomingSessionsSection />
-
-      {/* Messages and Earnings Snapshot - 50/50 Layout */}
+      {/* 2x2 Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Messages Section - 50% width */}
-        <div className="lg:col-span-1">
-          <MessagesSection
-            userId={session.userId}
-            subtitle="Chat with your students"
-            emptySubtitle="Start a conversation with your students"
-          />
+        {/* Top Left: Upcoming Sessions */}
+        <div>
+          <UpcomingSessionsSection />
         </div>
 
-        {/* Earnings Snapshot Section - 50% width */}
-        <div className="lg:col-span-1">
+        {/* Top Right: Earnings Snapshot */}
+        <div>
           <ProviderEarningsSnapshotClient
             initialTotalEarningsCents={earnings.totalEarningsCents}
             initialAvailableBalanceCents={earnings.availableBalanceCents}
             initialPendingPayoutsCents={earnings.pendingPayoutsCents}
             initialTotalWithdrawnCents={earnings.totalWithdrawnCents}
+          />
+        </div>
+
+        {/* Bottom Left: IvyWay AI */}
+        <div>
+          <IvyWayAICard
+            entryPoint="provider_dashboard"
+            description="Use AI to generate study materials, quizzes, explanations, and prep for tutoring sessions."
+          />
+        </div>
+
+        {/* Bottom Right: Messages */}
+        <div>
+          <MessagesSection
+            userId={session.userId}
+            subtitle="Chat with your students"
+            emptySubtitle="Start a conversation with your students"
           />
         </div>
       </div>

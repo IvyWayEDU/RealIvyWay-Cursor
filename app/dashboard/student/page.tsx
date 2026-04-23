@@ -9,7 +9,6 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import CompletedSessionsSection from '@/components/CompletedSessionsSection';
 import ConfirmedSessionsSection from '@/components/ConfirmedSessionsSection';
-import AIProblemSolver from '@/components/AIProblemSolver';
 import MessagesSection from '@/components/MessagesSection';
 import IvyWayAICard from '@/components/IvyWayAICard';
 import { getSession } from '@/lib/auth/session';
@@ -43,18 +42,23 @@ export default async function StudentDashboard() {
         </Link>
       </div>
 
-      <IvyWayAICard
-        entryPoint="student_dashboard"
-        description="Get instant help with studying, flashcards, quizzes, and step by step explanations."
-      />
-
-      {/* Upcoming Sessions Section */}
-      <ConfirmedSessionsSection />
-
-      {/* Completed Sessions and AI Problem Solver - 50/50 Layout */}
+      {/* 2x2 Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Completed Sessions Section - 50% width */}
-        <div className="lg:col-span-1">
+        {/* Top Left: Upcoming Sessions */}
+        <div>
+          <ConfirmedSessionsSection />
+        </div>
+
+        {/* Top Right: IvyWay AI */}
+        <div>
+          <IvyWayAICard
+            entryPoint="student_dashboard"
+            description="Get instant help with studying, flashcards, quizzes, and step by step explanations."
+          />
+        </div>
+
+        {/* Bottom Left: Completed Sessions */}
+        <div>
           <CompletedSessionsSection
             limit={3}
             showViewMore
@@ -62,9 +66,8 @@ export default async function StudentDashboard() {
           />
         </div>
 
-        {/* AI Problem Solver and Messages - 50% width, stacked */}
-        <div className="lg:col-span-1 space-y-6">
-          <AIProblemSolver />
+        {/* Bottom Right: Messages */}
+        <div>
           <MessagesSection
             userId={session.userId}
             subtitle="Chat with your tutors and counselors"

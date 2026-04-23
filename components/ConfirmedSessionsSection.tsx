@@ -56,7 +56,7 @@ export default function ConfirmedSessionsSection() {
           setSessions(upcoming as Session[]);
         }
       } catch (error) {
-        console.error('Error fetching confirmed sessions:', error);
+        console.error('Error fetching upcoming sessions:', error);
         if (!didInitialLoadRef.current) setSessions([]);
       } finally {
         if (!didInitialLoadRef.current) {
@@ -102,16 +102,16 @@ export default function ConfirmedSessionsSection() {
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
       <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-900">Confirmed Sessions</h2>
+        <h2 className="text-xl font-semibold text-gray-900">Upcoming Sessions</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Your upcoming confirmed sessions
+          Your upcoming sessions
         </p>
       </div>
       <div className="p-6 min-h-[220px]">
         {loading ? (
           <div className="text-center py-12">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-            <p className="mt-4 text-sm text-gray-500">Loading confirmed sessions...</p>
+            <p className="mt-4 text-sm text-gray-500">Loading upcoming sessions...</p>
           </div>
         ) : sessions.length === 0 ? (
           <div className="text-center py-12">
@@ -129,10 +129,10 @@ export default function ConfirmedSessionsSection() {
               />
             </svg>
             <h3 className="mt-2 text-sm font-medium text-gray-900">
-              No confirmed sessions
+              No upcoming sessions
             </h3>
             <p className="mt-1 text-sm text-gray-500">
-              Your confirmed sessions will appear here after payment.
+              Your upcoming sessions will appear here after booking and payment.
             </p>
           </div>
         ) : (
