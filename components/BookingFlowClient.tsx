@@ -472,6 +472,17 @@ const normalizeSubjectKey = (value: unknown): string =>
     .replace(/\s+/g, '_')
     .replace(/-/g, '_');
 
+function subjectBadgeClasses(subject: string): string {
+  const key = normalizeSubjectKey(subject);
+  const base = 'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium';
+  if (key === 'math') return `${base} border-blue-200 bg-blue-50 text-blue-800`;
+  if (key === 'english') return `${base} border-emerald-200 bg-emerald-50 text-emerald-800`;
+  if (key === 'science') return `${base} border-violet-200 bg-violet-50 text-violet-800`;
+  if (key === 'history') return `${base} border-amber-200 bg-amber-50 text-amber-900`;
+  if (key === 'test_prep') return `${base} border-slate-200 bg-slate-50 text-slate-700`;
+  return `${base} border-gray-200 bg-gray-50 text-gray-700`;
+}
+
 const providerSupportsSelectedOffering = (
   provider: any,
   selectedService: string | null | undefined,
@@ -2795,13 +2806,15 @@ function Step5SelectProvider({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-base font-semibold text-gray-900">{providerDisplayName}</div>
-                        {displayService && selectedService !== 'test_prep' ? (
-                          <span className="service-label mt-1 inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700">
-                            {displayService}
-                          </span>
-                        ) : null}
                         {showProviderSchool && typeof p.schoolName === 'string' && p.schoolName.trim() ? (
                           <div className="mt-0.5 text-sm text-gray-500">{p.schoolName.trim()}</div>
+                        ) : null}
+                        {displayService && selectedService !== 'test_prep' ? (
+                          <div className="mt-1.5">
+                            <span className="service-label inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                              {displayService}
+                            </span>
+                          </div>
                         ) : null}
 
                         {subjectsToShow.length > 0 ? (
@@ -2809,7 +2822,7 @@ function Step5SelectProvider({
                             {subjectsToShow.map((s) => (
                               <span
                                 key={s}
-                                className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold text-gray-700"
+                                className={subjectBadgeClasses(s)}
                               >
                                 {formatSubjectLabel(s)}
                               </span>
