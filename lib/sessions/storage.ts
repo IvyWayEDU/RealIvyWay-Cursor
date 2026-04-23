@@ -25,6 +25,7 @@ type SessionDbRow = {
   status: string | null;
   provider_joined_at: string | null;
   student_joined_at: string | null;
+  zoom_join_url?: string | null;
   data: any;
 };
 
@@ -84,6 +85,12 @@ function mergeDbRowIntoSession(row: SessionDbRow): Session | null {
     s.status = row.status.trim();
   }
 
+  // Expose Zoom join URL from DB column when present (authoritative).
+  // This is the field dashboards must use for the "Join Now" button.
+  if (typeof row?.zoom_join_url === 'string' && row.zoom_join_url.trim()) {
+    s.zoom_join_url = row.zoom_join_url.trim();
+  }
+
   // Ensure providerId/studentId are present even when legacy rows stored them only in DB columns.
   const providerIdRow = typeof row?.provider_id === 'string' ? row.provider_id.trim() : '';
   const studentIdRow = typeof row?.student_id === 'string' ? row.student_id.trim() : '';
@@ -138,7 +145,9 @@ async function readSessionsRaw(): Promise<Session[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('sessions')
-    .select('id, student_id, provider_id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
+    .select(
+      'id, student_id, provider_id, datetime, end_datetime, status, provider_joined_at, student_joined_at, zoom_join_url, data'
+    )
     .order('datetime', { ascending: true });
   if (error) {
     console.error('[sessions.storage] Error reading sessions from Supabase:', error);
@@ -155,7 +164,9 @@ async function readSessionByIdRaw(id: string): Promise<Session | null> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
     .from('sessions')
-    .select('id, student_id, provider_id, datetime, end_datetime, status, provider_joined_at, student_joined_at, data')
+    .select(
+      'id, student_id, provider_id, datetime, end_datetime, status, provider_joined_at, student_joined_at, zoom_join_url, data'
+    )
     .eq('id', sid)
     .maybeSingle();
   if (error) throw error;

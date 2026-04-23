@@ -97,18 +97,8 @@ export default function ConfirmedSessionsSection() {
 
   const getStartIso = (s: any) => s?.startTime || s?.scheduledStartTime || s?.scheduledStart;
   const getEndIso = (s: any) => s?.endTime || s?.scheduledEndTime || s?.scheduledEnd;
-  // Per spec: always navigate to session.zoom_join_url when available (participants join link).
-  // Keep legacy fallbacks for older/dev sessions.
   const getJoinUrl = (s: any): string | null =>
-    (typeof s?.zoom_join_url === 'string' && s.zoom_join_url.trim().length > 0
-      ? s.zoom_join_url
-      : typeof s?.meetingUrl === 'string' && s.meetingUrl.trim().length > 0
-        ? s.meetingUrl
-        : typeof s?.zoomUrl === 'string' && s.zoomUrl.trim().length > 0
-          ? s.zoomUrl
-          : typeof s?.joinUrl === 'string' && s.joinUrl.trim().length > 0
-            ? s.joinUrl
-            : null);
+    typeof s?.zoom_join_url === 'string' && s.zoom_join_url.trim().length > 0 ? s.zoom_join_url.trim() : null;
 
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
@@ -278,23 +268,28 @@ export default function ConfirmedSessionsSection() {
                           now <= sessionStart + 60 * 60 * 1000;
                         return (
                           <>
-                            <button
-                              type="button"
-                              disabled={!canJoinSession}
-                              onClick={() => {
-                                if (!joinUrl) return;
-                                // Early clicks are blocked via disabled button only.
-                                setJoinConfirm({ joinUrl, sessionId: session.id });
-                              }}
-                              className={`inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                                canJoinSession
-                                  ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
-                                  : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                              }`}
-                              title="Join Session"
-                            >
-                              Join Session
-                            </button>
+                            {joinUrl ? (
+                              <button
+                                type="button"
+                                disabled={!canJoinSession}
+                                onClick={() => {
+                                  // Early clicks are blocked via disabled button only.
+                                  setJoinConfirm({ joinUrl, sessionId: session.id });
+                                }}
+                                className={`inline-flex items-center justify-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                  canJoinSession
+                                    ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
+                                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                                }`}
+                                title="Join Now"
+                              >
+                                Join Now
+                              </button>
+                            ) : (
+                              <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                                Zoom link pending
+                              </div>
+                            )}
 
                             {process.env.NODE_ENV !== 'production' && (
                               <div className="mt-1 max-w-[360px] text-[10px] leading-snug text-gray-500 break-words">
