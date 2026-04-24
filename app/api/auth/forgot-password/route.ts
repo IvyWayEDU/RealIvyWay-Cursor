@@ -12,20 +12,20 @@ import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { getServerSession } from '@/lib/auth/getServerSession';
 
 function baseUrlFromRequest(request: NextRequest): string {
-  const canonical = (process.env.NEXT_PUBLIC_SITE_URL || 'https://ivywayedu.com').trim();
+  // Canonical base URL for links in production emails.
+  // Requirements: never use preview deployment domains or localhost in production sends.
+  const canonical = 'https://ivywayedu.com';
 
   const explicit = (process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || '').trim();
   const normalize = (raw: string) => raw.replace(/\/+$/, '');
-  if (explicit) return normalize(explicit);
+  const isDev = process.env.NODE_ENV !== 'production';
+  if (explicit && isDev) return normalize(explicit);
 
   const xfProto = (request.headers.get('x-forwarded-proto') || '').split(',')[0]?.trim();
   const xfHost = (request.headers.get('x-forwarded-host') || '').split(',')[0]?.trim();
   const host = (request.headers.get('host') || '').split(',')[0]?.trim();
   const proto = xfProto || 'https';
   const detectedHost = xfHost || host;
-
-  const isDev = process.env.NODE_ENV !== 'production';
-  const isPreview = String(process.env.VERCEL_ENV || '').toLowerCase() === 'preview';
 
   if (detectedHost) {
     const origin = normalize(`${proto}://${detectedHost}`);
@@ -36,9 +36,8 @@ function baseUrlFromRequest(request: NextRequest): string {
     // Never generate links to Vercel's own domain (mis-detected host can cause this).
     const isBadHost = hostname === 'vercel.com' || hostname.endsWith('.vercel.com');
 
+    // Local development convenience (explicit local testing only).
     if (isDev && isLocalhost) return origin;
-    if (isPreview && hostname.endsWith('.vercel.app') && !isBadHost) return origin;
-    if (!isBadHost) return origin;
   }
 
   return normalize(canonical);
@@ -107,9 +106,10 @@ export async function POST(request: NextRequest) {
         requestIp: getClientIp(request),
       });
 
-      const resetUrl = `${baseUrlFromRequest(request)}/auth/reset-password?token=${encodeURIComponent(
-        token
-      )}&uid=${encodeURIComponent(user.id)}`;
+      const resetUrlObj = new URL('/auth/reset-password', baseUrlFromRequest(request));
+      resetUrlObj.searchParams.set('token', token);
+      resetUrlObj.searchParams.set('uid', user.id);
+      const resetUrl = resetUrlObj.toString();
 
       // Best-effort email send: never reveal existence in API response.
       await sendPasswordResetEmail({
