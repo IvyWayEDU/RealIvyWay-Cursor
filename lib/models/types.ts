@@ -282,6 +282,7 @@ export type SessionStatus =
   | 'in_progress'   // Session is currently in progress
   | 'in_progress_pending_join' // Session started, waiting for both parties to join
   | 'flagged'       // Provider did not join within 10 minutes of scheduled start (canonical)
+  | 'disputed'      // Admin-managed: dispute opened and pending resolution
   | 'completed'     // Session has been completed
   | 'completed_provider_show' // Completed variant where provider showed (provider earns)
   | 'completed_no_show_provider' // DEV/admin override: completed with provider no-show outcome

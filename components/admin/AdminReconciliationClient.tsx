@@ -187,6 +187,8 @@ export default function AdminReconciliationClient(props: { initial: AdminReconci
 
   const discrepancy = data.balanceCheck.studentPaymentsMinusProviderMinusPlatformCents;
   const hasMismatch = !data.balanceCheck.ok;
+  const creditsMismatch = data.balanceCheck.providerCreditsMinusComputedEarningsCents;
+  const hasCreditsMismatch = creditsMismatch !== 0;
 
   const totals = data.totals;
 
@@ -240,13 +242,25 @@ export default function AdminReconciliationClient(props: { initial: AdminReconci
         </div>
       ) : null}
 
-      <Section title="Reconciliation Totals" subtitle="Student payments, platform revenue, and provider earnings are derived from completed sessions. Payout totals are derived from payout requests.">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      {hasCreditsMismatch ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="font-semibold">Earnings ledger mismatch</div>
+          <div className="mt-1 tabular-nums">
+            credits + adjustments − computed earnings = <span className="font-semibold">{money(creditsMismatch)}</span> ({creditsMismatch} cents)
+          </div>
+        </div>
+      ) : null}
+
+      <Section title="Reconciliation Totals" subtitle="Totals include finalized sessions (completed/no-show/refunded). Credits are derived from the earnings ledger. Payout totals are derived from payout requests.">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-7">
           <StatCard label="Total student payments received" value={money(totals.totalStudentPaymentsReceivedCents)} />
+          <StatCard label="Total student refunds" value={money(totals.totalStudentRefundsCents)} />
+          <StatCard label="Total net student payments" value={money(totals.totalStudentNetPaymentsCents)} />
           <StatCard label="Total platform revenue" value={money(totals.totalPlatformRevenueCents)} />
           <StatCard label="Total provider earnings" value={money(totals.totalProviderEarningsCents)} />
+          <StatCard label="Provider credits (ledger)" value={money(totals.providerCreditsCents)} sub={`Adjustments: ${money(totals.providerAdjustmentsCents)}`} />
           <StatCard label="Total payouts sent" value={money(totals.totalPayoutsSentCents)} />
-          <StatCard label="Total pending payouts" value={money(totals.totalPendingPayoutsCents)} />
+          <StatCard label="Total pending payouts" value={money(totals.totalPendingPayoutsCents)} sub="Pending + approved" />
         </div>
       </Section>
 

@@ -45,8 +45,10 @@ export default async function AdminLayout({
     { name: 'Reconciliation', href: '/admin/analytics/reconciliation' },
     { name: 'Users', href: '/admin/users' },
     { name: 'Sessions', href: '/admin/sessions' },
+    { name: 'Flagged Sessions', href: '/admin/flagged-sessions' },
     { name: 'Support', href: '/admin/support' },
-    { name: 'Earnings', href: '/admin/earnings' },
+    { name: 'Earnings (Analytics)', href: '/admin/earnings' },
+    { name: 'Earnings & Payouts (Ops)', href: '/admin/earnings-payouts' },
     { name: 'Payouts', href: '/admin/payouts' },
     { name: 'Payout Investigation', href: '/admin/payout-investigation' },
   ] as const;

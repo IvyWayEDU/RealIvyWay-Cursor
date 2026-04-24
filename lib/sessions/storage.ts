@@ -420,9 +420,7 @@ function requireStrictPaidSessionFields(session: any, nowMs: number): boolean {
     if (normalized === 'cancelled-late') {
       session.status = 'cancelled';
     }
-    if (normalized === 'refunded') {
-      session.status = 'cancelled';
-    }
+    // Keep `refunded` as a real terminal status (admin/support workflows depend on it).
     if (normalized === 'requires_review') {
       // "requires_review" is not part of the canonical lifecycle; treat as confirmed so time-based completion applies.
       session.status = 'confirmed';
@@ -467,6 +465,8 @@ function requireStrictPaidSessionFields(session: any, nowMs: number): boolean {
     'cancelled',
     'provider_no_show',
     'student_no_show',
+    'refunded',
+    'disputed',
   ]);
   if (!allowedStatuses.has(session.status as SessionStatus)) return false;
 
@@ -698,6 +698,51 @@ export async function getSessions(): Promise<Session[]> {
         updatedAt: (patch as any).updatedAt || nowISO,
       });
       localChanged = true;
+    }
+
+    // PRODUCTION CRITICAL: auto-credit provider earnings when a session resolves to completed.
+    // The resolver is the single source of truth for time-based completion; crediting must stay in sync.
+    try {
+      const statusNow = typeof (s as any)?.status === 'string' ? String((s as any).status).trim() : '';
+      const alreadyCredited = Boolean((s as any)?.earningsCredited);
+      const providerId = typeof (s as any)?.providerId === 'string' ? String((s as any).providerId).trim() : '';
+      const eligible =
+        (s as any)?.providerEligibleForPayout === true ||
+        (s as any)?.provider_eligible_for_payout === true ||
+        (s as any)?.providerEarned === true;
+      const withheld =
+        (s as any)?.providerEarned === false ||
+        (s as any)?.providerEligibleForPayout === false ||
+        (s as any)?.payoutStatus === 'none';
+
+      if (statusNow === 'completed' && !alreadyCredited && providerId && eligible && !withheld) {
+        const joined = typeof (s as any)?.providerJoinedAt === 'string' && String((s as any).providerJoinedAt).trim().length > 0;
+        if (joined) {
+          const { calculateProviderPayoutCentsFromSession } = await import('@/lib/earnings/calc');
+          const { addCreditForSession, creditExistsForSession } = await import('@/lib/earnings/credits.server');
+          const amountCents = Math.max(0, Math.floor(calculateProviderPayoutCentsFromSession(s as any)));
+          if (amountCents > 0) {
+            // Idempotent by sessionId (credit store + DB uniqueness)
+            const exists = await creditExistsForSession(String((s as any).id || ''));
+            if (!exists) {
+              await addCreditForSession({
+                providerId,
+                sessionId: String((s as any).id || ''),
+                amountCents,
+              });
+            }
+            (s as any).earningsCredited = true;
+            (s as any).earningsCreditedAt = (s as any)?.earningsCreditedAt || nowISO;
+            (s as any).updatedAt = nowISO;
+            localChanged = true;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[earnings] auto-credit failed (non-blocking)', {
+        sessionId: String((s as any)?.id || ''),
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
 
     // Transactional email triggers (no-show only) when we auto-resolve lifecycle.
@@ -1111,7 +1156,7 @@ export async function updateSessionLenient(id: string, patch: Partial<Session>):
     if (normalized === 'requires_review') {
       mergedRaw.status = 'confirmed';
     }
-    if (normalized === 'cancelled-late' || normalized === 'refunded') {
+    if (normalized === 'cancelled-late') {
       mergedRaw.status = 'cancelled';
     }
   }

@@ -939,6 +939,66 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true });
   }
 
+  // Chargeback / dispute tracking (Stripe disputes)
+  // Maps Stripe dispute events back to sessions via stripePaymentIntentId.
+  if (event.type === 'charge.dispute.created' || event.type === 'charge.dispute.updated' || event.type === 'charge.dispute.closed') {
+    const dispute = event.data.object as Stripe.Dispute;
+    try {
+      const paymentIntentId =
+        typeof (dispute as any)?.payment_intent === 'string' ? String((dispute as any).payment_intent).trim() : '';
+      const chargeId = typeof (dispute as any)?.charge === 'string' ? String((dispute as any).charge).trim() : '';
+      const status = typeof (dispute as any)?.status === 'string' ? String((dispute as any).status).trim() : '';
+      const amountCents = typeof (dispute as any)?.amount === 'number' ? Math.max(0, Math.floor((dispute as any).amount)) : 0;
+      const createdAt = typeof (dispute as any)?.created === 'number' ? new Date((dispute as any).created * 1000).toISOString() : new Date().toISOString();
+
+      if (paymentIntentId) {
+        const sessions = await getSessions();
+        const matches = (sessions as any[]).filter((s) => String((s as any)?.stripePaymentIntentId || '').trim() === paymentIntentId);
+        for (const s of matches) {
+          const sid = String((s as any)?.id || '').trim();
+          if (!sid) continue;
+          const nowISO = new Date().toISOString();
+          try {
+            await updateSession(sid, {
+              chargebackId: String((dispute as any)?.id || ''),
+              chargebackStatus: status || undefined,
+              chargebackAmountCents: amountCents || undefined,
+              chargebackChargeId: chargeId || undefined,
+              chargebackCreatedAt: createdAt,
+              chargebackUpdatedAt: nowISO,
+              requiresAdminReview: true,
+              // Operational surfacing: mark disputed only when the dispute is open-ish.
+              status: status && status !== 'won' && status !== 'lost' ? 'disputed' : (s as any)?.status,
+              updatedAt: nowISO,
+            } as any);
+          } catch {
+            // If strict update rejects legacy records, do a lenient patch.
+            try {
+              const { updateSessionLenient } = await import('@/lib/sessions/storage');
+              await updateSessionLenient(sid, {
+                chargebackId: String((dispute as any)?.id || ''),
+                chargebackStatus: status || undefined,
+                chargebackAmountCents: amountCents || undefined,
+                chargebackChargeId: chargeId || undefined,
+                chargebackCreatedAt: createdAt,
+                chargebackUpdatedAt: nowISO,
+                requiresAdminReview: true,
+                status: status && status !== 'won' && status !== 'lost' ? 'disputed' : (s as any)?.status,
+                updatedAt: nowISO,
+              } as any);
+            } catch {}
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WEBHOOK] charge.dispute handling failed (non-blocking)', {
+        eventId: event.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+    return NextResponse.json({ received: true });
+  }
+
   // Grant counseling monthly credits on invoice.paid (covers renewals).
   if (event.type === 'invoice.paid') {
     const invoice = event.data.object as Stripe.Invoice;

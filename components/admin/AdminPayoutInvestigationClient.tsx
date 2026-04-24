@@ -16,8 +16,27 @@ type InvestigationResult = {
     completedPayoutsCount: number;
     lastPayoutDate: string | null;
     lastPayoutAmountCents: number | null;
+    balanceAvailableCents?: number;
+    balancePendingCents?: number;
+    balanceWithdrawnCents?: number;
+    grossCollectedCents?: number;
+    refundedCents?: number;
+    netCollectedCents?: number;
+    providerPayoutDueCents?: number;
+    platformFeeCents?: number;
+    chargebackCents?: number;
+    chargebackOpenCount?: number;
   };
   alerts: Array<{ code: string; message: string; payoutRequestIds?: string[] }>;
+  manualOverrideHistory?: Array<{
+    id: string;
+    amountCents: number;
+    reason: string | null;
+    relatedSessionId: string | null;
+    relatedPayoutRequestId: string | null;
+    createdByAdmin: string | null;
+    createdAt: string | null;
+  }>;
   payoutRequests: Array<{
     id: string;
     providerId: string;
@@ -328,6 +347,74 @@ export default function AdminPayoutInvestigationClient() {
                             : undefined
                         }
                       />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <MetricCard
+                        label="Balances (DB)"
+                        value={money(Number(r.metrics.balanceAvailableCents ?? r.metrics.availableBalanceCents ?? 0))}
+                        sub={`pending ${money(Number(r.metrics.balancePendingCents ?? 0))} · withdrawn ${money(Number(r.metrics.balanceWithdrawnCents ?? 0))}`}
+                      />
+                      <MetricCard
+                        label="Gross collected (finalized)"
+                        value={money(Number(r.metrics.grossCollectedCents ?? 0))}
+                        sub="Finalized sessions only"
+                      />
+                      <MetricCard
+                        label="Refund impact (finalized)"
+                        value={money(Number(r.metrics.refundedCents ?? 0))}
+                        sub={`Net ${money(Number(r.metrics.netCollectedCents ?? 0))}`}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <MetricCard
+                        label="Provider payout due (finalized)"
+                        value={money(Number(r.metrics.providerPayoutDueCents ?? 0))}
+                        sub="Derived from session payout rules"
+                      />
+                      <MetricCard
+                        label="Platform fee (finalized)"
+                        value={money(Number(r.metrics.platformFeeCents ?? 0))}
+                        sub="Net collected minus provider payout due"
+                      />
+                      <MetricCard
+                        label="Chargebacks (Stripe disputes)"
+                        value={money(Number(r.metrics.chargebackCents ?? 0))}
+                        sub={`${Number(r.metrics.chargebackOpenCount ?? 0)} open`}
+                      />
+                    </div>
+
+                    <div className="overflow-hidden rounded-lg border border-gray-200">
+                      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-4">
+                        <div className="text-sm font-semibold text-gray-900">Manual override history</div>
+                        <div className="text-xs text-gray-500">{r.manualOverrideHistory?.length ? `${r.manualOverrideHistory.length} item(s)` : '—'}</div>
+                      </div>
+                      <div className="divide-y divide-gray-200 bg-white">
+                        {(r.manualOverrideHistory || []).length ? (
+                          (r.manualOverrideHistory || []).map((h) => (
+                            <div key={h.id} className="px-4 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-mono text-gray-700 break-all">{h.id}</div>
+                                  <div className="mt-1 text-xs text-gray-600">
+                                    {h.createdAt ? formatDate(h.createdAt) : '—'} • {h.reason || '—'}
+                                  </div>
+                                  <div className="mt-1 text-xs text-gray-600 font-mono break-all">
+                                    {h.relatedSessionId ? `session ${h.relatedSessionId}` : '—'}
+                                    {h.relatedPayoutRequestId ? ` • payout ${h.relatedPayoutRequestId}` : ''}
+                                  </div>
+                                </div>
+                                <div className="shrink-0 text-sm font-semibold text-gray-900 tabular-nums">
+                                  {money(h.amountCents)}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="px-4 py-8 text-center text-sm text-gray-600">No manual overrides recorded.</div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="overflow-hidden rounded-lg border border-gray-200">

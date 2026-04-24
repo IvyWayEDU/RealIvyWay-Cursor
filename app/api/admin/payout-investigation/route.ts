@@ -10,6 +10,10 @@ import {
   type PayoutRequest,
 } from '@/lib/payouts/payout-requests.server';
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
+import { getProviderEarningsBalance } from '@/lib/earnings/balances.server';
+import { getSessionsByProviderId } from '@/lib/sessions/storage';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 
 export const runtime = 'nodejs';
 
@@ -151,8 +155,69 @@ export async function GET(request: NextRequest) {
         const user = (users || []).find((u: any) => String(u?.id || '') === providerId) as any;
         const providerProfile = providerByUserId.get(providerId) as any;
 
-        const payoutRequests = await listProviderPayoutRequests(providerId);
-        const summary = await getProviderEarningsSummary(providerId);
+        const [payoutRequests, summary, balance, sessions] = await Promise.all([
+          listProviderPayoutRequests(providerId),
+          getProviderEarningsSummary(providerId),
+          getProviderEarningsBalance(providerId),
+          getSessionsByProviderId(providerId),
+        ]);
+
+        // Session-based net collection (best-effort): gross - refunds for finalized sessions.
+        let grossCollectedCents = 0;
+        let refundedCents = 0;
+        let providerPayoutDueCents = 0;
+        let chargebackCents = 0;
+        let chargebackOpenCount = 0;
+        for (const s of sessions as any[]) {
+          const st = String((s as any)?.status || '');
+          const finalized = st === 'completed' || st === 'provider_no_show' || st === 'student_no_show' || st === 'refunded';
+          if (!finalized) continue;
+          grossCollectedCents += Math.max(0, getSessionGrossCents(s as any));
+          refundedCents += Math.max(0, Math.floor(Number((s as any)?.amountRefundedCents || 0)));
+          providerPayoutDueCents += Math.max(0, calculateProviderPayoutCentsFromSession(s as any));
+
+          const cbStatus = String((s as any)?.chargebackStatus || '').trim().toLowerCase();
+          const cbAmount = Math.max(0, Math.floor(Number((s as any)?.chargebackAmountCents || 0)));
+          if (cbStatus) {
+            chargebackCents += cbAmount;
+            if (cbStatus !== 'won' && cbStatus !== 'lost') chargebackOpenCount += 1;
+          }
+        }
+        const netCollectedCents = Math.max(0, grossCollectedCents - refundedCents);
+        const platformFeeCents = netCollectedCents - providerPayoutDueCents;
+
+        // Manual override history (earnings adjustments)
+        let adjustments: Array<{
+          id: string;
+          amountCents: number;
+          reason: string | null;
+          relatedSessionId: string | null;
+          relatedPayoutRequestId: string | null;
+          createdByAdmin: string | null;
+          createdAt: string | null;
+        }> = [];
+        try {
+          const supabase = getSupabaseAdmin();
+          const { data, error } = await supabase
+            .from('provider_earnings_adjustments')
+            .select('*')
+            .eq('provider_id', providerId)
+            .order('created_at', { ascending: false })
+            .limit(25);
+          if (error) throw error;
+          const rows = Array.isArray(data) ? (data as any[]) : [];
+          adjustments = rows.map((r) => ({
+            id: String(r?.id || ''),
+            amountCents: Number.isFinite(Number(r?.amount_cents)) ? Math.trunc(Number(r.amount_cents)) : 0,
+            reason: typeof r?.reason === 'string' ? r.reason : null,
+            relatedSessionId: typeof r?.related_session_id === 'string' ? r.related_session_id : null,
+            relatedPayoutRequestId: typeof r?.related_payout_request_id === 'string' ? r.related_payout_request_id : null,
+            createdByAdmin: typeof r?.created_by_admin === 'string' ? r.created_by_admin : null,
+            createdAt: typeof r?.created_at === 'string' ? r.created_at : null,
+          }));
+        } catch {
+          adjustments = [];
+        }
 
         const pending = payoutRequests.filter((r) => isPendingStatus(r.status));
         const approved = payoutRequests.filter((r) => isApprovedStatus(r.status));
@@ -212,15 +277,28 @@ export async function GET(request: NextRequest) {
             : null,
           metrics: {
             totalProviderEarningsCents: summary.totalEarningsCents,
-            availableBalanceCents: summary.availableBalanceCents,
+            availableBalanceCents: balance.availableCents,
             pendingPayoutsCents: pendingCents + approvedCents,
             pendingPayoutsCount: pending.length + approved.length,
             completedPayoutsCents: completedCents,
             completedPayoutsCount: paid.length,
             lastPayoutDate: lastPaid ? (lastPaid.paidAt || lastPaid.createdAt) : null,
             lastPayoutAmountCents: lastPaid ? Number(lastPaid.amountCents || 0) : null,
+            // True balances (DB)
+            balanceAvailableCents: balance.availableCents,
+            balancePendingCents: balance.pendingCents,
+            balanceWithdrawnCents: balance.withdrawnCents,
+            // Session-level collection impact
+            grossCollectedCents,
+            refundedCents,
+            netCollectedCents,
+            providerPayoutDueCents,
+            platformFeeCents,
+            chargebackCents,
+            chargebackOpenCount,
           },
           alerts,
+          manualOverrideHistory: adjustments,
           payoutRequests: (payoutRequests || []).slice(0, 25).map((r) => ({
             id: r.id,
             providerId: r.providerId,

@@ -1,42 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
-import path from 'path';
 import { handleApiError } from '@/lib/errorHandler';
-
-type Balances = Record<string, { balanceCents: number; updatedAt: string }>;
-
-const FS_DISABLED_IN_PROD = process.env.NODE_ENV === 'production';
-
-async function readBalances(): Promise<Balances> {
-  if (FS_DISABLED_IN_PROD) return {};
-  const file = path.join(process.cwd(), 'data', 'provider-earnings.json');
-  try {
-    const fsp = await import('fs/promises');
-    const raw = await fsp.readFile(file, 'utf-8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as Balances) : {};
-  } catch {
-    return {};
-  }
-}
-
-async function writeBalances(balances: Balances): Promise<void> {
-  if (FS_DISABLED_IN_PROD) return;
-  const dir = path.join(process.cwd(), 'data');
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.mkdir(dir, { recursive: true });
-  } catch {
-    return;
-  }
-  const file = path.join(dir, 'provider-earnings.json');
-  try {
-    const fsp = await import('fs/promises');
-    await fsp.writeFile(file, JSON.stringify(balances, null, 2), 'utf-8');
-  } catch {
-    return;
-  }
-}
+import { getProviderEarningsBalance, updateProviderEarningsBalance } from '@/lib/earnings/balances.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 export async function POST(request: NextRequest) {
   const authResult = await auth.requireAdmin();
@@ -46,21 +12,48 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const providerId = String((body as any)?.providerId ?? '').trim();
     const deltaCents = Number((body as any)?.deltaCents ?? 0);
+    const reason = String((body as any)?.reason ?? '').trim();
     if (!providerId) return NextResponse.json({ error: 'providerId is required' }, { status: 400 });
     if (!Number.isFinite(deltaCents) || !Number.isInteger(deltaCents)) {
       return NextResponse.json({ error: 'deltaCents must be an integer' }, { status: 400 });
     }
 
-    const balances = await readBalances();
-    const prev = balances[providerId]?.balanceCents ?? 0;
     const nowISO = new Date().toISOString();
-    balances[providerId] = {
-      balanceCents: Math.max(0, prev + deltaCents),
-      updatedAt: nowISO,
-    };
-    await writeBalances(balances);
+    const current = await getProviderEarningsBalance(providerId);
+    const nextAvailable = Math.max(0, Math.floor((current.availableCents || 0) + deltaCents));
 
-    return NextResponse.json({ success: true, providerId, balance: balances[providerId] });
+    const updated = await updateProviderEarningsBalance({
+      providerId,
+      availableCents: nextAvailable,
+      pendingCents: current.pendingCents || 0,
+      withdrawnCents: current.withdrawnCents || 0,
+    });
+
+    // Best-effort: persist an adjustment history entry when table exists.
+    try {
+      const supabase = getSupabaseAdmin();
+      await supabase.from('provider_earnings_adjustments').insert({
+        id: `adj_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+        provider_id: providerId,
+        amount_cents: Math.trunc(deltaCents),
+        reason: reason || null,
+        created_by_admin: authResult.session!.userId,
+        created_at: nowISO,
+      } as any);
+    } catch {
+      // ignore (table may not exist yet)
+    }
+
+    return NextResponse.json({
+      success: true,
+      providerId,
+      balance: {
+        availableCents: updated.availableCents,
+        pendingCents: updated.pendingCents,
+        withdrawnCents: updated.withdrawnCents,
+        updatedAt: updated.updatedAt,
+      },
+    });
   } catch (error) {
     return handleApiError(error, { logPrefix: '[api/admin/earnings/adjust-balance]' });
   }

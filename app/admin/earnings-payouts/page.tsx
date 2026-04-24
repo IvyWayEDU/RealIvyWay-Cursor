@@ -2,14 +2,14 @@ import { getUsers } from '@/lib/auth/storage';
 import { getSessions } from '@/lib/sessions/storage';
 import { readCredits } from '@/lib/earnings/credits.server';
 import AdminEarningsClient from '@/components/admin/AdminEarningsClient';
-import path from 'path';
 import { listPendingPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { getProviders } from '@/lib/providers/storage';
 import type { User } from '@/lib/auth/types';
 import type { ProviderProfile } from '@/lib/models/types';
 import { listBankAccounts, type BankAccount } from '@/lib/payouts/bank-account-storage';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
-type Balances = Record<string, { balanceCents: number; updatedAt: string }>;
+type Balances = Record<string, { availableCents: number; pendingCents: number; withdrawnCents: number; updatedAt: string }>;
 
 type PayoutDetailsSummary = {
   payoutMethod?: string;
@@ -40,20 +40,46 @@ function normalizePayoutMethod(raw: unknown): 'wise' | 'paypal' | 'zelle' | 'ban
 }
 
 async function readProviderEarningsBalances(): Promise<Balances> {
+  // Primary: Supabase balances table (production-safe).
+  try {
+    const hasSupabase = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+    if (hasSupabase) {
+      const supabase = getSupabaseAdmin();
+      const { data, error } = await supabase.from('provider_earnings_balances').select('*');
+      if (error) throw error;
+      const rows = Array.isArray(data) ? (data as any[]) : [];
+      const out: Balances = {};
+      for (const r of rows) {
+        const providerId = String(r?.provider_id || '').trim();
+        if (!providerId) continue;
+        out[providerId] = {
+          availableCents: Math.max(0, Math.floor(Number(r?.available_cents || 0))),
+          pendingCents: Math.max(0, Math.floor(Number(r?.pending_cents || 0))),
+          withdrawnCents: Math.max(0, Math.floor(Number(r?.withdrawn_cents || 0))),
+          updatedAt: String(r?.updated_at || r?.created_at || new Date().toISOString()),
+        };
+      }
+      return out;
+    }
+  } catch {
+    // fall through to local fallback
+  }
+
+  // Local fallback: legacy JSON file (dev only).
   if (process.env.NODE_ENV === 'production') return {};
   try {
-    const p = path.join(process.cwd(), 'data', 'provider-earnings.json');
     const fsp = await import('fs/promises');
+    const p = (await import('path')).default.join(process.cwd(), 'data', 'provider-earnings.json');
     const raw = await fsp.readFile(p, 'utf-8');
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed)) return {};
     const out: Balances = {};
     for (const [k, v] of Object.entries(parsed)) {
       if (!isRecord(v)) continue;
-      const balanceCents = Number(v.balanceCents);
-      const updatedAt = typeof v.updatedAt === 'string' ? v.updatedAt : '';
+      const balanceCents = Number((v as any).balanceCents);
+      const updatedAt = typeof (v as any).updatedAt === 'string' ? (v as any).updatedAt : '';
       if (!Number.isFinite(balanceCents) || !updatedAt) continue;
-      out[k] = { balanceCents: Math.floor(balanceCents), updatedAt };
+      out[k] = { availableCents: Math.floor(balanceCents), pendingCents: 0, withdrawnCents: 0, updatedAt };
     }
     return out;
   } catch {

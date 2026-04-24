@@ -7,6 +7,7 @@ import { getUserById } from '@/lib/auth/storage';
 import { getProviderByUserId } from '@/lib/providers/storage';
 import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 import AdminSessionNotesClient from '@/components/admin/AdminSessionNotesClient';
+import AdminSessionActionsClient from '@/components/admin/AdminSessionActionsClient';
 
 export const runtime = 'nodejs';
 
@@ -110,6 +111,7 @@ export default async function AdminSessionDetailPage({
 
   const paymentStatus = s?.isPaid === true ? 'paid' : 'unpaid';
   const zoomJoinUrl = cleanString(s?.zoom_join_url) || cleanString(s?.joinUrl) || cleanString(s?.zoom_url) || '';
+  const disputeId = cleanString(s?.disputeId) || cleanString(s?.dispute_id) || '';
 
   return (
     <div className="space-y-6">
@@ -283,6 +285,53 @@ export default async function AdminSessionDetailPage({
             </div>
 
             <div className="border-t border-gray-200 pt-4">
+              <h3 className="text-sm font-semibold text-gray-900">No-show / dispute investigation</h3>
+              <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm text-gray-600">Provider joined at</div>
+                  <div className="mt-1 text-sm text-gray-900 font-mono break-all">{cleanString(s?.providerJoinedAt) || '—'}</div>
+                  <div className="mt-2 text-sm text-gray-600">Student joined at</div>
+                  <div className="mt-1 text-sm text-gray-900 font-mono break-all">{cleanString(s?.studentJoinedAt) || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-sm text-gray-600">Attendance flags</div>
+                  <div className="mt-1 text-sm text-gray-900">
+                    attendanceFlag={String(s?.attendanceFlag || '—')} • noShowParty={String(s?.noShowParty || '—')}
+                  </div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    flagNoShowProvider={String(Boolean(s?.flagNoShowProvider))} • flagNoShowStudent={String(Boolean(s?.flagNoShowStudent))} • requiresAdminReview={String(Boolean(s?.requiresAdminReview))}
+                  </div>
+                  <div className="mt-3 text-sm text-gray-600">Refund recommendation</div>
+                  <div className="mt-1 text-sm text-gray-900">
+                    {(() => {
+                      const providerJoined = Boolean(cleanString(s?.providerJoinedAt));
+                      const disputed = String(s?.status || '') === 'disputed' || Boolean(cleanString(s?.disputeId));
+                      if (disputed) return 'Manual review (dispute)';
+                      if (!providerJoined) return `Recommend full refund: ${formatMoneyFromCents(netPaidCents)}`;
+                      if (Boolean(s?.flagNoShowStudent) || String(s?.noShowParty || '').toLowerCase() === 'student') return 'No refund recommended by default (provider attended)';
+                      return 'No refund recommendation';
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm text-gray-600">Join logs</div>
+                <div className="mt-2 space-y-2">
+                  {Array.isArray(s?.zoomJoinLogs) && s.zoomJoinLogs.length > 0 ? (
+                    s.zoomJoinLogs.slice(0, 20).map((l: any, idx: number) => (
+                      <div key={idx} className="rounded-md border border-gray-200 px-4 py-2 text-xs text-gray-700 font-mono break-all">
+                        {String(l?.joinedAt || '—')} • {String(l?.role || '—')} • {String(l?.source || '—')}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-gray-600">No join logs recorded.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-4">
               <h3 className="text-sm font-semibold text-gray-900">Refund history (Stripe)</h3>
               <div className="mt-3 space-y-2">
                 {stripeRefunds && stripeRefunds.length > 0 ? (
@@ -315,6 +364,15 @@ export default async function AdminSessionDetailPage({
           </div>
         </div>
       </div>
+
+      <AdminSessionActionsClient
+        sessionId={String(s.id || id)}
+        currentStatus={String(s.status || '')}
+        providerId={cleanString(s.providerId) || null}
+        studentId={cleanString(s.studentId) || null}
+        stripePaymentIntentId={cleanString(s.stripePaymentIntentId) || null}
+        disputeId={disputeId || null}
+      />
 
       <div id="payment-timeline" className="bg-white shadow rounded-lg overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between gap-4">

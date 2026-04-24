@@ -3,19 +3,26 @@ import 'server-only';
 import { getSessions } from '@/lib/sessions/storage';
 import { listAllPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
+import { readCredits } from '@/lib/earnings/credits.server';
+import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 export type AdminReconciliation = {
   generatedAt: string; // ISO
   totals: {
     totalStudentPaymentsReceivedCents: number;
+    totalStudentRefundsCents: number;
+    totalStudentNetPaymentsCents: number;
     totalPlatformRevenueCents: number;
     totalProviderEarningsCents: number;
+    providerCreditsCents: number;
+    providerAdjustmentsCents: number;
     totalPayoutsSentCents: number;
     totalPendingPayoutsCents: number;
   };
   balanceCheck: {
     studentPaymentsMinusProviderMinusPlatformCents: number;
     ok: boolean;
+    providerCreditsMinusComputedEarningsCents: number;
   };
   daily: {
     days: number;
@@ -97,14 +104,38 @@ function payoutRequestIsPending(pr: PayoutRequest): boolean {
   return st === 'pending' || st === 'approved' || st === 'pending_admin_review' || st === 'processing';
 }
 
+function hasSupabaseConfigured(): boolean {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+async function sumProviderAdjustmentsCents(): Promise<number> {
+  if (!hasSupabaseConfigured()) return 0;
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.from('provider_earnings_adjustments').select('amount_cents');
+    if (error) throw error;
+    const rows = Array.isArray(data) ? (data as any[]) : [];
+    return rows.reduce((sum, r) => sum + safeInt((r as any)?.amount_cents), 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function getAdminReconciliation(args?: { days?: number }): Promise<AdminReconciliation> {
   const nowMs = Date.now();
   const days = Math.max(7, Math.min(365, Math.floor(args?.days ?? 30)));
 
-  const [sessions, payoutRequests] = await Promise.all([getSessions(), listAllPayoutRequests()]);
+  const [sessions, payoutRequests, credits, adjustmentsCents] = await Promise.all([
+    getSessions(),
+    listAllPayoutRequests(),
+    readCredits(),
+    sumProviderAdjustmentsCents(),
+  ]);
   const allSessions = sessions as any[];
 
   let totalStudentPaymentsReceivedCents = 0;
+  let totalStudentRefundsCents = 0;
+  let totalStudentNetPaymentsCents = 0;
   let totalPlatformRevenueCents = 0;
   let totalProviderEarningsCents = 0;
 
@@ -115,20 +146,31 @@ export async function getAdminReconciliation(args?: { days?: number }): Promise<
     const bookedDay = isoDayKey(getBookedAtIsoForSession(s));
     if (bookedDay) dailyBookingsByDay.set(bookedDay, (dailyBookingsByDay.get(bookedDay) || 0) + 1);
 
-    if (String(s?.status || '') !== 'completed') continue;
+    const status = String(s?.status || '');
+    const finalized =
+      status === 'completed' || status === 'provider_no_show' || status === 'student_no_show' || status === 'refunded';
+    if (!finalized) continue;
 
     const gross = Math.max(0, getSessionGrossCents(s as any));
+    const refunded = Math.max(0, safeInt((s as any)?.amountRefundedCents));
+    const netPaid = Math.max(0, gross - refunded);
     const eligible = Boolean(s?.providerEligibleForPayout === true);
     const provider = eligible ? Math.max(0, calculateProviderPayoutCentsFromSession(s as any)) : 0;
-    const platform = Math.max(0, getPlatformRevenueCents(s, provider));
+    const providerAfterRefund = status === 'refunded' ? 0 : provider;
+    const platform = Math.max(0, Math.min(netPaid, getPlatformRevenueCents(s, providerAfterRefund)));
 
     totalStudentPaymentsReceivedCents += gross;
+    totalStudentRefundsCents += refunded;
+    totalStudentNetPaymentsCents += netPaid;
     totalPlatformRevenueCents += platform;
-    totalProviderEarningsCents += provider;
+    totalProviderEarningsCents += providerAfterRefund;
 
     const completedDay = isoDayKey(getCompletedAtIsoForSession(s));
     if (completedDay) dailyRevenueByDay.set(completedDay, (dailyRevenueByDay.get(completedDay) || 0) + platform);
   }
+
+  const providerCreditsCents = (credits || []).reduce((sum, c: any) => sum + safeInt((c as any)?.amountCents), 0);
+  const providerAdjustmentsCents = safeInt(adjustmentsCents);
 
   let totalPayoutsSentCents = 0;
   let totalPendingPayoutsCents = 0;
@@ -146,6 +188,7 @@ export async function getAdminReconciliation(args?: { days?: number }): Promise<
   }
 
   const discrepancy = totalStudentPaymentsReceivedCents - totalProviderEarningsCents - totalPlatformRevenueCents;
+  const creditsMismatch = providerCreditsCents + providerAdjustmentsCents - totalProviderEarningsCents;
 
   const dateKeys = dayKeysBackFromNow(days, nowMs);
   const dailyRevenueCents = dateKeys.map((d) => dailyRevenueByDay.get(d) || 0);
@@ -156,14 +199,19 @@ export async function getAdminReconciliation(args?: { days?: number }): Promise<
     generatedAt: new Date(nowMs).toISOString(),
     totals: {
       totalStudentPaymentsReceivedCents,
+      totalStudentRefundsCents,
+      totalStudentNetPaymentsCents,
       totalPlatformRevenueCents,
       totalProviderEarningsCents,
+      providerCreditsCents,
+      providerAdjustmentsCents,
       totalPayoutsSentCents,
       totalPendingPayoutsCents,
     },
     balanceCheck: {
       studentPaymentsMinusProviderMinusPlatformCents: discrepancy,
       ok: discrepancy === 0,
+      providerCreditsMinusComputedEarningsCents: creditsMismatch,
     },
     daily: {
       days,

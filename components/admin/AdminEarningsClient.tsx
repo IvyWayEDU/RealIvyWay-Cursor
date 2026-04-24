@@ -40,7 +40,10 @@ type BankAccountRow = {
   status: string;
 };
 
-type Balances = Record<string, { balanceCents: number; updatedAt: string }>;
+type Balances = Record<
+  string,
+  { availableCents: number; pendingCents: number; withdrawnCents: number; updatedAt: string }
+>;
 
 type PayoutRequestRow = {
   id: string;
@@ -232,17 +235,20 @@ export default function AdminEarningsClient(props: {
         return st === 'pending_payout' || st === 'approved';
       }).length;
       const account = bankByProvider.get(p.id) || null;
-      const balanceCents = balances[p.id]?.balanceCents ?? 0;
+      const balance = balances[p.id] || null;
       return {
         providerId: p.id,
         name: p.name || p.email || p.id,
         email: p.email || '',
         completedCount,
         earningsCents: earnings,
-        withdrawnCents: withdrawn,
-        availableCents: Math.max(0, earnings - withdrawn),
+        withdrawnCents: withdrawn, // session-derived (legacy)
+        availableCents: Math.max(0, earnings - withdrawn), // session-derived (legacy)
         pendingCount: pending,
-        balanceCents,
+        balanceAvailableCents: balance ? balance.availableCents : 0,
+        balancePendingCents: balance ? balance.pendingCents : 0,
+        balanceWithdrawnCents: balance ? balance.withdrawnCents : 0,
+        balanceUpdatedAt: balance ? balance.updatedAt : '',
         bank: account ? `${account.bankName} ••••${account.last4}` : '—',
       };
     });
@@ -308,15 +314,30 @@ export default function AdminEarningsClient(props: {
     setWorking(providerId);
     setError(null);
     try {
-      const data = await post('/api/admin/earnings/adjust-balance', { providerId, deltaCents });
-      const nextBalance = data['balance'];
-      if (
-        nextBalance &&
-        typeof nextBalance === 'object' &&
-        typeof (nextBalance as { balanceCents?: unknown }).balanceCents === 'number' &&
-        typeof (nextBalance as { updatedAt?: unknown }).updatedAt === 'string'
-      ) {
-        setBalances((prev) => ({ ...prev, [providerId]: nextBalance as Balances[string] }));
+      const reason = window.prompt('Adjustment reason (optional):', '') || '';
+      const data = await post('/api/admin/earnings/adjust-balance', { providerId, deltaCents, reason });
+      const nextBalance = data['balance'] as any;
+      if (nextBalance && typeof nextBalance === 'object') {
+        const availableCents = Number(nextBalance.availableCents);
+        const pendingCents = Number(nextBalance.pendingCents);
+        const withdrawnCents = Number(nextBalance.withdrawnCents);
+        const updatedAt = typeof nextBalance.updatedAt === 'string' ? nextBalance.updatedAt : '';
+        if (
+          Number.isFinite(availableCents) &&
+          Number.isFinite(pendingCents) &&
+          Number.isFinite(withdrawnCents) &&
+          updatedAt
+        ) {
+          setBalances((prev) => ({
+            ...prev,
+            [providerId]: {
+              availableCents: Math.floor(availableCents),
+              pendingCents: Math.floor(pendingCents),
+              withdrawnCents: Math.floor(withdrawnCents),
+              updatedAt,
+            },
+          }));
+        }
       }
       router.refresh();
     } catch (e) {
@@ -386,7 +407,7 @@ export default function AdminEarningsClient(props: {
         <div className="sm:hidden divide-y divide-gray-200 bg-white">
           {filteredProviderRows.map((r) => {
             const busy = working === r.providerId;
-            const withdrawalStatus = r.pendingCount > 0 ? 'pending' : r.balanceCents > 0 ? 'available' : '—';
+            const withdrawalStatus = r.balancePendingCents > 0 ? 'pending' : r.balanceAvailableCents > 0 ? 'available' : '—';
             return (
               <div key={r.providerId} className={['px-4 py-4', busy ? 'opacity-70' : ''].join(' ')}>
                 <div className="flex items-start justify-between gap-4">
@@ -410,11 +431,11 @@ export default function AdminEarningsClient(props: {
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-gray-600">Withdrawn</span>
-                    <span className="font-semibold text-gray-900">{money(r.withdrawnCents)}</span>
+                    <span className="font-semibold text-gray-900">{money(r.balanceWithdrawnCents)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-gray-600">Available</span>
-                    <span className="font-semibold text-gray-900">{money(r.availableCents)}</span>
+                    <span className="font-semibold text-gray-900">{money(r.balanceAvailableCents)}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-gray-600">Bank</span>
@@ -459,7 +480,7 @@ export default function AdminEarningsClient(props: {
             <tbody className="divide-y divide-gray-200 bg-white">
               {filteredProviderRows.map((r) => {
                 const busy = working === r.providerId;
-                const withdrawalStatus = r.pendingCount > 0 ? 'pending' : r.balanceCents > 0 ? 'available' : '—';
+                const withdrawalStatus = r.balancePendingCents > 0 ? 'pending' : r.balanceAvailableCents > 0 ? 'available' : '—';
                 return (
                   <tr key={r.providerId} className={busy ? 'opacity-70' : ''}>
                     <td className="px-4 py-3">
@@ -475,11 +496,11 @@ export default function AdminEarningsClient(props: {
                         </div>
                         <div>
                           <span className="text-gray-500">Withdrawn:</span>{' '}
-                          <span className="font-medium text-gray-900">{money(r.withdrawnCents)}</span>
+                          <span className="font-medium text-gray-900">{money(r.balanceWithdrawnCents)}</span>
                         </div>
                         <div>
                           <span className="text-gray-500">Available Balance:</span>{' '}
-                          <span className="font-medium text-gray-900">{money(r.availableCents)}</span>
+                          <span className="font-medium text-gray-900">{money(r.balanceAvailableCents)}</span>
                         </div>
                       </div>
                     </td>

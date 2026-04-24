@@ -130,7 +130,16 @@ export function resolveSessionStatusByTime(
 ): Partial<Session> | null {
   // Do not auto-resolve cancelled sessions.
   const status = typeof (session as any)?.status === 'string' ? String((session as any).status) : '';
-  if (status === 'cancelled' || status === 'cancelled-late' || status === 'refunded') return null;
+  // Admin-managed/terminal statuses should never be auto-transitioned by time-based logic.
+  if (
+    status === 'cancelled' ||
+    status === 'cancelled-late' ||
+    status === 'refunded' ||
+    status === 'disputed' ||
+    status === 'student_no_show'
+  ) {
+    return null;
+  }
 
   // Terminal statuses (do not auto-transition further).
   // Note: no-show statuses may later transition to `completed` if both parties eventually join.
