@@ -12,7 +12,36 @@ import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { getServerSession } from '@/lib/auth/getServerSession';
 
 function baseUrlFromRequest(request: NextRequest): string {
-  return process.env.BASE_URL || new URL(request.url).origin;
+  const canonical = (process.env.NEXT_PUBLIC_SITE_URL || 'https://ivywayedu.com').trim();
+
+  const explicit = (process.env.BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || '').trim();
+  const normalize = (raw: string) => raw.replace(/\/+$/, '');
+  if (explicit) return normalize(explicit);
+
+  const xfProto = (request.headers.get('x-forwarded-proto') || '').split(',')[0]?.trim();
+  const xfHost = (request.headers.get('x-forwarded-host') || '').split(',')[0]?.trim();
+  const host = (request.headers.get('host') || '').split(',')[0]?.trim();
+  const proto = xfProto || 'https';
+  const detectedHost = xfHost || host;
+
+  const isDev = process.env.NODE_ENV !== 'production';
+  const isPreview = String(process.env.VERCEL_ENV || '').toLowerCase() === 'preview';
+
+  if (detectedHost) {
+    const origin = normalize(`${proto}://${detectedHost}`);
+    const hostname = detectedHost.split(':')[0]?.toLowerCase() || '';
+    const isLocalhost =
+      hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname.endsWith('.local');
+
+    // Never generate links to Vercel's own domain (mis-detected host can cause this).
+    const isBadHost = hostname === 'vercel.com' || hostname.endsWith('.vercel.com');
+
+    if (isDev && isLocalhost) return origin;
+    if (isPreview && hostname.endsWith('.vercel.app') && !isBadHost) return origin;
+    if (!isBadHost) return origin;
+  }
+
+  return normalize(canonical);
 }
 
 function getClientIp(request: NextRequest): string | undefined {
@@ -78,9 +107,9 @@ export async function POST(request: NextRequest) {
         requestIp: getClientIp(request),
       });
 
-      const resetUrl = `${baseUrlFromRequest(request)}/auth/reset-password?uid=${encodeURIComponent(
-        user.id
-      )}&token=${encodeURIComponent(token)}`;
+      const resetUrl = `${baseUrlFromRequest(request)}/auth/reset-password?token=${encodeURIComponent(
+        token
+      )}&uid=${encodeURIComponent(user.id)}`;
 
       // Best-effort email send: never reveal existence in API response.
       await sendPasswordResetEmail({
