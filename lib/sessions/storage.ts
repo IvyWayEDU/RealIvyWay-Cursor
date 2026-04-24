@@ -739,9 +739,15 @@ export async function getSessions(): Promise<Session[]> {
         }
       }
     } catch (e) {
+      const errorDetail =
+        e instanceof Error
+          ? { name: e.name, message: e.message, stack: e.stack }
+          : e && typeof e === 'object'
+            ? e
+            : { message: String(e) };
       console.warn('[earnings] auto-credit failed (non-blocking)', {
         sessionId: String((s as any)?.id || ''),
-        error: e instanceof Error ? e.message : String(e),
+        error: errorDetail,
       });
     }
 
