@@ -195,6 +195,44 @@ export function generateWelcomeEmail(data: { name: string; dashboardUrl: string 
   });
 }
 
+export function generatePasswordResetEmail(data: {
+  name: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+}): string {
+  const { name, resetUrl, expiresInMinutes } = data;
+
+  return baseShell({
+    title: 'Reset your IvyWay password',
+    innerHtml: `
+    <h1 style="color: #1a1a1a; margin-top: 0; font-size: 24px; font-weight: 600;">
+      Reset your password
+    </h1>
+
+    <p style="color: #666; font-size: 16px; margin: 20px 0;">
+      Hi <strong>${escapeHtml(name || 'there')}</strong> — we received a request to reset your IvyWay password.
+    </p>
+
+    <div style="margin: 26px 0;">
+      <a href="${escapeHtml(resetUrl)}"
+         style="display: inline-block; background-color: #4F46E5; color: #ffffff; text-decoration: none; padding: 12px 18px; border-radius: 6px; font-weight: 600; text-align: center;">
+        Reset Password
+      </a>
+    </div>
+
+    <p style="color: #666; font-size: 14px; margin: 18px 0;">
+      This link will expire in <strong>${escapeHtml(String(expiresInMinutes))} minutes</strong> and can be used only once.
+    </p>
+
+    <div style="background-color: #f5f5f5; border-radius: 6px; padding: 16px; margin: 20px 0;">
+      <p style="margin: 0; color: #666; font-size: 13px;">
+        If you didn’t request this, you can safely ignore this email — your password won’t change.
+      </p>
+    </div>
+    `.trim(),
+  });
+}
+
 export function generateCancellationEmail(data: {
   recipientRole: 'student' | 'provider';
   otherPartyName: string;

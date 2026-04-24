@@ -7,6 +7,7 @@ import {
   formatDateTimeInTimezone,
   generateCancellationEmail,
   generateNoShowEmail,
+  generatePasswordResetEmail,
   generatePayoutPaidEmail,
   generateProviderNotificationEmail,
   generateRescheduleEmail,
@@ -52,6 +53,26 @@ export async function sendWelcomeEmailForUser(user: Pick<User, 'email' | 'name' 
   const result = await sendEmail({ to, subject: 'Welcome to IvyWay', html });
   if (!result.success) {
     console.warn('[email] welcome send failed', { error: result.error });
+  }
+  return result.success;
+}
+
+export async function sendPasswordResetEmail(args: {
+  to: string;
+  name?: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+}): Promise<boolean> {
+  const to = String(args.to || '').trim();
+  if (!to) return false;
+  const html = generatePasswordResetEmail({
+    name: args.name || 'there',
+    resetUrl: args.resetUrl,
+    expiresInMinutes: args.expiresInMinutes,
+  });
+  const result = await sendEmail({ to, subject: 'Reset your IvyWay password', html });
+  if (!result.success) {
+    console.warn('[email] password reset send failed', { error: result.error });
   }
   return result.success;
 }

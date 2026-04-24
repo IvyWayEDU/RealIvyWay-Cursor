@@ -157,9 +157,9 @@ export default function LoginClient() {
 
               {/* Forgot Password Link */}
               <div className="flex justify-end">
-                <a href="#" className="text-sm text-[#0088CB] hover:underline">
+                <Link href="/auth/forgot-password" className="text-sm text-[#0088CB] hover:underline">
                   Forgot password?
-                </a>
+                </Link>
               </div>
 
               {/* Login Button */}
