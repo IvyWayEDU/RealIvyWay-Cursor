@@ -645,7 +645,7 @@ export default function BookingSummaryPage() {
           >
             {isProcessing
               ? 'Processing...'
-              : `Continue to secure checkout (${formatUsdFromCents(baseCents)} + tax)`}
+              : 'Checkout'}
           </button>
         </div>
 
