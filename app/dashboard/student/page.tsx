@@ -51,10 +51,7 @@ export default async function StudentDashboard() {
 
         {/* Top Right: IvyWay AI */}
         <div>
-          <IvyWayAICard
-            entryPoint="student_dashboard"
-            description="Get instant help with studying, flashcards, quizzes, and step by step explanations."
-          />
+          <IvyWayAICard />
         </div>
 
         {/* Bottom Left: Completed Sessions */}

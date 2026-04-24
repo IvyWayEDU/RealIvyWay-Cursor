@@ -74,10 +74,7 @@ export default async function ProviderDashboard() {
 
         {/* Bottom Left: IvyWay AI */}
         <div>
-          <IvyWayAICard
-            entryPoint="provider_dashboard"
-            description="Use AI to generate study materials, quizzes, explanations, and prep for tutoring sessions."
-          />
+          <IvyWayAICard />
         </div>
 
         {/* Bottom Right: Messages */}
