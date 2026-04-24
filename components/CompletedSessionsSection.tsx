@@ -401,7 +401,23 @@ export default function CompletedSessionsSection({
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow-sm border border-gray-200">
       <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-900">Completed Sessions</h2>
+        <div className="flex items-center gap-2">
+          <svg
+            className="h-5 w-5 shrink-0 text-[#0088CB]"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth="1.5"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <h2 className="text-xl font-semibold text-gray-900">Completed Sessions</h2>
+        </div>
         <p className="mt-1 text-sm text-gray-500">
           Review and rebook your past sessions
         </p>

@@ -102,7 +102,23 @@ export default function ConfirmedSessionsSection() {
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
       <div className="px-6 py-4 border-b border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-900">Upcoming Sessions</h2>
+        <div className="flex items-center gap-2">
+          <svg
+            className="h-5 w-5 shrink-0 text-[#0088CB]"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth="1.5"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"
+            />
+          </svg>
+          <h2 className="text-xl font-semibold text-gray-900">Upcoming Sessions</h2>
+        </div>
         <p className="mt-1 text-sm text-gray-500">
           Your upcoming sessions
         </p>
