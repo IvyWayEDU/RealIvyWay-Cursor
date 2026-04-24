@@ -1,0 +1,61 @@
+/* Checkout-only CSS fixes.
+   Scoped here to avoid global mobile layout regressions elsewhere in the app. */
+
+/* Hide Stripe Link / floating helper UI that can overlap mobile layouts. */
+iframe[src*="link.stripe.com"],
+iframe[src*="js.stripe.com"][src*="link"],
+iframe[src*="hooks.stripe.com"][src*="link"],
+iframe[src*="stripe.com"][title*="Link"],
+iframe[src*="stripe.com"][src*="link"],
+iframe[id*="stripe-link"],
+iframe[class*="stripe-link"],
+iframe[name*="stripe-link"],
+div[data-stripe-link],
+div[id*="stripe-link"],
+div[class*="stripe-link"],
+div[id*="StripeLink"],
+div[class*="StripeLink"],
+div[id^="stripe-link-"],
+div[class^="stripe-link-"],
+div[id*="__stripe-link"],
+div[class*="__stripe-link"],
+div[data-testid*="stripe-link"],
+div[aria-label*="Stripe Link"],
+div[aria-label*="stripe link"],
+button[data-stripe-link],
+button[id*="stripe-link"],
+button[class*="stripe-link"],
+button[aria-label*="Stripe Link"],
+button[aria-label*="stripe link"],
+a[data-stripe-link],
+a[id*="stripe-link"],
+a[class*="stripe-link"],
+a[href*="stripe.com"][href*="link"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: -9999px !important;
+  width: 0 !important;
+  height: 0 !important;
+  z-index: -9999 !important;
+}
+
+/* Ensure embedded PaymentElement can expand naturally. */
+form .StripeElement,
+form [data-testid*="payment-element"],
+form [class*="StripeElement"],
+form [id*="payment-element"],
+form iframe[src*="js.stripe.com"][src*="elements"],
+form iframe[src*="hooks.stripe.com"][src*="elements"],
+form iframe[src*="js.stripe.com"][src*="payment"],
+form iframe[src*="hooks.stripe.com"][src*="payment"] {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.checkout-container {
+  padding-bottom: 6rem;
+}
+

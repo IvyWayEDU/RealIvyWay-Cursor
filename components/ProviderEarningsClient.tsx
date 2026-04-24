@@ -319,77 +319,109 @@ export default function ProviderEarningsClient(props: {
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900">Earnings Breakdown</h2>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Session Type
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Amount Earned
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {bookings.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">
-                    <svg
-                      className="mx-auto h-12 w-12 text-gray-400"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
+        {bookings.length === 0 ? (
+          <div className="px-6 py-12 text-center text-sm text-gray-500">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <h3 className="mt-2 text-sm font-medium text-gray-900">No earnings yet</h3>
+            <p className="mt-1 text-sm text-gray-500">Your earnings will appear here after completing sessions.</p>
+          </div>
+        ) : (
+          <>
+            {/* Mobile: cards */}
+            <div className="sm:hidden divide-y divide-gray-200">
+              {[...bookings]
+                .sort((a, b) => {
+                  const dateA = new Date(a.completedAt || a.bookedAt || a.scheduledStartTime);
+                  const dateB = new Date(b.completedAt || b.bookedAt || b.scheduledStartTime);
+                  return dateB.getTime() - dateA.getTime();
+                })
+                .map((booking) => {
+                  const earnings = booking.providerPayoutCents / 100;
+                  const when = booking.completedAt || booking.bookedAt || booking.scheduledStartTime;
+                  return (
+                    <div key={booking.id} className="px-4 py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-gray-900">{booking.serviceLabel}</div>
+                          <div className="mt-1 text-xs text-gray-600">{formatDate(when)}</div>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className="text-sm font-semibold text-gray-900">{`$${earnings.toFixed(2)}`}</div>
+                          <div className="mt-1 text-xs text-gray-600">{getStatusBadge(booking.payoutStatus)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {/* Desktop/tablet: table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                    <h3 className="mt-2 text-sm font-medium text-gray-900">No earnings yet</h3>
-                    <p className="mt-1 text-sm text-gray-500">
-                      Your earnings will appear here after completing sessions.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                bookings
-                  .sort((a, b) => {
-                    const dateA = new Date(a.completedAt || a.bookedAt || a.scheduledStartTime);
-                    const dateB = new Date(b.completedAt || b.bookedAt || b.scheduledStartTime);
-                    return dateB.getTime() - dateA.getTime(); // Most recent first
-                  })
-                  .map((booking) => {
-                    const earnings = booking.providerPayoutCents / 100;
-                    return (
-                      <tr key={booking.id} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatDate(booking.completedAt || booking.bookedAt || booking.scheduledStartTime)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {booking.serviceLabel}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {`$${earnings.toFixed(2)}`}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {getStatusBadge(booking.payoutStatus)}
-                        </td>
-                      </tr>
-                    );
-                  })
-              )}
-            </tbody>
-          </table>
-        </div>
+                      Date
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Session Type
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Amount Earned
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {[...bookings]
+                    .sort((a, b) => {
+                      const dateA = new Date(a.completedAt || a.bookedAt || a.scheduledStartTime);
+                      const dateB = new Date(b.completedAt || b.bookedAt || b.scheduledStartTime);
+                      return dateB.getTime() - dateA.getTime(); // Most recent first
+                    })
+                    .map((booking) => {
+                      const earnings = booking.providerPayoutCents / 100;
+                      return (
+                        <tr key={booking.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {formatDate(booking.completedAt || booking.bookedAt || booking.scheduledStartTime)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{booking.serviceLabel}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {`$${earnings.toFixed(2)}`}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {getStatusBadge(booking.payoutStatus)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

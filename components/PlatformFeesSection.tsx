@@ -181,7 +181,112 @@ export default function PlatformFeesSection({ initialConfig }: PlatformFeesSecti
               <h3 className="text-lg font-medium text-gray-900 mb-4">
                 {formatServiceType(serviceType as PlatformFee['serviceType'])}
               </h3>
-              <div className="overflow-x-auto">
+              {/* Mobile: cards */}
+              <div className="sm:hidden space-y-3">
+                {fees.map((fee) => {
+                  const editing = editingFeeId === fee.id && !!editValues;
+                  return (
+                    <div key={fee.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-gray-900">{formatPlanType(fee.planType)}</div>
+                          <div className="mt-1 text-xs text-gray-500">
+                            {fee.calculationType === 'flat' ? 'Flat Amount' : 'Percentage'}
+                          </div>
+                        </div>
+                        {!editing ? (
+                          <button onClick={() => handleEdit(fee)} className="text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+                            Edit
+                          </button>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-3">
+                        {editing && editValues ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={editValues.calculationType}
+                                onChange={(e) => {
+                                  const newType = e.target.value as 'flat' | 'percentage';
+                                  setEditValues({
+                                    ...editValues,
+                                    calculationType: newType,
+                                    ...(newType === 'flat' ? { percentage: 0 } : { amountCents: 0 }),
+                                  });
+                                }}
+                                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                              >
+                                <option value="flat">Flat</option>
+                                <option value="percentage">Percentage</option>
+                              </select>
+                            </div>
+                            {editValues.calculationType === 'flat' ? (
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-500">$</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={(editValues.amountCents / 100).toFixed(2)}
+                                  onChange={(e) => {
+                                    const value = parseFloat(e.target.value) || 0;
+                                    setEditValues({
+                                      ...editValues,
+                                      amountCents: Math.round(value * 100),
+                                    });
+                                  }}
+                                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                />
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="0.1"
+                                  value={editValues.percentage}
+                                  onChange={(e) => {
+                                    const value = parseFloat(e.target.value) || 0;
+                                    setEditValues({
+                                      ...editValues,
+                                      percentage: Math.min(100, Math.max(0, value)),
+                                    });
+                                  }}
+                                  className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                                />
+                                <span className="text-gray-500">%</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleSave(fee.id)}
+                                disabled={isSaving}
+                                className="inline-flex flex-1 justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {isSaving ? 'Saving...' : 'Save'}
+                              </button>
+                              <button
+                                onClick={handleCancel}
+                                disabled={isSaving}
+                                className="inline-flex flex-1 justify-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-lg font-semibold text-gray-900">{formatFee(fee)}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop/tablet: table */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -288,10 +393,7 @@ export default function PlatformFeesSection({ initialConfig }: PlatformFeesSecti
                               </button>
                             </div>
                           ) : (
-                            <button
-                              onClick={() => handleEdit(fee)}
-                              className="text-indigo-600 hover:text-indigo-900"
-                            >
+                            <button onClick={() => handleEdit(fee)} className="text-indigo-600 hover:text-indigo-900">
                               Edit
                             </button>
                           )}

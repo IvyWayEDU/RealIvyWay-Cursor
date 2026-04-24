@@ -66,7 +66,63 @@ export default function ProviderNoShowSection({ initialSessions = [], userNames 
           {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}
         </span>
       </div>
-      <div className="overflow-x-auto">
+      {/* Mobile: cards */}
+      <div className="sm:hidden divide-y divide-gray-200 bg-white">
+        {sessions.map((session) => (
+          <div key={session.id} className="px-4 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-900">{formatDate(session.scheduledStartTime)}</div>
+                {(session as any).flaggedAt ? (
+                  <div className="mt-1 text-xs text-gray-500">Marked: {formatDate((session as any).flaggedAt)}</div>
+                ) : null}
+                <div className="mt-2 text-xs text-gray-600">
+                  <div className="break-words">
+                    <span className="font-semibold text-gray-900">Provider:</span>{' '}
+                    {userNames[session.providerId] || 'Provider'}
+                  </div>
+                  <div className="mt-1 break-words">
+                    <span className="font-semibold text-gray-900">Student:</span>{' '}
+                    {userNames[session.studentId] || 'Student'}
+                  </div>
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-800">
+                  Flagged
+                </span>
+                <div className="mt-2 text-[11px] text-gray-500">No payout</div>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+              <div className="text-[11px] font-semibold text-gray-500 mb-1">Zoom join data</div>
+              <div className="space-y-1">
+                {session.providerJoinedAt ? (
+                  <div className="text-red-700 font-semibold">Provider joined late: {formatDate(session.providerJoinedAt)}</div>
+                ) : (
+                  <div className="text-red-700 font-semibold">Provider never joined Zoom</div>
+                )}
+                {session.providerJoinTime ? <div>Join: {formatDate(session.providerJoinTime)}</div> : null}
+                {session.providerLeaveTime ? <div>Leave: {formatDate(session.providerLeaveTime)}</div> : null}
+                {session.providerDurationSeconds !== undefined ? (
+                  <div>
+                    Duration: {Math.floor(session.providerDurationSeconds / 60)} min {session.providerDurationSeconds % 60} sec
+                  </div>
+                ) : null}
+                {session.providerAccumulatedSeconds !== undefined ? (
+                  <div>
+                    Total: {Math.floor(session.providerAccumulatedSeconds / 60)} min {session.providerAccumulatedSeconds % 60} sec
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop/tablet: table */}
+      <div className="hidden sm:block overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>

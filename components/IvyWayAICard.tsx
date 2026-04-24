@@ -58,7 +58,7 @@ export default function IvyWayAICard() {
       <div className="mt-6">
         <Link
           href="/dashboard/ai"
-          className="inline-flex w-full items-center justify-center rounded-md bg-[#0088CB] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB]"
+          className="inline-flex items-center justify-center w-full px-4 py-2 bg-white border border-[#0088CB] text-[#0088CB] text-sm font-medium rounded-md hover:bg-[#0088CB] hover:text-white transition-colors"
         >
           Ask IvyWay AI
         </Link>

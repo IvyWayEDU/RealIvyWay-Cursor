@@ -147,7 +147,7 @@ function SessionCard({
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between mb-3">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
             {getStatusBadge()}
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
@@ -159,9 +159,9 @@ function SessionCard({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 min-w-0">
             <UserAvatar name={otherName} imageUrl={otherProfileImage} />
-            <h3 className="text-lg font-semibold text-gray-900">
+            <h3 className="text-lg font-semibold text-gray-900 min-w-0 break-words">
               {otherName}
             </h3>
           </div>
@@ -223,11 +223,11 @@ function SessionCard({
       </div>
 
       {/* Action buttons (sessions page only) */}
-      <div className="mt-4 pt-4 border-t border-gray-200 flex items-center gap-2 flex-wrap">
+      <div className="mt-4 pt-4 border-t border-gray-200 flex flex-col sm:flex-row sm:flex-wrap gap-2">
         <button
           type="button"
           onClick={() => onMessage?.(session)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
@@ -248,7 +248,7 @@ function SessionCard({
                 href={zoomJoinUrl as string}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-[#0088CB] text-white hover:bg-[#0077B3]"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 text-sm font-medium rounded-md transition-colors bg-[#0088CB] text-white hover:bg-[#0077B3]"
                 title="Join Now"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -265,7 +265,7 @@ function SessionCard({
               <button
                 type="button"
                 disabled
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors bg-gray-200 text-gray-500 cursor-not-allowed"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 text-sm font-medium rounded-md transition-colors bg-gray-200 text-gray-500 cursor-not-allowed"
                 title="Join becomes available 10 minutes before start"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -280,7 +280,7 @@ function SessionCard({
               </button>
             )
           ) : (
-            <div className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
+            <div className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 rounded-md text-sm font-medium bg-gray-100 text-gray-600 border border-gray-200">
               Zoom link pending
             </div>
           )
@@ -302,7 +302,7 @@ function SessionCard({
 
               router.push(`/dashboard/book?${params.toString()}`);
             }}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-[#0088CB] text-[#0088CB] text-sm font-medium rounded-md hover:bg-[#0088CB] hover:text-white transition-colors"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-white border border-[#0088CB] text-[#0088CB] text-sm font-medium rounded-md hover:bg-[#0088CB] hover:text-white transition-colors"
           >
             Book Again
           </button>
@@ -310,7 +310,7 @@ function SessionCard({
 
         {viewerRole === 'student' && isCompleted && (
           existingReview ? (
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md">
+            <div className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md">
               <span>Reviewed</span>
               <Stars count={reviewedStars} />
             </div>
@@ -318,7 +318,7 @@ function SessionCard({
             <button
               type="button"
               onClick={() => onLeaveReview?.(session)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#0088CB] text-white text-sm font-medium rounded-md hover:bg-[#0077B3] transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 bg-[#0088CB] text-white text-sm font-medium rounded-md hover:bg-[#0077B3] transition-colors"
               disabled={!currentUserId || !otherUserId}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

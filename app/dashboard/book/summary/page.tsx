@@ -428,31 +428,31 @@ export default function BookingSummaryPage() {
   const totalDisplayCents = typeof taxAmountCents === 'number' ? baseCents + taxAmountCents : baseCents;
 
   return (
-    <div className="min-h-screen w-full bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-[100svh] w-full bg-gray-50 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto space-y-8">
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Checkout</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Checkout</h1>
           <p className="mt-2 text-sm text-gray-600">
             Review your booking details and complete your purchase
           </p>
         </div>
 
         {/* Booking Details Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 space-y-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 sm:p-8 space-y-6">
           <div className="flex items-center justify-between border-b border-gray-200 pb-4">
             <h2 className="text-xl font-semibold text-gray-900">Booking Details</h2>
           </div>
 
           {/* Service */}
-          <div className="flex items-start justify-between py-3 border-b border-gray-100">
-            <div className="flex-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between py-3 border-b border-gray-100">
+            <div className="flex-1 min-w-0">
               <div className="text-sm text-gray-500 mb-1">Service Type</div>
               <div className="text-base font-medium text-gray-900">{serviceName}</div>
             </div>
             <Link
               href={`/dashboard/book?step=${getStepForEdit('service')}`}
-              className="text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
+              className="self-start text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
             >
               Edit
             </Link>
@@ -460,8 +460,8 @@ export default function BookingSummaryPage() {
 
           {/* Plan */}
           {planInfo && (
-            <div className="flex items-start justify-between py-3 border-b border-gray-100">
-              <div className="flex-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between py-3 border-b border-gray-100">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm text-gray-500 mb-1">Plan</div>
                 <div className="text-base font-medium text-gray-900">
                   {planDisplayName(bookingState.service, bookingState.plan)}
@@ -469,7 +469,7 @@ export default function BookingSummaryPage() {
               </div>
               <Link
                 href={`/dashboard/book?step=${getStepForEdit('plan')}`}
-                className="text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
+                className="self-start text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
               >
                 Edit
               </Link>
@@ -478,14 +478,14 @@ export default function BookingSummaryPage() {
 
           {/* Subject or School */}
           {(bookingState.subject || bookingState.school) && (
-            <div className="flex items-start justify-between py-3 border-b border-gray-100">
-              <div className="flex-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between py-3 border-b border-gray-100">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm text-gray-500 mb-1">
                   {bookingState.service === 'tutoring' || bookingState.service === 'test-prep'
                     ? 'Subject'
                     : 'School'}
                 </div>
-                <div className="text-base font-medium text-gray-900">
+                <div className="text-base font-medium text-gray-900 break-words">
                   {bookingState.subject || schoolDisplay}
                 </div>
                 {bookingState.topic && (
@@ -496,7 +496,7 @@ export default function BookingSummaryPage() {
               </div>
               <Link
                 href={`/dashboard/book?step=3`}
-                className="text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
+                className="self-start text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
               >
                 Edit
               </Link>
@@ -529,8 +529,8 @@ export default function BookingSummaryPage() {
 
           {/* Selected Dates & Times */}
           {bookingState.selectedSessions.length > 0 && (
-            <div className="flex items-start justify-between py-3 border-b border-gray-100">
-              <div className="flex-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between py-3 border-b border-gray-100">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm text-gray-500 mb-2">Selected Date(s) and Time(s)</div>
                 <div className="space-y-2">
                   {bookingState.selectedSessions.map((session, index) => (
@@ -541,14 +541,14 @@ export default function BookingSummaryPage() {
                       <svg className="w-5 h-5 text-[#0088CB] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
-                      <span>{session.displayString}</span>
+                      <span className="min-w-0 break-words leading-snug">{session.displayString}</span>
                     </div>
                   ))}
                 </div>
               </div>
               <Link
                 href={`/dashboard/book?step=${getStepForEdit('datetime')}`}
-                className="text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
+                className="self-start text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
               >
                 Edit
               </Link>
@@ -557,22 +557,22 @@ export default function BookingSummaryPage() {
 
           {/* Provider */}
           {providerId && (
-            <div className="flex items-start justify-between py-3">
-              <div className="flex-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between py-3">
+              <div className="flex-1 min-w-0">
                 <div className="text-sm text-gray-500 mb-1">
                   {bookingState.service === 'tutoring' || bookingState.service === 'test-prep'
                     ? 'Selected Tutor'
                     : 'Selected Counselor'}
                 </div>
                 <div className="mt-2">
-                  <div className="text-base font-medium text-gray-900">
+                  <div className="text-base font-medium text-gray-900 break-words">
                     {providerNameStatus === 'loading' ? 'Loading provider…' : providerDisplayName || 'Provider'}
                   </div>
                 </div>
               </div>
               <Link
                 href={`/dashboard/book?step=5`}
-                className="text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
+                className="self-start text-sm text-[#0088CB] hover:text-[#0077B3] font-medium"
               >
                 Edit
               </Link>
@@ -581,7 +581,7 @@ export default function BookingSummaryPage() {
         </div>
 
         {/* Order Summary Section */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 space-y-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 sm:p-8 space-y-6">
           <div className="flex items-center justify-between border-b border-gray-200 pb-4">
             <h2 className="text-xl font-semibold text-gray-900">Order Summary</h2>
           </div>
@@ -612,7 +612,7 @@ export default function BookingSummaryPage() {
         </div>
 
         {/* Payment Button */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 space-y-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 sm:p-8 space-y-6">
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
@@ -641,7 +641,7 @@ export default function BookingSummaryPage() {
           <button
             onClick={handlePay}
             disabled={isProcessing}
-            className="w-full px-8 py-3 bg-[#0088CB] text-white font-semibold rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full px-6 py-3 bg-[#0088CB] text-white font-semibold rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed leading-snug"
           >
             {isProcessing
               ? 'Processing...'
@@ -653,7 +653,7 @@ export default function BookingSummaryPage() {
         <div className="flex items-center justify-start gap-4">
           <Link
             href="/dashboard/book"
-            className="px-6 py-2.5 font-medium rounded-md bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors"
+            className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 sm:py-2.5 font-medium rounded-md bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors"
           >
             Back to Booking
           </Link>

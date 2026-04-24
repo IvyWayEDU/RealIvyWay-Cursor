@@ -932,14 +932,14 @@ export default function BookingFlowClient() {
     <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Book a Session</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Book a Session</h1>
         <p className="mt-2 text-sm text-gray-600">
           Follow the steps below to book your session
         </p>
       </div>
 
       {/* Progress Indicator */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 sm:p-6">
         <div className="relative">
           {/* Progress Line Background */}
           <div className="absolute top-5 left-0 right-0 h-0.5 bg-gray-200" />
@@ -955,7 +955,7 @@ export default function BookingFlowClient() {
             {Array.from({ length: totalSteps }, (_, i) => i + 1).map((step) => (
               <div key={step} className="flex flex-col items-center">
                 <div
-                  className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-colors ${
+                  className={`relative z-10 w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-semibold transition-colors ${
                     step === currentStep
                       ? 'bg-[#0088CB] text-white'
                       : step < currentStep
@@ -971,7 +971,7 @@ export default function BookingFlowClient() {
                     step
                   )}
                 </div>
-                <div className="mt-2 text-xs text-center text-gray-600">
+                <div className="mt-2 text-[11px] sm:text-xs text-center text-gray-600 leading-snug">
                   {step === 1 && 'Service'}
                   {step === 2 && 'Plan'}
                   {step === 3 && 'Subject/School'}
@@ -985,7 +985,7 @@ export default function BookingFlowClient() {
       </div>
 
       {/* Step Content */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 sm:p-8">
         {flowError ? (
           <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
             <p className="text-sm text-red-800">{flowError}</p>
@@ -995,32 +995,34 @@ export default function BookingFlowClient() {
       </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={handleBack}
-          disabled={currentStep === 1}
-          className={`px-6 py-2.5 font-medium rounded-md transition-colors ${
-            currentStep === 1
-              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          Back
-        </button>
-        <div className="text-sm text-gray-600">
+      <div className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={handleBack}
+            disabled={currentStep === 1}
+            className={`w-full sm:w-auto px-6 py-3 sm:py-2.5 font-medium rounded-md transition-colors ${
+              currentStep === 1
+                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+            }`}
+          >
+            Back
+          </button>
+          <button
+            onClick={handleNext}
+            disabled={!canProceed()}
+            className={`w-full sm:w-auto px-6 py-3 sm:py-2.5 font-medium rounded-md transition-colors ${
+              canProceed()
+                ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            {currentStep === totalSteps ? 'Review Booking' : 'Next'}
+          </button>
+        </div>
+        <div className="text-sm text-gray-600 text-center sm:text-right">
           Step {currentStep} of {totalSteps}
         </div>
-        <button
-          onClick={handleNext}
-          disabled={!canProceed()}
-          className={`px-6 py-2.5 font-medium rounded-md transition-colors ${
-            canProceed()
-              ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
-              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-          }`}
-        >
-          {currentStep === totalSteps ? 'Review Booking' : 'Next'}
-        </button>
       </div>
     </div>
   );

@@ -353,12 +353,20 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
       ? draftParticipantImageUrl
       : null;
 
+  const isChatOpen = Boolean(selectedConversation || draftParticipantId);
+
   return (
-    <div className="h-[calc(100dvh-7rem)] flex rounded-lg bg-white shadow-sm border border-gray-200 overflow-hidden">
+    <div className="min-h-[calc(100dvh-7rem)] md:h-[calc(100dvh-7rem)] flex flex-col md:flex-row rounded-lg bg-white shadow-sm border border-gray-200 overflow-hidden">
       {/* Left Panel - Conversations List */}
-      <div className="w-80 border-r border-gray-200 flex flex-col">
+      <div
+        className={[
+          'w-full md:w-80 border-gray-200 flex flex-col',
+          'md:border-r',
+          isChatOpen ? 'hidden md:flex' : 'flex',
+        ].join(' ')}
+      >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-4 md:px-6 py-4 border-b border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900">Messages</h2>
           <p className="mt-1 text-sm text-gray-500">
             {userRole === 'student' ? 'Chat with your tutors and counselors' : 'Chat with your students'}
@@ -380,7 +388,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                   <button
                     key={conversation.id}
                     onClick={() => handleConversationSelect(conversation.id)}
-                    className={`w-full px-6 py-4 text-left transition-colors border-l-4 ${
+                    className={`w-full px-4 md:px-6 py-4 text-left transition-colors border-l-4 ${
                       isSelected
                         ? 'bg-gray-50 border-[#0088CB]'
                         : 'border-transparent hover:bg-gray-50'
@@ -426,13 +434,33 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
       </div>
 
       {/* Right Panel - Chat Window */}
-      <div className="flex-1 flex flex-col">
+      <div
+        className={[
+          'flex-1 flex flex-col min-w-0',
+          isChatOpen ? 'flex' : 'hidden md:flex',
+        ].join(' ')}
+      >
         {selectedConversation || draftParticipantId ? (
           <>
             {/* Chat Header */}
-            <div className="px-6 py-4 border-b border-gray-200 bg-white">
+            <div className="px-4 md:px-6 py-4 border-b border-gray-200 bg-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedConversationId(null);
+                      lastSelectedRef.current = null;
+                      setDraftParticipantId(null);
+                      setMessages([]);
+                    }}
+                    className="md:hidden inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/40"
+                    aria-label="Back to conversations"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
                   <UserAvatar name={activeParticipantName || 'User'} imageUrl={activeParticipantImageUrl} />
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">
@@ -447,7 +475,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
             </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50">
               <div className="space-y-4">
                 {messages.map((message, index) => {
                   const isOwnMessage = message.senderId === session.userId;
@@ -468,7 +496,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                           {message.senderName.charAt(0)}
                         </div>
                       )}
-                      <div className={`flex flex-col max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+                      <div className={`flex flex-col max-w-[85%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
                         {showAvatar && (
                           <span className={`text-xs font-medium mb-1 ${
                             isOwnMessage ? 'text-gray-600' : 'text-gray-500'
@@ -483,7 +511,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                               : 'bg-white text-gray-900 border border-gray-200'
                           }`}
                         >
-                          <p className={`text-sm ${isOwnMessage ? 'text-white' : 'text-gray-900'}`}>
+                          <p className={`text-sm break-words ${isOwnMessage ? 'text-white' : 'text-gray-900'}`}>
                             {message.text}
                           </p>
                         </div>
@@ -508,7 +536,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
             </div>
 
             {/* Message Input */}
-            <div className="px-6 py-4 border-t border-gray-200 bg-white">
+            <div className="px-4 md:px-6 py-4 border-t border-gray-200 bg-white pb-[calc(1rem+env(safe-area-inset-bottom))]">
               <div className="flex items-end gap-3">
                 <div className="flex-1">
                   <textarea
@@ -541,7 +569,7 @@ export default function MessagesClient({ session, userRole }: MessagesClientProp
                 <button
                   onClick={handleSendMessage}
                   disabled={!inputValue.trim()}
-                  className={`px-6 py-2 rounded-lg font-medium text-sm transition-colors ${
+                  className={`px-5 py-3 rounded-lg font-semibold text-sm transition-colors ${
                     inputValue.trim()
                       ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
                       : 'bg-gray-200 text-gray-400 cursor-not-allowed'

@@ -302,7 +302,9 @@ export default function WithdrawFormClient({
                     id="withdrawal-amount"
                     value={amount}
                     onChange={handleAmountChange}
-                    className={`block w-full rounded-md border-gray-300 pl-7 pr-12 py-2 text-gray-900 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] sm:text-sm ${
+                    inputMode="decimal"
+                    autoComplete="off"
+                    className={`block w-full rounded-md border-gray-300 pl-7 pr-12 py-3 text-base text-gray-900 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] ${
                       amountError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : ''
                     }`}
                     placeholder="0.00"
@@ -325,17 +327,17 @@ export default function WithdrawFormClient({
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-4 pt-4 border-t border-gray-200">
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-3 pt-4 border-t border-gray-200">
                 <Link
                   href="/dashboard/earnings"
-                  className="text-sm font-medium text-gray-700 hover:text-gray-900"
+                  className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                 >
                   Cancel
                 </Link>
                 <button
                   type="submit"
                   disabled={!canSubmit}
-                  className="inline-flex items-center rounded-md bg-[#0088CB] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto inline-flex items-center justify-center rounded-md bg-[#0088CB] px-4 py-3 sm:py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? 'Submitting...' : 'Submit Withdrawal Request'}
                 </button>

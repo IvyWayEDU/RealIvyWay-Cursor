@@ -7,9 +7,11 @@ import { useEffect, useState, useRef } from 'react';
 import { logout } from '@/lib/auth/actions';
 import { Session } from '@/lib/auth/types';
 import { getDashboardRoute } from '@/lib/auth/utils';
+import { usePathname } from 'next/navigation';
 
 export default function NavigationClient() {
   const router = useRouter();
+  const pathname = usePathname();
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showServicesDropdown, setShowServicesDropdown] = useState(false);
@@ -65,6 +67,21 @@ export default function NavigationClient() {
     };
   }, [showServicesDropdown]);
 
+  useEffect(() => {
+    setShowMobileMenu(false);
+    setShowServicesDropdown(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!showMobileMenu) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [showMobileMenu]);
+
   async function handleLogout() {
     await logout();
     setSession(null);
@@ -82,15 +99,15 @@ export default function NavigationClient() {
   return (
     <nav className="border-b border-gray-200 bg-white shadow-sm">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="flex h-32 items-center justify-between">
+        <div className="flex h-16 sm:h-20 items-center justify-between">
           <div className="flex items-center">
             <Link href={session ? getDashboardRoute(session.roles) : "/"} className="flex items-center">
               <Image
                 src="/logo/ivyway-logo.png"
                 alt="IvyWay"
-                width={320}
-                height={115}
-                className="h-[92px] md:h-[115px] w-auto"
+                width={260}
+                height={94}
+                className="h-10 sm:h-12 md:h-14 w-auto"
                 priority
               />
             </Link>
@@ -168,7 +185,7 @@ export default function NavigationClient() {
               </a>
             </div>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="hidden md:flex items-center space-x-4">
             {isLoading ? (
               <div className="h-8 w-20 animate-pulse rounded bg-gray-200" />
             ) : session ? (
@@ -211,11 +228,12 @@ export default function NavigationClient() {
             )}
           </div>
           {/* Mobile menu button */}
-          <div className="md:hidden">
+          <div className="md:hidden flex items-center gap-2">
             <button
               onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="inline-flex items-center justify-center rounded-md p-2 text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[#0088CB]"
-              aria-expanded="false"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/40"
+              aria-expanded={showMobileMenu}
+              aria-controls="mobile-menu"
             >
               <span className="sr-only">Open main menu</span>
               {!showMobileMenu ? (
@@ -245,113 +263,137 @@ export default function NavigationClient() {
           </div>
         </div>
       </div>
-      {/* Mobile menu */}
-      {showMobileMenu && (
-        <div className="md:hidden border-t border-gray-200">
-          <div className="space-y-1 px-2 pb-3 pt-2">
-            <Link
-              href="/"
-              onClick={() => setShowMobileMenu(false)}
-              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              Home
-            </Link>
-            <button
-              onClick={() => {
-                setShowMobileMenu(false);
-                router.push('/pricing#tutoring-plans');
-              }}
-              className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              Tutoring
-            </button>
-            <button
-              onClick={() => {
-                setShowMobileMenu(false);
-                router.push('/pricing#college-counseling');
-              }}
-              className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              College
-            </button>
-            <button
-              onClick={() => {
-                setShowMobileMenu(false);
-                router.push('/pricing#ai-tools');
-              }}
-              className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              IvyWay AI
-            </button>
-            <Link
-              href="/pricing"
-              onClick={() => setShowMobileMenu(false)}
-              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/pricing#payments-faq"
-              onClick={() => setShowMobileMenu(false)}
-              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              FAQ
-            </Link>
-            <a
-              href="mailto:support@ivyway.com"
-              onClick={() => setShowMobileMenu(false)}
-              className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-            >
-              Contact
-            </a>
-            {!session && (
-              <>
-                <Link
-                  href="/auth/login"
-                  onClick={() => setShowMobileMenu(false)}
-                  className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-                >
-                  Log In
-                </Link>
-                <button
-                  onClick={() => {
-                    window.location.href = "/#create-account";
-                    setShowMobileMenu(false);
-                  }}
-                  className="block w-full text-left rounded-md bg-[#0088CB] px-3 py-2 text-base font-medium text-white hover:bg-[#0077B3]"
-                >
-                  Sign up
-                </button>
-              </>
-            )}
-            {session && (
-              <>
-                {dashboardLink && (
-                  <Link
-                    href={dashboardLink}
-                    onClick={() => setShowMobileMenu(false)}
-                    className="block rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-                  >
-                    Dashboard
-                  </Link>
-                )}
-                <div className="border-t border-gray-200 pt-2">
-                  <div className="px-3 py-2 text-sm text-gray-700">{session.name}</div>
-                  <button
-                    onClick={() => {
-                      handleLogout();
-                      setShowMobileMenu(false);
-                    }}
-                    className="block w-full text-left rounded-md px-3 py-2 text-base font-medium text-black hover:bg-gray-100"
-                  >
-                    Sign out
-                  </button>
-                </div>
-              </>
-            )}
+      {/* Mobile menu (drawer) */}
+      {showMobileMenu ? (
+        <div className="md:hidden fixed inset-0 z-[70]" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setShowMobileMenu(false)} />
+          <div
+            id="mobile-menu"
+            className="absolute inset-y-0 right-0 w-[min(22rem,92vw)] bg-white shadow-xl border-l border-gray-200 flex flex-col"
+          >
+            <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="text-sm font-semibold text-gray-900">Menu</div>
+              <button
+                type="button"
+                onClick={() => setShowMobileMenu(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/40"
+                aria-label="Close menu"
+              >
+                <svg className="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1">
+              <Link
+                href="/"
+                onClick={() => setShowMobileMenu(false)}
+                className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                Home
+              </Link>
+              <Link
+                href="/pricing"
+                onClick={() => setShowMobileMenu(false)}
+                className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                Pricing
+              </Link>
+              <button
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  router.push('/pricing#tutoring-plans');
+                }}
+                className="block w-full text-left rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                Tutoring
+              </button>
+              <button
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  router.push('/pricing#college-counseling');
+                }}
+                className="block w-full text-left rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                College
+              </button>
+              <button
+                onClick={() => {
+                  setShowMobileMenu(false);
+                  router.push('/pricing#ai-tools');
+                }}
+                className="block w-full text-left rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                IvyWay AI
+              </button>
+              <Link
+                href="/pricing#payments-faq"
+                onClick={() => setShowMobileMenu(false)}
+                className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                FAQ
+              </Link>
+              <a
+                href="mailto:support@ivyway.com"
+                onClick={() => setShowMobileMenu(false)}
+                className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
+              >
+                Contact
+              </a>
+
+              <div className="pt-2">
+                {!isLoading && !session ? (
+                  <div className="space-y-2">
+                    <Link
+                      href="/auth/login"
+                      onClick={() => setShowMobileMenu(false)}
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-center text-base font-semibold text-gray-900 hover:bg-gray-50"
+                    >
+                      Log in
+                    </Link>
+                    <button
+                      onClick={() => {
+                        window.location.href = "/#create-account";
+                        setShowMobileMenu(false);
+                      }}
+                      className="block w-full rounded-md bg-[#0088CB] px-3 py-3 text-center text-base font-semibold text-white hover:bg-[#0077B3]"
+                    >
+                      Sign up
+                    </button>
+                  </div>
+                ) : null}
+
+                {!isLoading && session ? (
+                  <div className="space-y-2">
+                    {dashboardLink ? (
+                      <Link
+                        href={dashboardLink}
+                        onClick={() => setShowMobileMenu(false)}
+                        className="block w-full rounded-md bg-gray-900 px-3 py-3 text-center text-base font-semibold text-white hover:bg-gray-800"
+                      >
+                        Go to Dashboard
+                      </Link>
+                    ) : null}
+                    <div className="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                      Signed in as <span className="font-semibold text-gray-900">{session.name}</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        void handleLogout();
+                        setShowMobileMenu(false);
+                      }}
+                      className="block w-full rounded-md border border-gray-300 bg-white px-3 py-3 text-center text-base font-semibold text-gray-900 hover:bg-gray-50"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
-      )}
+      ) : null}
     </nav>
   );
 }

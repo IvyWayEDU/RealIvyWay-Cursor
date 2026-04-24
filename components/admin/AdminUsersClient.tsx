@@ -220,13 +220,13 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
       </div>
 
       <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-gray-200 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="text-sm font-semibold text-gray-900">Provider Schools</div>
             <div className="mt-1 text-xs text-gray-500">Deduplicated by normalized school id.</div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="w-56">
+            <div className="w-full sm:w-56">
               <input
                 value={schoolQuery}
                 onChange={(e) => setSchoolQuery(e.target.value)}
@@ -240,7 +240,34 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
             </div>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Mobile: cards */}
+        <div className="sm:hidden divide-y divide-gray-200">
+          {filteredSchoolRows.map((row) => (
+            <div key={row.schoolIdNormalized} className="px-4 py-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-gray-900 break-words">{row.schoolName}</div>
+                  <div className="mt-1 text-xs text-gray-500">{row.schoolIdNormalized}</div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-xs text-gray-500">Providers</div>
+                  <div className="mt-0.5 text-sm font-semibold text-gray-900">{row.providerCount}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {schoolRows.length === 0 && (
+            <div className="px-4 py-10 text-center text-sm text-gray-600">No provider schools found.</div>
+          )}
+          {schoolRows.length > 0 && filteredSchoolRows.length === 0 && (
+            <div className="px-4 py-10 text-center text-sm text-gray-600">
+              No schools match “{schoolQuery.trim()}”.
+            </div>
+          )}
+        </div>
+
+        {/* Desktop/tablet: table */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -275,10 +302,10 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
       </div>
 
       <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+        <div className="px-4 py-3 border-b border-gray-200 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="text-sm font-semibold text-gray-900">All Users</div>
-          <div className="flex items-center gap-3">
-            <div className="w-72">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-3">
+            <div className="w-full lg:w-72">
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -286,7 +313,7 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               />
             </div>
-            <div className="inline-flex rounded-full bg-gray-100 p-1">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-gray-100 p-2">
               {(
                 [
                   { key: 'all', label: 'All' },
@@ -304,7 +331,7 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
                     onClick={() => setSelectedFilter(opt.key)}
                     aria-pressed={active}
                     className={[
-                      'px-3 py-1.5 text-xs font-semibold rounded-full transition-colors',
+                      'px-3 py-2 text-xs font-semibold rounded-full transition-colors',
                       active ? 'bg-[#0088CB] text-white shadow-sm' : 'bg-gray-200 text-gray-700 hover:bg-gray-300',
                     ].join(' ')}
                   >
@@ -316,7 +343,106 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
             <div className="text-sm text-gray-500">{filteredUsers.length} shown</div>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Mobile: cards */}
+        <div className="sm:hidden divide-y divide-gray-200">
+          {filteredUsers.map((u) => {
+            const role = displayRole(u.roles);
+            const isSuspended = Boolean(u.isSuspended) || u.status === 'suspended';
+            const status: 'active' | 'suspended' = isSuspended ? 'suspended' : 'active';
+            const busy = workingId === u.id;
+            return (
+              <div key={u.id} className={['px-4 py-4', busy ? 'opacity-70' : ''].join(' ')}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 break-words">{u.name || '—'}</div>
+                    <div className="mt-1 text-xs text-gray-600 break-words">{u.email || '—'}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className={[
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold',
+                          role === 'admin'
+                            ? 'bg-indigo-100 text-indigo-800'
+                            : role === 'provider'
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-800',
+                        ].join(' ')}
+                      >
+                        {role}
+                      </span>
+                      <span
+                        className={[
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold',
+                          status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800',
+                        ].join(' ')}
+                      >
+                        {status === 'active' ? 'Active' : 'Suspended'}
+                      </span>
+                    </div>
+                  </div>
+                  <Link
+                    href={`/admin/users/${encodeURIComponent(u.id)}`}
+                    className="shrink-0 rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50"
+                  >
+                    View
+                  </Link>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {status === 'active' ? (
+                    <button
+                      type="button"
+                      onClick={() => suspend(u.id)}
+                      disabled={busy || role === 'admin'}
+                      className="rounded-md border border-red-300 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      title={role === 'admin' ? 'Cannot suspend admin via UI' : ''}
+                    >
+                      Suspend
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => unsuspend(u.id)}
+                      disabled={busy}
+                      className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Unsuspend
+                    </button>
+                  )}
+
+                  {role !== 'admin' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => changeRole(u.id, 'student')}
+                        disabled={busy}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Make student
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => changeRole(u.id, 'provider')}
+                        disabled={busy}
+                        className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Make provider
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+
+          {filteredUsers.length === 0 && (
+            <div className="px-4 py-10 text-center text-sm text-gray-600">
+              {hasActiveSearch ? 'No users found matching your search.' : 'No users found for this filter.'}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop/tablet: table */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>

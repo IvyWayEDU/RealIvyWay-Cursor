@@ -103,7 +103,7 @@ export default function Home() {
   return (
     <div className="bg-white">
       {/* Hero Section */}
-      <section className="relative w-full min-h-[110vh] flex items-center">
+      <section className="relative w-full min-h-[100svh] sm:min-h-[110vh] flex items-center">
         {/* Hero Image */}
         <div className="absolute inset-0">
           <Image
@@ -119,8 +119,8 @@ export default function Home() {
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/70 z-[1]" />
 
         {/* Hero Header - Absolute positioning, positioned relative to hero container */}
-        <nav className="absolute top-0 left-0 right-0 z-40 bg-transparent">
-          <div className="flex h-20 items-center justify-between w-full">
+        <nav className="absolute top-0 left-0 right-0 z-40 bg-transparent pt-[env(safe-area-inset-top)]">
+          <div className="flex h-16 sm:h-20 items-center justify-between w-full">
             {/* Logo */}
             <div className="flex items-center pl-4 sm:pl-6 lg:pl-8">
               <Link href={session ? getDashboardRoute(session.roles) : "/"} className="flex items-center">
@@ -129,7 +129,7 @@ export default function Home() {
                   alt="IvyWay"
                   width={160}
                   height={58}
-                  className="h-16 md:h-20 w-auto"
+                  className="h-12 sm:h-14 md:h-16 w-auto"
                   priority
                 />
               </Link>

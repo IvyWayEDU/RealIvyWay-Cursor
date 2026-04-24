@@ -382,7 +382,69 @@ export default function AdminEarningsClient(props: {
             />
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Mobile: cards */}
+        <div className="sm:hidden divide-y divide-gray-200 bg-white">
+          {filteredProviderRows.map((r) => {
+            const busy = working === r.providerId;
+            const withdrawalStatus = r.pendingCount > 0 ? 'pending' : r.balanceCents > 0 ? 'available' : '—';
+            return (
+              <div key={r.providerId} className={['px-4 py-4', busy ? 'opacity-70' : ''].join(' ')}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 break-words">{r.name}</div>
+                    {r.email ? <div className="mt-1 text-xs text-gray-600 break-words">{r.email}</div> : null}
+                    <div className="mt-2 text-xs text-gray-600">
+                      <span className="font-semibold text-gray-900">{r.completedCount}</span> completed sessions
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-[11px] font-semibold text-gray-500">Withdrawal</div>
+                    <div className="mt-0.5 text-xs font-semibold text-gray-900">{withdrawalStatus}</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600">Total earned</span>
+                    <span className="font-semibold text-gray-900">{money(r.earningsCents)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600">Withdrawn</span>
+                    <span className="font-semibold text-gray-900">{money(r.withdrawnCents)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600">Available</span>
+                    <span className="font-semibold text-gray-900">{money(r.availableCents)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600">Bank</span>
+                    <span className="font-semibold text-gray-900 break-words text-right">{r.bank}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => adjustBalance(r.providerId)}
+                    disabled={busy}
+                    className="inline-flex w-full items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-3 text-sm font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Adjust earnings
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {filteredProviderRows.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-gray-600">
+              No providers found{providerSearch.trim() ? ' for that search.' : '.'}
+            </div>
+          ) : null}
+        </div>
+
+        {/* Desktop/tablet: table */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -397,8 +459,7 @@ export default function AdminEarningsClient(props: {
             <tbody className="divide-y divide-gray-200 bg-white">
               {filteredProviderRows.map((r) => {
                 const busy = working === r.providerId;
-                const withdrawalStatus =
-                  r.pendingCount > 0 ? 'pending' : r.balanceCents > 0 ? 'available' : '—';
+                const withdrawalStatus = r.pendingCount > 0 ? 'pending' : r.balanceCents > 0 ? 'available' : '—';
                 return (
                   <tr key={r.providerId} className={busy ? 'opacity-70' : ''}>
                     <td className="px-4 py-3">
@@ -516,7 +577,99 @@ export default function AdminEarningsClient(props: {
           <div className="text-sm font-semibold text-gray-900">Payout Requests</div>
           <div className="text-sm text-gray-500">{(props.initialPayoutRequests || []).length}</div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Mobile: cards */}
+        <div className="sm:hidden divide-y divide-gray-200 bg-white">
+          {(props.initialPayoutRequests || []).map((r) => {
+            const busy = working === r.id;
+            const status = String(r.status || '');
+            const canApprove = status === 'pending' || status === 'pending_admin_review';
+            const canMarkPaid = status === 'approved' || status === 'processing';
+            const providerLabel = r.providerName || r.providerEmail || r.providerId;
+
+            return (
+              <div key={r.id} className={['px-4 py-4', busy ? 'opacity-70' : ''].join(' ')}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 break-words">{providerLabel}</div>
+                    {r.providerEmail ? <div className="mt-1 text-xs text-gray-600 break-words">{r.providerEmail}</div> : null}
+                    <div className="mt-1 text-xs font-mono text-gray-600 break-all">{r.id}</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold text-gray-900">{money(Number(r.amountCents || 0))}</div>
+                    <div className="mt-1">
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-800">
+                        {status || '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600">Method</span>
+                    <span className="font-semibold text-gray-900">{payoutMethodLabelForRow(r)}</span>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="text-gray-600">Destination</span>
+                    <span className="font-semibold text-gray-900 break-words text-right">{payoutDestinationLabelForRow(r)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-gray-600">Requested</span>
+                    <span className="font-semibold text-gray-900">{formatDateTime(r.createdAt)}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPayoutRequest(r)}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50"
+                    disabled={busy}
+                  >
+                    Details
+                  </button>
+                  <Link
+                    href={`/admin/users/${encodeURIComponent(String(r.providerId || ''))}`}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50"
+                  >
+                    Profile
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canApprove) return;
+                      approvePayoutRequest(r.id);
+                    }}
+                    disabled={busy || !canApprove}
+                    className="rounded-md bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!canMarkPaid) return;
+                      const ok = window.confirm('Confirm you have sent this payout manually.');
+                      if (!ok) return;
+                      markPayoutRequestPaid(r.id);
+                    }}
+                    disabled={busy || !canMarkPaid}
+                    className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    Mark paid
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {(props.initialPayoutRequests || []).length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-gray-600">No payout requests pending.</div>
+          ) : null}
+        </div>
+
+        {/* Desktop/tablet: table */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>

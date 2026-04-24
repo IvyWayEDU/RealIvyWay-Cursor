@@ -319,7 +319,7 @@ export default function SessionDetailsPage() {
         <p className="mt-2 text-sm text-gray-500">The session you're looking for doesn't exist.</p>
         <button
           onClick={() => router.push(`/dashboard/${userRole}`)}
-          className="mt-4 px-4 py-2 bg-[#0088CB] text-white text-sm font-medium rounded-md hover:bg-[#0077B3] transition-colors"
+          className="mt-4 w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 bg-[#0088CB] text-white text-sm font-medium rounded-md hover:bg-[#0077B3] transition-colors"
         >
           Back to Dashboard
         </button>
@@ -355,10 +355,10 @@ export default function SessionDetailsPage() {
             {/* Provider/Student Info */}
             <div className="mb-6">
               {userRole === 'student' && session.providerName && (
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 min-w-0">
                   <ProviderAvatar name={session.providerName} imageUrl={(session as any)?.providerProfileImage ?? undefined} />
-                  <div className="flex-1">
-                    <h2 className="text-2xl font-semibold text-gray-900">{session.providerName}</h2>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-2xl font-semibold text-gray-900 break-words">{session.providerName}</h2>
                     <p className="text-sm text-gray-600">Provider</p>
                     {providerBadges.length > 0 && (
                       <div className="mt-2">
@@ -369,7 +369,7 @@ export default function SessionDetailsPage() {
                 </div>
               )}
               {userRole === 'provider' && session.studentName && (
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 min-w-0">
                   <div className="h-16 w-16 rounded-full bg-[#0088CB] flex items-center justify-center">
                     <span className="text-white text-lg font-semibold">
                       {session.studentName
@@ -380,8 +380,8 @@ export default function SessionDetailsPage() {
                         .slice(0, 2) || 'S'}
                     </span>
                   </div>
-                  <div>
-                    <h2 className="text-2xl font-semibold text-gray-900">{session.studentName}</h2>
+                  <div className="min-w-0">
+                    <h2 className="text-2xl font-semibold text-gray-900 break-words">{session.studentName}</h2>
                     <p className="text-sm text-gray-600">Student</p>
                   </div>
                 </div>
@@ -468,12 +468,12 @@ export default function SessionDetailsPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-3 flex-wrap pt-6 border-t border-gray-200">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 pt-6 border-t border-gray-200">
               {/* Review button - for completed sessions (students only) */}
               {session.status === 'completed' && userRole === 'student' && (
                 <button
                   onClick={() => setShowReviewModal(true)}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  className={`w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium rounded-md transition-colors ${
                     hasReviewForSession(session.id)
                       ? 'bg-gray-100 text-gray-600 cursor-default'
                       : 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
@@ -489,7 +489,7 @@ export default function SessionDetailsPage() {
                (session.status === 'confirmed' || session.status === 'scheduled') && (
                 <button
                   onClick={() => setShowCancelModal(true)}
-                  className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white border border-red-300 text-red-600 hover:bg-red-50"
+                  className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium rounded-md transition-colors bg-white border border-red-300 text-red-600 hover:bg-red-50"
                 >
                   Cancel Session
                 </button>
@@ -502,7 +502,7 @@ export default function SessionDetailsPage() {
                   onClick={() => {
                     window.location.href = `/dashboard/messages?sessionId=${session.id}`;
                   }}
-                  className="px-4 py-2 text-sm font-medium rounded-md transition-colors bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium rounded-md transition-colors bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
                 >
                   Message
                 </button>
@@ -544,7 +544,7 @@ export default function SessionDetailsPage() {
                         // Early clicks are blocked via disabled button only.
                         setJoinConfirm({ joinUrl, sessionId: session.id });
                       }}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                      className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 sm:py-2 text-sm font-medium rounded-md transition-colors ${
                         canJoinSession
                           ? 'bg-[#0088CB] text-white hover:bg-[#0077B3]'
                           : 'bg-gray-200 text-gray-500 cursor-not-allowed'

@@ -195,7 +195,7 @@ export default function GameModeRoomClient(props: { roomId: string; currentUserN
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20 sm:max-w-sm"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20 sm:max-w-sm"
               autoComplete="off"
             />
             <button

@@ -71,7 +71,7 @@ export default function GameModeLandingClient() {
             <input
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20"
               placeholder="AP Biology challenge room"
               autoComplete="off"
             />
@@ -86,7 +86,7 @@ export default function GameModeLandingClient() {
               <select
                 value={questionCount}
                 onChange={(e) => setQuestionCount(parseInt(e.target.value, 10))}
-                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20"
+                className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20"
               >
                 {[5, 6, 8, 10, 12].map((n) => (
                   <option key={n} value={n}>
@@ -158,7 +158,7 @@ export default function GameModeLandingClient() {
             <input
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
-              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20"
+              className="mt-2 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-base sm:text-sm text-gray-900 shadow-sm focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/20"
               placeholder="AB12-CD34"
               autoComplete="off"
             />

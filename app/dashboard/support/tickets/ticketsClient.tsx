@@ -149,7 +149,7 @@ export default function MySupportTicketsClient() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
         {/* Left: Ticket list */}
-        <div className="overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200">
+        <div className={`overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200 ${selectedId ? 'hidden lg:block' : ''}`}>
           <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between">
             <div>
               <h2 className="text-sm font-semibold text-gray-900">Tickets</h2>
@@ -162,7 +162,7 @@ export default function MySupportTicketsClient() {
             </button>
           </div>
 
-          <div className="max-h-[70vh] overflow-y-auto">
+          <div className="max-h-[70vh] lg:max-h-[calc(100dvh-12rem)] overflow-y-auto">
             {isLoading ? (
               <div className="p-5 text-sm text-gray-500">Loading…</div>
             ) : tickets.length === 0 ? (
@@ -228,11 +228,23 @@ export default function MySupportTicketsClient() {
         </div>
 
         {/* Right: Conversation */}
-        <div className="overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200 flex flex-col min-h-[70vh]">
+        <div className={`overflow-hidden rounded-xl bg-white shadow-sm border border-gray-200 flex flex-col min-h-[70vh] ${!selectedId ? 'hidden lg:flex' : ''}`}>
           <div className="px-5 py-4 border-b border-gray-200">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <h2 className="text-sm font-semibold text-gray-900">Conversation</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(null)}
+                    className="lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/40"
+                    aria-label="Back to tickets"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <h2 className="text-sm font-semibold text-gray-900">Conversation</h2>
+                </div>
                 {selected && (
                   <>
                     <p className="mt-2 text-base font-semibold text-gray-900 truncate">{selected.subject}</p>
@@ -302,7 +314,7 @@ export default function MySupportTicketsClient() {
                 )}
               </div>
 
-              <form onSubmit={sendReply} className="p-4 border-t border-gray-200 bg-white">
+              <form onSubmit={sendReply} className="p-4 border-t border-gray-200 bg-white pb-[calc(1rem+env(safe-area-inset-bottom))]">
                 <div className="flex gap-2 items-end">
                   <input
                     type="text"

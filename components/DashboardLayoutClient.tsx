@@ -63,7 +63,7 @@ export default function DashboardLayoutClient({
 
   const Drawer = (
     <div
-      className={`fixed inset-x-0 bottom-0 top-16 z-40 ${isNavOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
+      className={`fixed inset-x-0 bottom-0 top-[calc(4rem+env(safe-area-inset-top))] z-40 ${isNavOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
       aria-hidden={!isNavOpen}
     >
       <div
@@ -87,8 +87,8 @@ export default function DashboardLayoutClient({
   if (isCheckoutPage) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <header className="fixed inset-x-0 top-0 z-50 h-16 bg-white border-b border-gray-200">
-          <div className="h-full px-4 sm:px-6 flex items-center justify-between">
+        <header className="fixed inset-x-0 top-0 z-50 h-[calc(4rem+env(safe-area-inset-top))] bg-white border-b border-gray-200 pt-[env(safe-area-inset-top)]">
+          <div className="h-16 px-4 sm:px-6 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -115,7 +115,7 @@ export default function DashboardLayoutClient({
           </div>
         </header>
         {Drawer}
-        <main className="min-h-screen overflow-visible pt-16">{children}</main>
+        <main className="min-h-screen overflow-visible pt-[calc(4rem+env(safe-area-inset-top))]">{children}</main>
         {showSupportWidget && (
           <SupportWidget role={userRole === 'provider' ? 'provider' : 'student'} />
         )}
@@ -125,8 +125,8 @@ export default function DashboardLayoutClient({
   
   return (
     <div className="min-h-screen bg-gray-100">
-      <header className="fixed inset-x-0 top-0 z-50 h-16 bg-white border-b border-gray-200">
-        <div className="h-full px-4 sm:px-6 flex items-center justify-between">
+      <header className="fixed inset-x-0 top-0 z-50 h-[calc(4rem+env(safe-area-inset-top))] bg-white border-b border-gray-200 pt-[env(safe-area-inset-top)]">
+        <div className="h-16 px-4 sm:px-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -155,7 +155,7 @@ export default function DashboardLayoutClient({
 
       {Drawer}
 
-      <main className="pt-16">
+      <main className="pt-[calc(4rem+env(safe-area-inset-top))]">
         <div className={isAiPage ? 'p-0' : 'px-4 sm:px-6 lg:px-8 py-6'}>{children}</div>
       </main>
       {showSupportWidget && (

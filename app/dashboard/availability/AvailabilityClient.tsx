@@ -521,21 +521,21 @@ export default function AvailabilityClient() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Availability</h1>
           <p className="mt-2 text-sm text-gray-600">
             Set your weekly availability per service type. Availability only changes when you press Save.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 w-full sm:w-auto">
           {enabledServices.length > 0 && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <label className="text-sm font-medium text-gray-700">Service</label>
               <select
                 value={selectedServiceType || ''}
                 onChange={(e) => setSelectedServiceType(e.target.value || null)}
-                className="rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] text-sm py-2 px-3"
+                className="flex-1 sm:flex-none rounded-md border-gray-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] text-sm py-2.5 px-3"
               >
                 {enabledServices.map((s) => (
                   <option key={s} value={s}>
@@ -545,12 +545,12 @@ export default function AvailabilityClient() {
               </select>
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto">
           <button
             type="button"
             onClick={handleClear}
             disabled={clearing || saving || !selectedServiceType}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex w-full sm:w-auto justify-center items-center px-4 py-3 border border-gray-300 text-sm font-semibold rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {clearing ? 'Clearing...' : 'Clear'}
           </button>
@@ -558,7 +558,7 @@ export default function AvailabilityClient() {
             type="button"
             onClick={handleSave}
             disabled={saving || clearing || !selectedServiceType}
-            className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex w-full sm:w-auto justify-center items-center px-4 py-3 border border-transparent text-sm font-semibold rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? (
               <>

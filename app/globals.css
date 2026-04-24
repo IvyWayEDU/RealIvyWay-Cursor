@@ -19,15 +19,20 @@
 
 html {
   scroll-behavior: smooth;
-  height: auto;
+  height: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   background: #ffffff;
   color: #171717;
   font-family: Arial, Helvetica, sans-serif;
-  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -72,184 +77,7 @@ body {
   animation: slide-up 0.3s ease-out;
 }
 
-/* Hide Stripe's floating helper UI (Link popup and other floating elements) */
-/* These rules target Stripe's injected floating UI elements without affecting payment functionality */
-/* Payment Elements inside forms are NOT affected by these rules */
-
-/* Target Stripe Link iframes */
-iframe[src*="link.stripe.com"],
-iframe[src*="js.stripe.com"][src*="link"],
-iframe[src*="hooks.stripe.com"][src*="link"],
-iframe[src*="stripe.com"][title*="Link"],
-iframe[src*="stripe.com"][src*="link"],
-iframe[id*="stripe-link"],
-iframe[class*="stripe-link"],
-iframe[name*="stripe-link"] {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  left: -9999px !important;
-  width: 0 !important;
-  height: 0 !important;
-  z-index: -9999 !important;
-}
-
-/* Target Stripe Link floating UI containers */
-div[data-stripe-link],
-div[id*="stripe-link"],
-div[class*="stripe-link"],
-div[id*="StripeLink"],
-div[class*="StripeLink"],
-div[id^="stripe-link-"],
-div[class^="stripe-link-"],
-div[id*="__stripe-link"],
-div[class*="__stripe-link"],
-div[data-testid*="stripe-link"],
-div[aria-label*="Stripe Link"],
-div[aria-label*="stripe link"],
-div[role="button"][aria-label*="Link"],
-div[class*="StripeLinkButton"],
-div[id*="StripeLinkButton"] {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  left: -9999px !important;
-  width: 0 !important;
-  height: 0 !important;
-  z-index: -9999 !important;
-}
-
-/* Target Stripe Link floating button/helper elements */
-button[data-stripe-link],
-button[id*="stripe-link"],
-button[class*="stripe-link"],
-button[aria-label*="Stripe Link"],
-button[aria-label*="stripe link"],
-a[data-stripe-link],
-a[id*="stripe-link"],
-a[class*="stripe-link"],
-a[href*="stripe.com"][href*="link"] {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  left: -9999px !important;
-  width: 0 !important;
-  height: 0 !important;
-  z-index: -9999 !important;
-}
-
-/* Target any element with Stripe Link in its class or ID that's positioned fixed/floating */
-div[class*="stripe"][class*="link"][style*="position"],
-div[id*="stripe"][id*="link"][style*="position"],
-div[class*="Stripe"][class*="Link"][style*="position"],
-div[id*="Stripe"][id*="Link"][style*="position"] {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  position: absolute !important;
-  left: -9999px !important;
-  width: 0 !important;
-  height: 0 !important;
-  z-index: -9999 !important;
-}
-
-/* Hide any fixed bottom element that contains Stripe Link indicators */
-/* This catches dynamically injected elements that use inline styles */
-div[style*="position: fixed"][style*="bottom"]:has(iframe[src*="stripe.com"][src*="link"]),
-div[style*="position:fixed"][style*="bottom"]:has(iframe[src*="stripe.com"][src*="link"]),
-div[style*="position: fixed"][style*="bottom"]:has([data-stripe-link]),
-div[style*="position:fixed"][style*="bottom"]:has([data-stripe-link]) {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  z-index: -9999 !important;
-}
-
-/* Ensure Payment Elements inside forms are NOT affected */
-form .StripeElement,
-form [data-testid*="payment-element"],
-form [class*="StripeElement"],
-form [id*="payment-element"],
-form iframe[src*="js.stripe.com"]:not([src*="link"]),
-form iframe[src*="hooks.stripe.com"]:not([src*="link"]) {
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  position: relative !important;
-  left: auto !important;
-  width: auto !important;
-  height: auto !important;
-  z-index: auto !important;
-}
-
-/* Ensure PaymentElement container allows full expansion and scrolling */
-form [data-testid*="payment-element"],
-form [id*="payment-element"],
-form [class*="PaymentElement"],
-div[data-testid*="payment-element"],
-div[id*="payment-element"] {
-  overflow: visible !important;
-  min-height: auto !important;
-  max-height: none !important;
-  height: auto !important;
-}
-
-/* Ensure Stripe Payment Element iframes can render fully */
-form iframe[src*="js.stripe.com"][src*="elements"],
-form iframe[src*="hooks.stripe.com"][src*="elements"],
-form iframe[src*="js.stripe.com"][src*="payment"],
-form iframe[src*="hooks.stripe.com"][src*="payment"] {
-  overflow: visible !important;
-  max-height: none !important;
-  height: auto !important;
-}
-/* ===============================
-   STRIPE CHECKOUT SCROLL FIX
-================================ */
-
-html,
-body {
-  height: auto !important;
-  min-height: 100% !important;
-  overflow-y: auto !important;
-}
-
-* {
-  max-height: none !important;
-}
-
-.checkout-container {
-  padding-bottom: 180px !important;
-}
-
-iframe[src*="stripe"],
-div[class*="Stripe"],
-div[class*="stripe"] {
-  max-height: none !important;
-  overflow: visible !important;
-}
-/* STRIPE CHECKOUT FIX – DO NOT REMOVE */
-html, body {
-  height: auto !important;
-  min-height: 100%;
-  overflow-y: auto !important;
-}
-
-[data-stripe], 
-.StripeElement,
-iframe[src*="stripe"] {
-  max-height: none !important;
-  overflow: visible !important;
-}
+/* Stripe-specific UI fixes belong in `app/checkout/checkout.css` so they don't impact the full platform. */
 
 /* ===============================
    LANDING: COLLEGE LOGO MARQUEE
@@ -426,6 +254,23 @@ iframe[src*="stripe"] {
 }
 
 @media (max-width: 640px) {
+  .hero-logos-overlay {
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: min(1200px, 94%);
+    padding: 12px 14px 14px;
+    border-radius: 16px;
+  }
+
+  .hero-logos-title {
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+
+  .hero-logos-logo,
+  .hero-logos-carousel img {
+    height: 34px;
+  }
+
   .ivyway-school-carousel-track {
     gap: 48px;
     animation-duration: 28s;

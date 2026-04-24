@@ -42,11 +42,11 @@ export default function RegisterClient() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100 px-4 py-8">
+    <div className="min-h-[100svh] flex items-start sm:items-center justify-center bg-gray-100 px-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           {/* Top Section - Blue */}
-          <div className="bg-[#0088CB] px-8 py-8 flex flex-col items-center">
+          <div className="bg-[#0088CB] px-5 sm:px-8 py-7 sm:py-8 flex flex-col items-center">
             {/* Logo - Perfect white circle with shadow */}
             <div className="mb-6 flex items-center justify-center">
               <div className="w-28 h-28 bg-white rounded-full flex items-center justify-center shadow-lg">
@@ -72,7 +72,7 @@ export default function RegisterClient() {
           </div>
 
           {/* Bottom Section - White */}
-          <div className="px-8 py-8">
+          <div className="px-5 sm:px-8 py-7 sm:py-8">
             {error && (
               <div className="mb-4 rounded-md bg-red-50 p-4 border border-red-200">
                 <p className="text-sm text-red-800">{error}</p>
@@ -129,7 +129,8 @@ export default function RegisterClient() {
                     id="name"
                     name="name"
                     required
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
+                    autoComplete="name"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
                     placeholder="Enter your name"
                   />
                 </div>
@@ -147,7 +148,11 @@ export default function RegisterClient() {
                     id="email"
                     name="email"
                     required
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    autoComplete="email"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
                     placeholder="Enter your email"
                   />
                 </div>
@@ -166,7 +171,7 @@ export default function RegisterClient() {
                       value="student"
                       checked={selectedRole === 'student'}
                       onChange={(e) => setSelectedRole(e.target.value as 'student' | 'provider')}
-                      className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300"
+                      className="h-5 w-5 text-[#0088CB] focus:ring-[#0088CB] border-gray-300"
                       required
                     />
                     <span className="ml-3 text-base text-gray-900">Student</span>
@@ -178,7 +183,7 @@ export default function RegisterClient() {
                       value="provider"
                       checked={selectedRole === 'provider'}
                       onChange={(e) => setSelectedRole(e.target.value as 'student' | 'provider')}
-                      className="h-4 w-4 text-[#0088CB] focus:ring-[#0088CB] border-gray-300"
+                      className="h-5 w-5 text-[#0088CB] focus:ring-[#0088CB] border-gray-300"
                       required
                     />
                     <span className="ml-3 text-base text-gray-900">Tutor or Counselor</span>
@@ -199,8 +204,9 @@ export default function RegisterClient() {
                     name="password"
                     required
                     minLength={6}
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
-                    placeholder="Create a password (min. 6 characters)"
+                    autoComplete="new-password"
+                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-md text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
+                    placeholder="Create a password (6+ characters)"
                   />
                 </div>
               </div>

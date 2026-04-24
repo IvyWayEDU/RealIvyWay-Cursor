@@ -23,7 +23,7 @@ export default async function IvyWayAIPage() {
   const iframeSrc = `https://ivywayai.com/sso?token=${encodedToken}`;
 
   return (
-    <div className="flex h-[calc(100dvh-4rem)] min-h-0 overflow-hidden bg-white">
+    <div className="flex h-[calc(100dvh-(4rem+env(safe-area-inset-top)))] min-h-0 overflow-hidden bg-white">
       <iframe
         title="IvyWay AI"
         src={iframeSrc}

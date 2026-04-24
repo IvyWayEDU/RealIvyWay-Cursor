@@ -1,21 +1,20 @@
 .chat-page {
-  height: calc(100vh - 4rem);
-  min-height: calc(100vh - 4rem);
+  height: calc(100dvh - (4rem + env(safe-area-inset-top)));
+  min-height: calc(100dvh - (4rem + env(safe-area-inset-top)));
   display: flex;
   flex-direction: column;
   background: #ffffff;
 }
 
 .chat-page--fullbleed {
-  /* Counteract the dashboard layout's `p-8` wrapper so chat is full width. */
-  margin: -32px;
+  margin: 0;
 }
 
 .chat-messages {
   flex: 1;
   overflow-y: auto;
   padding: 24px;
-  padding-bottom: 120px;
+  padding-bottom: calc(120px + env(safe-area-inset-bottom));
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -306,7 +305,7 @@
   display: flex;
   justify-content: center;
   gap: 10px; /* equal spacing between buttons */
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .assistant-action {
@@ -408,7 +407,7 @@
 @media (max-width: 640px) {
   .chat-messages {
     padding: 16px;
-    padding-bottom: 112px;
+    padding-bottom: calc(112px + env(safe-area-inset-bottom));
     gap: 12px;
   }
 

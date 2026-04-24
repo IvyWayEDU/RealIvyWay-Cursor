@@ -149,7 +149,7 @@ function BookAgainModal({ isOpen, onClose, session }: BookAgainModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <div className="flex items-center justify-center min-h-[100svh] px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(5rem,env(safe-area-inset-bottom))] text-center sm:block sm:p-0">
         {/* Background overlay */}
         <div
           className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
@@ -178,7 +178,7 @@ function BookAgainModal({ isOpen, onClose, session }: BookAgainModalProps) {
                       <select
                         value={selectedServiceType}
                         onChange={(e) => setSelectedServiceType(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-sm"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-base sm:text-sm"
                       >
                         <option value="tutoring">Tutoring</option>
                         <option value="counseling">Counseling</option>
@@ -203,7 +203,7 @@ function BookAgainModal({ isOpen, onClose, session }: BookAgainModalProps) {
                         value={selectedDate}
                         onChange={(e) => setSelectedDate(e.target.value)}
                         min={new Date().toISOString().split('T')[0]}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-sm"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-base sm:text-sm"
                       />
                     </div>
                     <div>
@@ -213,7 +213,7 @@ function BookAgainModal({ isOpen, onClose, session }: BookAgainModalProps) {
                       <select
                         value={selectedTime}
                         onChange={(e) => setSelectedTime(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-sm"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-base sm:text-sm"
                       >
                         <option value="">Choose a time</option>
                         <option value="9:00 AM">9:00 AM</option>
@@ -440,24 +440,24 @@ function CompletedSessionCard({ session }: CompletedSessionCardProps) {
                 onChange={(e) => setReviewText(e.target.value)}
                 placeholder="Write your review here…"
                 rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-sm transition-colors"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB] text-base sm:text-sm transition-colors"
               />
             </div>
 
             {/* Action Buttons */}
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <button
                 type="button"
                 onClick={handleSubmitReview}
                 disabled={rating === 0}
-                className="px-4 py-2 bg-white border border-[#0088CB] text-[#0088CB] text-sm font-medium rounded-md hover:bg-[#0088CB] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 bg-white border border-[#0088CB] text-[#0088CB] text-sm font-medium rounded-md hover:bg-[#0088CB] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Submit Review
               </button>
               <button
                 type="button"
                 onClick={handleCancelReview}
-                className="px-4 py-2 bg-white border border-red-500 text-red-500 text-sm font-medium rounded-md hover:bg-red-500 hover:text-white transition-colors"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 bg-white border border-red-500 text-red-500 text-sm font-medium rounded-md hover:bg-red-500 hover:text-white transition-colors"
               >
                 Cancel
               </button>

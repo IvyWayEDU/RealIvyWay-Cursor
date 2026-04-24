@@ -583,13 +583,13 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
         <div className="mt-4">
           <Link
             href="/change-password"
-            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+            className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
           >
             Change Password
           </Link>
         </div>
       </div>
-      <div className="p-6 space-y-8">
+      <div className="p-5 sm:p-6 space-y-8">
         {saveMessage && (
           <div
             className={`rounded-md p-4 ${
@@ -731,12 +731,12 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                         className="block w-full rounded-md border-blue-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] sm:text-sm px-4 py-2"
                       />
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <button
                         type="button"
                         onClick={verifyAndApplyChange}
                         disabled={isVerifying || !verificationCode.trim()}
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isVerifying ? 'Verifying...' : 'Verify & Apply'}
                       </button>
@@ -749,7 +749,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                           setVerificationCode('');
                           setVerificationError(null);
                         }}
-                        className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB]"
+                        className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB]"
                       >
                         Cancel
                       </button>
@@ -805,12 +805,12 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                         className="block w-full rounded-md border-blue-300 shadow-sm focus:border-[#0088CB] focus:ring-[#0088CB] sm:text-sm px-4 py-2"
                       />
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <button
                         type="button"
                         onClick={verifyAndApplyChange}
                         disabled={isVerifying || !verificationCode.trim()}
-                        className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 border border-transparent text-sm font-medium rounded-md text-white bg-[#0088CB] hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isVerifying ? 'Verifying...' : 'Verify & Apply'}
                       </button>
@@ -823,7 +823,7 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
                           setVerificationCode('');
                           setVerificationError(null);
                         }}
-                        className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB]"
+                        className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB]"
                       >
                         Cancel
                       </button>

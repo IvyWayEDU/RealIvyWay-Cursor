@@ -40,16 +40,16 @@ export default async function ProviderDashboard() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Welcome back</h1>
           <p className="mt-2 text-sm text-gray-600">
             Manage your sessions and track your earnings.
           </p>
         </div>
         <Link
           href="/dashboard/availability"
-          className="px-6 py-2.5 bg-[#0088CB] text-white font-medium rounded-md hover:bg-[#0077B3] transition-colors"
+          className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-3 sm:py-2.5 bg-[#0088CB] text-white font-medium rounded-md hover:bg-[#0077B3] transition-colors"
         >
           Manage Availability
         </Link>

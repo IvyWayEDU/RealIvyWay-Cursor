@@ -718,7 +718,29 @@ export default function AdminStatisticsClient(props: { initial: AdminStatistics 
 
       <Section title="Top Providers" subtitle="Leaderboard by platform revenue generated (completed sessions).">
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-          <div className="overflow-x-auto">
+          {/* Mobile: cards */}
+          <div className="sm:hidden divide-y divide-gray-200 bg-white">
+            {data.topProviders.map((p) => (
+              <div key={p.providerId} className="px-4 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 break-words">{p.providerName}</div>
+                    <div className="mt-1 text-xs text-gray-600">{p.sessionsCompleted} sessions completed</div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-xs text-gray-500">Earnings generated</div>
+                    <div className="mt-0.5 text-sm font-semibold text-gray-900">{money(p.platformRevenueCents)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {data.topProviders.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm text-gray-600">No completed sessions yet.</div>
+            ) : null}
+          </div>
+
+          {/* Desktop/tablet: table */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>

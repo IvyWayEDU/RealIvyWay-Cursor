@@ -2,6 +2,7 @@ import { getAuthContext } from '@/lib/auth/session';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import AdminLogoutButton from '@/components/admin/AdminLogoutButton';
+import AdminMobileNav from '@/components/admin/AdminMobileNav';
 import Link from 'next/link';
 
 export default async function AdminLayout({
@@ -87,6 +88,7 @@ export default async function AdminLayout({
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-3">
+              <AdminMobileNav nav={[...nav]} pathname={pathname} />
               <div className="md:hidden">
                 <Link href="/admin" className="text-sm font-semibold text-gray-900">
                   Admin

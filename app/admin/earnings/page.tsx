@@ -120,7 +120,7 @@ export default async function AdminEarningsPage() {
 
   return (
     <div className="space-y-10">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Earnings</h1>
           <p className="mt-2 text-sm text-gray-600">Revenue, payout, and booking analytics in one place.</p>
@@ -150,7 +150,45 @@ export default async function AdminEarningsPage() {
           </p>
         </div>
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-          <div className="overflow-x-auto">
+          <div className="sm:hidden divide-y divide-gray-200">
+            {a.revenueByType.map((r) => (
+              <div key={r.type} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900">{labelForType(r.type)}</div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {r.bookings} bookings • {fmtPct(r.bookingsPct)} of bookings
+                    </div>
+                  </div>
+                  <Pill tone="blue">{fmtPct(r.grossRevenuePct)} gross</Pill>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Gross</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.grossRevenueCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Avg booking</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.avgBookingValueCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Provider</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.providerRevenueCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Platform</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.platformRevenueCents)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {a.revenueByType.length === 0 ? (
+              <div className="p-4 text-sm text-gray-600">No revenue data found.</div>
+            ) : null}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -229,7 +267,37 @@ export default async function AdminEarningsPage() {
             <div className="text-sm font-semibold text-gray-900">Provider payout totals</div>
             <div className="text-sm text-gray-500">{a.payoutAnalytics.providerTotals.length}</div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="sm:hidden divide-y divide-gray-200">
+            {a.payoutAnalytics.providerTotals.slice(0, 50).map((r) => (
+              <div key={r.providerId} className="p-4">
+                <div className="text-sm font-semibold text-gray-900 break-words">{r.providerName}</div>
+                {r.providerEmail ? <div className="mt-0.5 text-xs text-gray-500 break-words">{r.providerEmail}</div> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Pending</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.pendingCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Approved</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.approvedCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Paid</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.paidCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Total</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.totalRequestedCents)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {a.payoutAnalytics.providerTotals.length === 0 ? (
+              <div className="p-4 text-sm text-gray-600">No payout requests found.</div>
+            ) : null}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -274,7 +342,37 @@ export default async function AdminEarningsPage() {
         </div>
 
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-          <div className="overflow-x-auto">
+          <div className="sm:hidden divide-y divide-gray-200">
+            {a.providerLeaderboard.slice(0, 50).map((r) => (
+              <div key={r.providerId} className="p-4">
+                <div className="text-sm font-semibold text-gray-900 break-words">{r.providerName}</div>
+                {r.email ? <div className="mt-0.5 text-xs text-gray-500 break-words">{r.email}</div> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Completed</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{r.completedSessions}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Total earnings</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.totalEarningsCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Pending</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.pendingPayoutsCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Available</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(r.availableBalanceCents)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {a.providerLeaderboard.length === 0 ? (
+              <div className="p-4 text-sm text-gray-600">No providers found.</div>
+            ) : null}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -323,7 +421,38 @@ export default async function AdminEarningsPage() {
           </p>
         </div>
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-          <div className="overflow-x-auto">
+          <div className="sm:hidden divide-y divide-gray-200">
+            {a.monthly.map((m) => (
+              <div key={m.month} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900">{m.label}</div>
+                    <div className="mt-0.5 text-xs text-gray-500">{m.month} • {m.sessionCount} sessions</div>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Gross</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(m.grossRevenueCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Platform</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(m.platformRevenueCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Provider</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(m.providerRevenueCents)}</div>
+                  </div>
+                  <div className="rounded-md bg-gray-50 p-2">
+                    <div className="text-xs text-gray-500">Pending payouts</div>
+                    <div className="font-semibold text-gray-900 tabular-nums">{money(m.pendingPayoutsCents)}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -363,7 +492,59 @@ export default async function AdminEarningsPage() {
           <p className="mt-1 text-sm text-gray-600">Latest completed-session earnings and payout request events.</p>
         </div>
         <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-          <div className="overflow-x-auto">
+          <div className="sm:hidden divide-y divide-gray-200">
+            {a.recentActivity.map((e) => {
+              const typeLabel =
+                e.type === 'completed_session'
+                  ? 'Completed session earnings'
+                  : e.type === 'payout_request'
+                    ? 'New payout request'
+                    : e.type === 'payout_approved'
+                      ? 'Approved payout'
+                      : 'Paid payout';
+              const pillTone =
+                e.type === 'payout_paid'
+                  ? 'green'
+                  : e.type === 'payout_approved'
+                    ? 'blue'
+                    : e.type === 'payout_request'
+                      ? 'amber'
+                      : 'gray';
+              return (
+                <div key={`${e.type}:${e.refId}:${e.at}`} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-gray-900">{typeLabel}</div>
+                      <div className="mt-0.5 text-xs text-gray-500">{formatDateTime(e.at)}</div>
+                    </div>
+                    <Pill tone={pillTone as any}>{e.status || '—'}</Pill>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-1 text-sm text-gray-700">
+                    <div className="break-words">
+                      <span className="text-gray-500">Provider:</span>{' '}
+                      <span className="font-medium text-gray-900">{e.providerName || e.providerId || '—'}</span>
+                    </div>
+                    {e.sessionType ? (
+                      <div>
+                        <span className="text-gray-500">Session:</span>{' '}
+                        <span className="font-medium text-gray-900">{labelForType(e.sessionType)}</span>
+                      </div>
+                    ) : null}
+                    <div>
+                      <span className="text-gray-500">Amount:</span>{' '}
+                      <span className="font-semibold text-gray-900 tabular-nums">{money(e.amountCents)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {a.recentActivity.length === 0 ? (
+              <div className="p-4 text-sm text-gray-600">No recent activity found.</div>
+            ) : null}
+          </div>
+
+          <div className="hidden sm:block overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>

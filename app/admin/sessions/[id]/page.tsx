@@ -113,14 +113,14 @@ export default async function AdminSessionDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Session Detail</h1>
           <div className="mt-1 text-sm text-gray-600 font-mono break-all">{s.id}</div>
         </div>
         <Link
           href="/admin/sessions"
-          className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+          className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-medium text-indigo-600 hover:text-indigo-700"
         >
           Back to Sessions
         </Link>

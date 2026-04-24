@@ -265,18 +265,18 @@ export default function SupportInboxPage() {
 
           {selected && (
             <form onSubmit={sendReply} className="p-4 border-t border-gray-200 bg-white">
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
                   value={reply}
                   onChange={(e) => setReply(e.target.value)}
                   placeholder="Reply to user…"
-                  className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
+                  className="flex-1 px-3 py-2.5 text-base sm:text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-transparent"
                   disabled={isSending || selected.status === 'closed'}
                 />
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-[#0088CB] text-white rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2.5 bg-[#0088CB] text-white rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={!reply.trim() || isSending || selected.status === 'closed'}
                 >
                   Send

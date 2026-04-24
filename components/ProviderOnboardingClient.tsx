@@ -280,7 +280,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-[100svh] bg-gray-50 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto">
         {/* Progress Bar */}
         <div className="mb-8">
@@ -306,7 +306,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
         )}
 
         {/* Step Content */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 sm:p-8">
           {currentStep === 'service-selection' && (
             <Step1ServiceSelection
               services={onboardingData.services}
@@ -347,12 +347,12 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
         </div>
 
         {/* Navigation Buttons */}
-        <div className="mt-6 flex justify-between">
+        <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-between">
           <button
             type="button"
             onClick={handleBack}
             disabled={getPreviousStep() === null}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Back
           </button>
@@ -362,7 +362,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
               type="button"
               onClick={() => handleNext()}
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-[#0088CB] rounded-md hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium text-white bg-[#0088CB] rounded-md hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Saving...' : 'Next'}
             </button>
@@ -371,7 +371,7 @@ export default function ProviderOnboardingClient({ initialUser }: ProviderOnboar
               type="button"
               onClick={handleComplete}
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-[#0088CB] rounded-md hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 text-sm font-medium text-white bg-[#0088CB] rounded-md hover:bg-[#0077B3] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#0088CB] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Completing...' : 'Complete'}
             </button>

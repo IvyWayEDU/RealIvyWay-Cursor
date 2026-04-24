@@ -59,7 +59,7 @@ export default function ChangePasswordClient() {
           <p className="mt-1 text-sm text-gray-600">Update your password for this account.</p>
         </div>
 
-        <form onSubmit={onSubmit} className="p-6 space-y-5">
+        <form onSubmit={onSubmit} className="p-5 sm:p-6 space-y-5">
           {message ? (
             <div
               className={`rounded-md p-3 border ${
@@ -79,7 +79,7 @@ export default function ChangePasswordClient() {
               autoComplete="current-password"
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB]"
+              className="w-full px-4 py-3 text-base border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB]"
             />
           </div>
 
@@ -90,7 +90,7 @@ export default function ChangePasswordClient() {
               autoComplete="new-password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB]"
+              className="w-full px-4 py-3 text-base border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB]"
             />
             <p className="mt-1 text-xs text-gray-500">Minimum 6 characters.</p>
           </div>
@@ -102,22 +102,22 @@ export default function ChangePasswordClient() {
               autoComplete="new-password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB]"
+              className="w-full px-4 py-3 text-base border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:border-[#0088CB]"
             />
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={() => router.back()}
-              className="px-5 py-2 border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-3 sm:py-2 border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-5 py-2 rounded-md bg-[#0088CB] text-white font-medium hover:bg-[#0077B3] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-3 sm:py-2 rounded-md bg-[#0088CB] text-white font-medium hover:bg-[#0077B3] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Updating…' : 'Update Password'}
             </button>

@@ -261,128 +261,243 @@ function PayoutRequestsTable(props: {
 }) {
   const rows = props.rows || [];
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Provider</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Email</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Amount</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Payout Method</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Destination</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">{props.dateColumnLabel}</th>
-            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Status</th>
-            <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200 bg-white">
-          {rows.map((r) => {
-            const busy = props.workingId === r.id;
-            const badge = statusBadge(r.status);
-            const providerLabel = r.providerName || r.providerEmail || r.providerId;
-            return (
-              <tr
-                key={r.id}
-                className={[
-                  busy ? 'opacity-70' : '',
-                  !busy ? 'cursor-pointer hover:bg-gray-50' : '',
-                ].join(' ')}
-                onClick={(e) => {
-                  if (busy) return;
-                  const target = e.target as HTMLElement | null;
-                  if (target?.closest('a,button')) return;
-                  props.onViewDetails(r);
-                }}
+    <>
+      {/* Mobile: cards */}
+      <div className="sm:hidden divide-y divide-gray-200 bg-white">
+        {rows.map((r) => {
+          const busy = props.workingId === r.id;
+          const badge = statusBadge(r.status);
+          const providerLabel = r.providerName || r.providerEmail || r.providerId;
+          const canApprove =
+            props.actionVariant === 'requested' &&
+            (normalizeStatus(r.status) === 'pending' || normalizeStatus(r.status) === 'pending_admin_review');
+          const canMarkPaid =
+            props.actionVariant === 'approved' &&
+            (normalizeStatus(r.status) === 'approved' || normalizeStatus(r.status) === 'processing');
+
+          return (
+            <div key={r.id} className={['px-4 py-4', busy ? 'opacity-70' : ''].join(' ')}>
+              <button
+                type="button"
+                onClick={() => props.onViewDetails(r)}
+                disabled={busy}
+                className="w-full text-left"
               >
-                <td className="px-4 py-3">
-                  <div className="text-sm font-medium text-gray-900 truncate">
-                    <HighlightedText text={providerLabel} tokens={props.highlightTokens} />
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-gray-900 break-words">
+                      <HighlightedText text={providerLabel} tokens={props.highlightTokens} />
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600 break-words">
+                      <HighlightedText text={r.providerEmail || '—'} tokens={props.highlightTokens} />
+                    </div>
+                    <div className="mt-1 text-xs font-mono text-gray-600 break-all">
+                      <HighlightedText text={String(r.id || '')} tokens={props.highlightTokens} />
+                    </div>
                   </div>
-                  <div className="mt-1">
-                    <Link
-                      href={`/admin/users/${encodeURIComponent(String(r.providerId || ''))}`}
-                      className="text-xs font-semibold text-indigo-700 hover:text-indigo-900"
-                    >
-                      View provider profile
-                    </Link>
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold text-gray-900">
+                      <HighlightedText text={money(Number(r.amountCents || 0))} tokens={props.highlightTokens} />
+                    </div>
+                    <div className="mt-1">
+                      <span className={['inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold', badge.className].join(' ')}>
+                        {badge.label}
+                      </span>
+                    </div>
                   </div>
-                  <div className="mt-1 text-xs text-gray-600 font-mono truncate">
-                    <HighlightedText text={String(r.id || '')} tokens={props.highlightTokens} />
+                </div>
+
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-gray-600">
+                  <div>
+                    <div className="text-[11px] font-semibold text-gray-500">Method</div>
+                    <div className="mt-0.5 break-words">
+                      <HighlightedText text={r.payoutMethod || '—'} tokens={props.highlightTokens} />
+                    </div>
                   </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <div className="truncate">
-                    <HighlightedText text={r.providerEmail || '—'} tokens={props.highlightTokens} />
+                  <div>
+                    <div className="text-[11px] font-semibold text-gray-500">Destination</div>
+                    <div className="mt-0.5 break-words">
+                      <HighlightedText text={r.payoutDestination || '—'} tokens={props.highlightTokens} />
+                    </div>
                   </div>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <HighlightedText text={money(Number(r.amountCents || 0))} tokens={props.highlightTokens} />
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <HighlightedText text={r.payoutMethod || '—'} tokens={props.highlightTokens} />
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <HighlightedText text={r.payoutDestination || '—'} tokens={props.highlightTokens} />
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(props.getDateValue(r) || '—')}</td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <span className={['inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold', badge.className].join(' ')}>
-                    {badge.label}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-700">
-                  <div className="flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        props.onViewDetails(r);
-                      }}
-                      disabled={busy}
-                      className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      View Payout Details
-                    </button>
-                    {props.actionVariant === 'requested' ? (
+                </div>
+
+                <div className="mt-2 text-xs text-gray-600">
+                  <span className="text-[11px] font-semibold text-gray-500">{props.dateColumnLabel}: </span>
+                  {formatDateTime(props.getDateValue(r) || '—')}
+                </div>
+              </button>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href={`/admin/users/${encodeURIComponent(String(r.providerId || ''))}`}
+                  className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200 hover:bg-indigo-50"
+                >
+                  Provider profile
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => props.onViewDetails(r)}
+                  disabled={busy}
+                  className="rounded-md bg-white px-3 py-2 text-xs font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  View payout details
+                </button>
+                {props.actionVariant === 'requested' ? (
+                  <button
+                    type="button"
+                    onClick={() => props.onApprove(String(r.id || ''))}
+                    disabled={busy || !canApprove}
+                    className="rounded-md bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    Approve
+                  </button>
+                ) : null}
+                {props.actionVariant === 'approved' ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ok = window.confirm('Confirm you have sent this payout manually.');
+                      if (!ok) return;
+                      props.onMarkPaid(String(r.id || ''));
+                    }}
+                    disabled={busy || !canMarkPaid}
+                    className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    Mark paid
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+
+        {rows.length === 0 ? (
+          <div className="px-4 py-10 text-center text-sm text-gray-600">{props.emptyText}</div>
+        ) : null}
+      </div>
+
+      {/* Desktop/tablet: table */}
+      <div className="hidden sm:block overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Provider</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Email</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Amount</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Payout Method</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Destination</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">{props.dateColumnLabel}</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600">Status</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 bg-white">
+            {rows.map((r) => {
+              const busy = props.workingId === r.id;
+              const badge = statusBadge(r.status);
+              const providerLabel = r.providerName || r.providerEmail || r.providerId;
+              return (
+                <tr
+                  key={r.id}
+                  className={[busy ? 'opacity-70' : '', !busy ? 'cursor-pointer hover:bg-gray-50' : ''].join(' ')}
+                  onClick={(e) => {
+                    if (busy) return;
+                    const target = e.target as HTMLElement | null;
+                    if (target?.closest('a,button')) return;
+                    props.onViewDetails(r);
+                  }}
+                >
+                  <td className="px-4 py-3">
+                    <div className="text-sm font-medium text-gray-900 truncate">
+                      <HighlightedText text={providerLabel} tokens={props.highlightTokens} />
+                    </div>
+                    <div className="mt-1">
+                      <Link
+                        href={`/admin/users/${encodeURIComponent(String(r.providerId || ''))}`}
+                        className="text-xs font-semibold text-indigo-700 hover:text-indigo-900"
+                      >
+                        View provider profile
+                      </Link>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600 font-mono truncate">
+                      <HighlightedText text={String(r.id || '')} tokens={props.highlightTokens} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    <div className="truncate">
+                      <HighlightedText text={r.providerEmail || '—'} tokens={props.highlightTokens} />
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    <HighlightedText text={money(Number(r.amountCents || 0))} tokens={props.highlightTokens} />
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    <HighlightedText text={r.payoutMethod || '—'} tokens={props.highlightTokens} />
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    <HighlightedText text={r.payoutDestination || '—'} tokens={props.highlightTokens} />
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(props.getDateValue(r) || '—')}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    <span className={['inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold', badge.className].join(' ')}>
+                      {badge.label}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">
+                    <div className="flex items-center justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => {
-                          props.onApprove(String(r.id || ''));
+                          props.onViewDetails(r);
                         }}
-                        disabled={busy || !(normalizeStatus(r.status) === 'pending' || normalizeStatus(r.status) === 'pending_admin_review')}
-                        className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                        disabled={busy}
+                        className="rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 ring-1 ring-inset ring-gray-300 hover:bg-gray-50 disabled:opacity-50"
                       >
-                        Approve Payout
+                        View Payout Details
                       </button>
-                    ) : null}
-                    {props.actionVariant === 'approved' ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const ok = window.confirm('Confirm you have sent this payout manually.');
-                          if (!ok) return;
-                          props.onMarkPaid(String(r.id || ''));
-                        }}
-                        disabled={busy || !(normalizeStatus(r.status) === 'approved' || normalizeStatus(r.status) === 'processing')}
-                        className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        Mark Paid
-                      </button>
-                    ) : null}
-                  </div>
+                      {props.actionVariant === 'requested' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            props.onApprove(String(r.id || ''));
+                          }}
+                          disabled={busy || !(normalizeStatus(r.status) === 'pending' || normalizeStatus(r.status) === 'pending_admin_review')}
+                          className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Approve Payout
+                        </button>
+                      ) : null}
+                      {props.actionVariant === 'approved' ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const ok = window.confirm('Confirm you have sent this payout manually.');
+                            if (!ok) return;
+                            props.onMarkPaid(String(r.id || ''));
+                          }}
+                          disabled={busy || !(normalizeStatus(r.status) === 'approved' || normalizeStatus(r.status) === 'processing')}
+                          className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          Mark Paid
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-600">
+                  {props.emptyText}
                 </td>
               </tr>
-            );
-          })}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-600">
-                {props.emptyText}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

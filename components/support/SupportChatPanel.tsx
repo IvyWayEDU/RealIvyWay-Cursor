@@ -31,9 +31,9 @@ export default function SupportChatPanel(props: {
   return (
     <div
       className={[
-        'fixed z-[60] bottom-[76px] right-5',
-        'w-[360px] max-w-[calc(100vw-2.5rem)]',
-        'h-[520px] max-h-[70vh]',
+        'fixed z-[60] bottom-[calc(76px+env(safe-area-inset-bottom))] right-3 sm:right-5',
+        'w-[min(360px,calc(100vw-1.5rem))]',
+        'h-[min(520px,calc(100svh-140px))] max-h-[calc(100svh-140px)]',
         'rounded-2xl bg-white border border-gray-200 shadow-xl shadow-black/10',
         'overflow-hidden',
         'transition-all duration-200',
@@ -67,7 +67,7 @@ export default function SupportChatPanel(props: {
       </div>
 
       {/* Body */}
-      <div className="flex flex-col h-[calc(520px-56px)] max-h-[calc(70vh-56px)]">
+      <div className="flex flex-col h-[calc(100%-56px)]">
         {messages.length === 0 && (
           <div className="bg-gray-50 pt-4">
             <div className="px-4">

@@ -120,12 +120,15 @@ export default async function AdminUserDetailPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">User</h1>
           <p className="mt-1 text-sm text-gray-600 font-mono break-all">{user.id}</p>
         </div>
-        <Link href="/admin/users" className="text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+        <Link
+          href="/admin/users"
+          className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+        >
           Back to Users
         </Link>
       </div>

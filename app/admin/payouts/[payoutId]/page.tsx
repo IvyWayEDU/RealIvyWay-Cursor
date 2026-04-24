@@ -101,14 +101,17 @@ export default async function AdminPayoutRecordPage(props: { params: { payoutId:
           <h1 className="text-3xl font-bold text-gray-900">Payout Record</h1>
           <div className="mt-2 text-sm text-gray-600 font-mono break-all">{pr.id}</div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <Link
             href="#payment-timeline"
-            className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+            className="w-full sm:w-auto inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-2.5 sm:py-2 text-sm font-semibold text-white hover:bg-indigo-700"
           >
             View Payment Timeline
           </Link>
-          <Link href="/admin/payouts" className="text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+          <Link
+            href="/admin/payouts"
+            className="w-full sm:w-auto inline-flex items-center justify-center text-sm font-semibold text-indigo-700 hover:text-indigo-900"
+          >
             Back to Payouts
           </Link>
         </div>

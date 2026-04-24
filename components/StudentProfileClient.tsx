@@ -89,14 +89,14 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
           <div className="mt-4">
             <Link
               href="/change-password"
-              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
             >
               Change Password
             </Link>
           </div>
         </div>
 
-        <div className="p-6 space-y-8">
+        <div className="p-5 sm:p-6 space-y-8">
           {saveMessage && (
             <div
               className={`rounded-md p-4 ${
@@ -112,7 +112,7 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
           )}
 
           {/* Profile Photo */}
-          <div className="flex items-center gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-6">
             <div className="flex-shrink-0">
               {profilePhotoUrl ? (
                 <img
@@ -139,7 +139,7 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors"
+                className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-3 sm:py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors"
               >
                 Change photo
               </button>
@@ -186,7 +186,7 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="px-6 py-2.5 bg-[#0088CB] text-white font-medium rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 sm:py-2.5 bg-[#0088CB] text-white font-medium rounded-md hover:bg-[#0077B3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving...' : 'Save / Update'}
             </button>
@@ -195,7 +195,7 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
       </div>
 
       {/* Billing */}
-      <div className="bg-white rounded-xl shadow p-6 mt-6">
+      <div className="bg-white rounded-xl shadow p-5 sm:p-6 mt-6">
         <h2 className="text-xl font-semibold mb-2">Billing & Payments</h2>
         <p className="text-sm text-gray-600 mb-4">
           Manage your payment methods, subscriptions, and receipts.
@@ -228,7 +228,7 @@ export default function StudentProfileClient({ initialUser }: StudentProfileClie
             }
           }}
           disabled={billingLoading}
-          className="bg-[#0088cb] text-white px-5 py-2 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full sm:w-auto bg-[#0088cb] text-white px-5 py-3 sm:py-2 rounded-lg disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {billingLoading ? 'Opening…' : 'Manage Billing'}
         </button>
