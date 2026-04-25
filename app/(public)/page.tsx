@@ -3,24 +3,298 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useRef } from 'react';
-import SignupPreview from '@/components/SignupPreview';
 import SchoolCarousel from '@/components/SchoolCarousel';
+import FAQAccordion from '@/components/FAQAccordion';
 import { getDashboardRoute } from '@/lib/auth/utils';
 import { Session } from '@/lib/auth/types';
+import {
+  ArrowRight,
+  BookOpen,
+  BrainCircuit,
+  CalendarCheck,
+  GraduationCap,
+  Map,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
+
+function ScenicHeroBackdrop() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      {/* Base: rich IvyWay blue → white fade */}
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,#052a48_0%,#063a63_9%,#074c7b_18%,#0b5f96_34%,#1f86c1_56%,#bfeaff_82%,#ffffff_100%)]" />
+
+      {/* Top blend bridge (prevents “dark slab → sudden shift” impression) */}
+      <div className="absolute inset-x-0 top-0 h-[420px] bg-[linear-gradient(180deg,rgba(5,42,72,0.30)_0%,rgba(5,42,72,0.14)_35%,rgba(11,95,150,0.00)_100%)]" />
+
+      {/* Soft atmospheric glows */}
+      <div className="absolute -top-56 left-1/2 h-[820px] w-[820px] -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
+      <div className="absolute -top-44 right-[-260px] h-[720px] w-[720px] rounded-full bg-[#0088CB]/18 blur-3xl" />
+      <div className="absolute top-24 left-[-260px] h-[640px] w-[640px] rounded-full bg-[#5bbcff]/12 blur-3xl" />
+
+      {/* Scenic abstract landscape (vector, not “AI art”) */}
+      <svg
+        className="absolute left-1/2 top-[22px] h-[720px] w-[1400px] -translate-x-1/2 opacity-[0.92] sm:top-[10px] sm:h-[800px]"
+        viewBox="0 0 1400 760"
+        fill="none"
+      >
+        <defs>
+          <linearGradient id="ivywaySky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#ffffff" stopOpacity="0.30" />
+            <stop offset="0.38" stopColor="#ffffff" stopOpacity="0.14" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="ivywayRidge1" x1="120" y1="220" x2="1240" y2="640">
+            <stop offset="0" stopColor="#EAF6FF" stopOpacity="0.45" />
+            <stop offset="0.55" stopColor="#BFE8FF" stopOpacity="0.22" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0.06" />
+          </linearGradient>
+          <linearGradient id="ivywayRidge2" x1="120" y1="260" x2="1240" y2="700">
+            <stop offset="0" stopColor="#CDEEFF" stopOpacity="0.20" />
+            <stop offset="0.65" stopColor="#7FD2FF" stopOpacity="0.12" />
+            <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          <filter id="softBlur" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="6" />
+          </filter>
+        </defs>
+
+        {/* Horizon haze */}
+        <rect x="0" y="0" width="1400" height="460" fill="url(#ivywaySky)" />
+
+        {/* Far ridges */}
+        <path
+          d="M0 430C120 380 220 345 335 360C430 372 520 420 640 402C760 384 870 310 1020 304C1170 298 1260 362 1400 410V760H0V430Z"
+          fill="url(#ivywayRidge2)"
+          filter="url(#softBlur)"
+        />
+        <path
+          d="M0 470C160 410 260 404 360 420C470 438 560 506 690 486C820 466 940 365 1080 350C1210 336 1290 398 1400 452V760H0V470Z"
+          fill="url(#ivywayRidge1)"
+        />
+
+        {/* Foreground silhouette hint */}
+        <path
+          d="M0 560C180 520 300 560 420 598C560 642 700 664 860 640C1030 614 1180 528 1400 540V760H0V560Z"
+          fill="#061f33"
+          opacity="0.10"
+        />
+      </svg>
+
+      {/* Top edge gloss */}
+      <div className="absolute inset-x-0 top-0 h-24 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),rgba(255,255,255,0))]" />
+
+      {/* Bottom wash to avoid any hard “cut line” into white sections */}
+      <div className="absolute inset-x-0 bottom-0 h-56 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,0.70)_45%,#ffffff_100%)]" />
+    </div>
+  );
+}
+
+function ProductShowcase() {
+  return (
+    <div className="relative mx-auto mt-10 w-full max-w-5xl sm:mt-12">
+      <div className="absolute inset-0 -z-10 rounded-[32px] bg-[radial-gradient(1200px_600px_at_50%_-10%,rgba(0,136,203,0.35),rgba(255,255,255,0))]" />
+      <div className="relative overflow-hidden rounded-[32px] border border-white/12 bg-white/6 shadow-[0_28px_80px_rgba(3,12,26,0.32)] ring-1 ring-white/10 backdrop-blur-xl">
+        {/* Window top bar */}
+        <div className="flex items-center justify-between border-b border-white/10 bg-white/5 px-5 py-4">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-white/35" />
+            <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
+            <span className="h-2.5 w-2.5 rounded-full bg-white/20" />
+          </div>
+          <div className="hidden sm:flex items-center gap-2 text-xs font-semibold tracking-wide text-white/70">
+            <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1">Dashboard</span>
+            <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1">Booking</span>
+            <span className="rounded-full border border-white/12 bg-white/5 px-3 py-1">IvyWay AI</span>
+          </div>
+          <div className="text-xs font-semibold text-white/65">ivywayedu.com</div>
+        </div>
+
+        {/* “Real UI” layout mock */}
+        <div className="grid grid-cols-1 gap-0 md:grid-cols-12">
+          <div className="hidden md:block md:col-span-3 border-r border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.02))] p-5">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-2xl bg-white/10 ring-1 ring-white/10" />
+              <div className="min-w-0">
+                <div className="h-2.5 w-28 rounded-full bg-white/18" />
+                <div className="mt-2 h-2 w-20 rounded-full bg-white/10" />
+              </div>
+            </div>
+            <div className="mt-6 space-y-2">
+              {['Overview', 'Sessions', 'Booking', 'IvyWay AI', 'Progress'].map((label, i) => (
+                <div
+                  key={label}
+                  className={[
+                    'flex items-center justify-between rounded-2xl px-3 py-2.5',
+                    i === 2
+                      ? 'bg-white/10 ring-1 ring-white/10'
+                      : 'bg-white/0 ring-1 ring-transparent',
+                  ].join(' ')}
+                >
+                  <div className="h-2.5 w-24 rounded-full bg-white/18" />
+                  <div className="h-2.5 w-2.5 rounded-full bg-white/12" />
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 h-9 w-9 rounded-2xl bg-[#0088CB]/25 ring-1 ring-[#5bbcff]/30" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-white">Next session</div>
+                  <div className="mt-1 h-2 w-24 rounded-full bg-white/16" />
+                  <div className="mt-2 h-2 w-32 rounded-full bg-white/10" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="md:col-span-9 p-5 sm:p-6">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+              <div className="lg:col-span-7">
+                <div className="rounded-3xl border border-white/10 bg-white/5 p-5 sm:p-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-white">Book tutoring</div>
+                      <div className="mt-1 text-xs text-white/70">
+                        Verified providers by subject, availability, and fit.
+                      </div>
+                    </div>
+                    <div className="hidden sm:block rounded-full bg-white/8 px-3 py-1 text-xs font-semibold text-white/80 ring-1 ring-white/10">
+                      This week
+                    </div>
+                  </div>
+                  <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {[
+                      { title: 'AP Calculus', meta: 'Mon • 6:00pm' },
+                      { title: 'SAT Math', meta: 'Wed • 7:30pm' },
+                      { title: 'Chemistry', meta: 'Thu • 5:15pm' },
+                      { title: 'Essay review', meta: 'Fri • 4:00pm' },
+                    ].map((c) => (
+                      <div
+                        key={c.title}
+                        className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.03))] p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-white">{c.title}</div>
+                            <div className="mt-1 text-xs text-white/70">{c.meta}</div>
+                          </div>
+                          <div className="h-9 w-9 rounded-2xl bg-white/8 ring-1 ring-white/10" />
+                        </div>
+                        <div className="mt-3 h-2 w-3/4 rounded-full bg-white/12" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-5">
+                <div className="rounded-3xl border border-white/10 bg-white/5 p-5 sm:p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-white">IvyWay AI</div>
+                    <div className="rounded-full bg-[#0088CB]/18 px-3 py-1 text-xs font-semibold text-white/90 ring-1 ring-[#5bbcff]/25">
+                      Live
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs text-white/70">
+                    Flashcards, quizzes, planning, and problem-solving—between sessions.
+                  </div>
+                  <div className="mt-5 space-y-3">
+                    <div className="rounded-3xl border border-white/10 bg-white/6 p-4">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-2xl bg-white/10 ring-1 ring-white/10" />
+                        <div className="h-2.5 w-32 rounded-full bg-white/16" />
+                      </div>
+                      <div className="mt-3 h-2 w-full rounded-full bg-white/10" />
+                      <div className="mt-2 h-2 w-5/6 rounded-full bg-white/10" />
+                      <div className="mt-2 h-2 w-2/3 rounded-full bg-white/10" />
+                    </div>
+                    <div className="rounded-3xl border border-white/10 bg-[linear-gradient(180deg,rgba(0,136,203,0.20),rgba(255,255,255,0.04))] p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="h-2.5 w-28 rounded-full bg-white/20" />
+                        <div className="h-8 w-16 rounded-full bg-white/10 ring-1 ring-white/10" />
+                      </div>
+                      <div className="mt-4 grid grid-cols-3 gap-2">
+                        <div className="h-16 rounded-2xl bg-white/8 ring-1 ring-white/10" />
+                        <div className="h-16 rounded-2xl bg-white/6 ring-1 ring-white/10" />
+                        <div className="h-16 rounded-2xl bg-white/7 ring-1 ring-white/10" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-4 rounded-3xl border border-white/10 bg-white/5 px-5 py-4">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-white">Sessions preview</div>
+                <div className="mt-1 text-xs text-white/70">
+                  Notes, next steps, and progress in one clean timeline.
+                </div>
+              </div>
+              <div className="hidden sm:flex items-center gap-2">
+                <div className="h-9 w-28 rounded-2xl bg-white/8 ring-1 ring-white/10" />
+                <div className="h-9 w-10 rounded-2xl bg-white/8 ring-1 ring-white/10" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  const [showFloatingCta, setShowFloatingCta] = useState(false);
+  const [floatingCtaVariant, setFloatingCtaVariant] = useState<'light' | 'brand'>('light');
   const menuRef = useRef<HTMLDivElement>(null);
+  const whiteSectionsStartRef = useRef<HTMLDivElement>(null);
+  const bottomBlueStartRef = useRef<HTMLElement>(null);
+  const sectionTopsRef = useRef<{ whiteStart: number; bottomBlueStart: number }>({
+    whiteStart: 0,
+    bottomBlueStart: Number.POSITIVE_INFINITY,
+  });
 
   useEffect(() => {
-    const handleScroll = () => {
-      setShowScrollTop(window.scrollY > 300);
+    const computeSectionTops = () => {
+      sectionTopsRef.current.whiteStart = whiteSectionsStartRef.current
+        ? whiteSectionsStartRef.current.getBoundingClientRect().top + window.scrollY
+        : 0;
+      sectionTopsRef.current.bottomBlueStart = bottomBlueStartRef.current
+        ? bottomBlueStartRef.current.getBoundingClientRect().top + window.scrollY
+        : Number.POSITIVE_INFINITY;
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const handleScroll = () => {
+      const y = window.scrollY;
+      setShowScrollTop(y > 300);
+      setShowFloatingCta(y > 140);
+
+      // Use a small forward-looking probe so the CTA feels like it transitions
+      // as you enter each background region (premium, not abrupt).
+      const probeY = y + 140;
+      const { whiteStart, bottomBlueStart } = sectionTopsRef.current;
+      const nextVariant: 'light' | 'brand' =
+        probeY >= bottomBlueStart - 120 ? 'light' : probeY >= whiteStart ? 'brand' : 'light';
+
+      setFloatingCtaVariant((prev) => (prev === nextVariant ? prev : nextVariant));
+    };
+
+    computeSectionTops();
+    handleScroll();
+    // Ensure we recalc after initial layout settles (fonts/images).
+    const t = window.setTimeout(computeSectionTops, 700);
+
+    window.addEventListener('resize', computeSectionTops);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('resize', computeSectionTops);
+      window.removeEventListener('scroll', handleScroll);
+    };
   }, []);
 
   // Handle smooth scrolling when navigating to page with hash
@@ -56,7 +330,7 @@ export default function Home() {
             setSession(parsedSession);
           }
         }
-      } catch (error) {
+      } catch {
         setSession(null);
       }
     };
@@ -95,413 +369,597 @@ export default function Home() {
   };
 
   const dashboardLink = getDashboardLink();
+  const primaryCtaHref = dashboardLink ?? '/auth/register';
+  const primaryCtaLabel = dashboardLink ? 'Go to Dashboard' : 'Get Started';
 
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const heroNavItemClass =
+    'inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold text-white/90 ' +
+    'transition-all duration-200 ease-out ' +
+    'hover:bg-white/10 hover:ring-1 hover:ring-white/25 hover:backdrop-blur-xl hover:text-white ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40';
+
   return (
-    <div className="bg-white">
-      {/* Hero Section */}
-      <section className="relative w-full min-h-[100svh] sm:min-h-[110vh] flex items-center">
-        {/* Hero Image */}
-        <div className="absolute inset-0">
-          <Image
-            src="/images/ivyway-hero.png"
-            alt="IvyWay students"
-            fill
-            priority
-            className="object-cover"
-          />
-        </div>
+    <div className="text-gray-950">
+      {/* Floating CTA (only sticky element on scroll) */}
+      <div
+        className={[
+          'fixed right-4 z-[60] transition-all duration-300 ease-out',
+          'top-[calc(env(safe-area-inset-top)+16px)] sm:right-6 sm:top-[calc(env(safe-area-inset-top)+20px)]',
+          showFloatingCta ? 'opacity-100 translate-y-0' : 'pointer-events-none opacity-0 -translate-y-2',
+        ].join(' ')}
+      >
+        <Link
+          href={primaryCtaHref}
+          className={[
+            'inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold',
+            'transition-colors duration-500 ease-out transition-shadow',
+            floatingCtaVariant === 'brand'
+              ? 'bg-[#0088CB] text-white shadow-[0_18px_60px_rgba(0,136,203,0.35)] hover:bg-[#0077B3]'
+              : 'bg-white text-[#06233A] shadow-[0_18px_60px_rgba(3,12,26,0.22)] hover:bg-white/95',
+          ].join(' ')}
+        >
+          {primaryCtaLabel}
+        </Link>
+      </div>
 
-        {/* Cinematic gradient overlay for depth (kept behind hero copy + logo glass panel) */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-black/70 z-[1]" />
+      {/* SECTION 2 — HERO (scenic abstract background) */}
+      <section className="relative pt-[calc(env(safe-area-inset-top)+20px)] sm:pt-[calc(env(safe-area-inset-top)+24px)]">
+        <ScenicHeroBackdrop />
 
-        {/* Hero Header - Absolute positioning, positioned relative to hero container */}
-        <nav className="absolute top-0 left-0 right-0 z-40 bg-transparent pt-[env(safe-area-inset-top)]">
-          <div className="flex h-16 sm:h-20 items-center justify-between w-full">
-            {/* Logo */}
-            <div className="flex items-center pl-4 sm:pl-6 lg:pl-8">
-              <Link href={session ? getDashboardRoute(session.roles) : "/"} className="flex items-center">
+        {/* Corner softeners (prevents any “boxed/clipped” edge feel under the header) */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-[220px] bg-[radial-gradient(520px_240px_at_0%_0%,rgba(0,136,203,0.26),rgba(0,136,203,0)_72%)]"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-[220px] bg-[radial-gradient(520px_240px_at_100%_0%,rgba(0,136,203,0.26),rgba(0,136,203,0)_72%)]"
+        />
+
+        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          {/* NAVBAR — rebuilt cleanly inside hero canvas */}
+          <div className="absolute inset-x-0 top-0 z-40 pt-3 sm:pt-4">
+            <div className="flex h-16 items-center justify-between sm:h-[72px]">
+              <Link href={dashboardLink ?? '/'} className="flex items-center pl-4 sm:pl-6">
                 <Image
-                  src="/ivyway-landing-logo.png"
+                  src="/ivyway-landing-logo-2.png"
                   alt="IvyWay"
-                  width={160}
-                  height={58}
-                  className="h-12 sm:h-14 md:h-16 w-auto"
+                  width={1536}
+                  height={1024}
+                  sizes="(min-width: 1024px) 320px, (min-width: 768px) 280px, 220px"
+                  className="h-[60px] w-auto sm:h-[68px] md:h-[76px] drop-shadow-[0_12px_34px_rgba(3,12,26,0.35)]"
                   priority
                 />
               </Link>
-            </div>
-            
-            {/* Menu Button and Auth Buttons */}
-            <div className="relative flex items-center gap-3 pr-4 sm:pr-6 lg:pr-8" ref={menuRef}>
-              {/* Log in and Sign up buttons - only show when not logged in */}
-              {!session && (
-                <div className="hidden sm:flex items-center gap-3">
-                  <Link
-                    href="/auth/login"
-                    className="rounded-md px-4 py-2 text-sm font-semibold text-white ring-1 ring-inset ring-white/30 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-white/50 transition-colors"
-                  >
-                    Log in
+
+              <div className="hidden md:flex flex-1 justify-center">
+                <nav className="flex items-center gap-2 lg:gap-3">
+                  <button onClick={() => scrollToSection('tutoring')} className={heroNavItemClass}>
+                    Tutoring
+                  </button>
+                  <button onClick={() => scrollToSection('college-counseling')} className={heroNavItemClass}>
+                    College Counseling
+                  </button>
+                  <button onClick={() => scrollToSection('virtual-tours')} className={heroNavItemClass}>
+                    Virtual Tours
+                  </button>
+                  <button onClick={() => scrollToSection('ivyway-ai')} className={heroNavItemClass}>
+                    IvyWay AI
+                  </button>
+                  <Link href="/pricing" className={heroNavItemClass}>
+                    Pricing
                   </Link>
-                  <Link
-                    href="/auth/register"
-                    className="rounded-md px-4 py-2 text-sm font-semibold text-white ring-1 ring-inset ring-white/30 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-white/50 transition-colors"
-                  >
-                    Sign up
-                  </Link>
-                </div>
-              )}
-              <button
-                onClick={() => setShowMenu(!showMenu)}
-                className="inline-flex items-center justify-center rounded-md p-2 text-white hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/50 transition-colors"
-                aria-expanded={showMenu}
-                aria-label="Toggle menu"
-              >
-                {!showMenu ? (
-                  <svg
-                    className="block h-6 w-6"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                ) : (
-                  <svg
-                    className="block h-6 w-6"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-              </button>
-              
-              {/* Dropdown Menu */}
-              {showMenu && (
-                <div className="absolute top-full right-0 mt-2 w-64 bg-white/10 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20 z-50">
-                  <div className="py-2 space-y-1">
-                    <Link
-                      href="/"
-                      onClick={() => setShowMenu(false)}
-                      className="block mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                    >
-                      Home
-                    </Link>
-                    <button
-                      onClick={() => scrollToSection('features')}
-                      className="block w-full text-left mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                    >
-                      Features
-                    </button>
-                    <button
-                      onClick={() => scrollToSection('how-it-works')}
-                      className="block w-full text-left mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                    >
-                      How It Works
-                    </button>
-                    <button
-                      onClick={() => scrollToSection('testimonials')}
-                      className="block w-full text-left mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                    >
-                      Testimonials
-                    </button>
-                    <Link
-                      href="/pricing"
-                      onClick={() => setShowMenu(false)}
-                      className="block mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                    >
-                      Pricing
-                    </Link>
-                    {!session && (
-                      <>
-                        <div className="border-t border-white/20 my-1"></div>
-                        <Link
-                          href="/auth/login"
-                          onClick={() => setShowMenu(false)}
-                          className="block mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                        >
-                          Log in
-                        </Link>
-                        <Link
-                          href="/auth/register"
-                          onClick={() => setShowMenu(false)}
-                          className="block mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                        >
-                          Sign up
-                        </Link>
-                      </>
-                    )}
-                    {session && dashboardLink && (
-                      <>
-                        <div className="border-t border-white/20 my-1"></div>
-                        <Link
-                          href={dashboardLink}
-                          onClick={() => setShowMenu(false)}
-                          className="block mx-2 px-3 py-2 text-sm font-medium text-white rounded-[10px] hover:text-[#0f8bff] hover:bg-white/10 transition-colors"
-                        >
-                          Dashboard
-                        </Link>
-                        <div className="px-5 py-2 text-xs text-white/70">{session.name}</div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </nav>
-        
-        {/* Content Overlay */}
-        <div className="relative w-full flex items-center z-20 pb-36">
-          <div className="w-full px-4 sm:px-6 lg:px-8">
-            <div className="max-w-3xl">
-              <h1 className="text-4xl font-bold tracking-tight text-white sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl leading-tight">
-                Build your future with <span style={{ color: '#5bbcff' }}>Ivy</span><span style={{ color: '#0b3c6f' }}>Way</span>
-              </h1>
-              <p className="mt-6 text-lg leading-8 text-white/95 sm:text-xl md:text-2xl max-w-2xl">
-                Personalized tutoring, college counseling, and AI powered learning built for student success.
-              </p>
-              <div className="mt-10 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <button onClick={() => scrollToSection('faq')} className={heroNavItemClass}>
+                    FAQ
+                  </button>
+                </nav>
+              </div>
+
+              <div className="relative flex items-center gap-3 pr-1 sm:pr-2" ref={menuRef}>
                 <Link
-                  href="/auth/register"
-                  className="rounded-md bg-[#0088CB] px-8 py-3.5 text-base font-semibold text-white shadow-lg hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
+                  href={primaryCtaHref}
+                  className="hidden sm:inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#06233A] shadow-[0_18px_50px_rgba(3,12,26,0.22)] hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
                 >
-                  Get Started Free
+                  {primaryCtaLabel}
                 </Link>
+
                 <button
-                  onClick={() => {
-                    const element = document.getElementById('how-it-works');
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }}
-                  className="rounded-md bg-white/10 backdrop-blur-sm px-6 py-3.5 text-base font-semibold text-white ring-1 ring-inset ring-white/30 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
+                  onClick={() => setShowMenu(!showMenu)}
+                  className="inline-flex items-center justify-center rounded-xl p-2 text-white/90 hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white/40 transition-colors md:hidden"
+                  aria-expanded={showMenu}
+                  aria-label="Toggle menu"
                 >
-                  How It Works
+                  {!showMenu ? (
+                    <svg className="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  ) : (
+                    <svg className="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
                 </button>
+
+                {showMenu && (
+                  <div className="absolute top-full right-0 mt-2 w-80 rounded-2xl border border-white/12 bg-[#071d31]/85 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl z-50 md:hidden">
+                    <div className="p-2 space-y-1">
+                      {[
+                        { id: 'tutoring', label: 'Tutoring' },
+                        { id: 'college-counseling', label: 'College Counseling' },
+                        { id: 'virtual-tours', label: 'Virtual Tours' },
+                        { id: 'ivyway-ai', label: 'IvyWay AI' },
+                        { id: 'faq', label: 'FAQ' },
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => scrollToSection(item.id)}
+                          className="block w-full text-left rounded-xl px-3 py-2.5 text-sm font-semibold text-white/90 hover:bg-white/10 hover:ring-1 hover:ring-white/22 hover:backdrop-blur-xl transition-all"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                      <Link
+                        href="/pricing"
+                        onClick={() => setShowMenu(false)}
+                        className="block rounded-xl px-3 py-2.5 text-sm font-semibold text-white/90 hover:bg-white/10 hover:ring-1 hover:ring-white/22 hover:backdrop-blur-xl transition-all"
+                      >
+                        Pricing
+                      </Link>
+
+                      <div className="my-2 border-t border-white/10" />
+
+                      <Link
+                        href={primaryCtaHref}
+                        onClick={() => setShowMenu(false)}
+                        className="flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-sm font-semibold text-[#06233A] shadow-sm hover:bg-white/95 transition-colors"
+                      >
+                        {primaryCtaLabel} <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        </div>
-        
-        {/* School logos overlay (premium glass) */}
-        <div className="hero-logos-overlay">
-          <p className="hero-logos-title">Trusted by Top Schools, Students, and Educators</p>
 
-          <div className="hero-logos-carousel">
-            <SchoolCarousel />
+          <div className="mx-auto max-w-4xl text-center pt-[124px] sm:pt-[144px]">
+            <h1 className="text-balance text-4xl font-semibold tracking-tight text-white sm:text-6xl md:text-7xl leading-[1.02]">
+              #1 Platform for Tutoring, College Counseling &amp; IvyWay AI
+            </h1>
+
+            <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-8 text-white/80 sm:text-xl">
+              Real mentors. Real tutors. Real college guidance.
+              <br className="hidden sm:block" />
+              Powered by IvyWay AI.
+            </p>
+
+            <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+              <Link
+                href={primaryCtaHref}
+                className="inline-flex items-center justify-center rounded-xl bg-white px-6 py-3 text-base font-semibold text-[#06233A] shadow-sm hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
+              >
+                {primaryCtaLabel}
+              </Link>
+              <Link
+                href="/pricing"
+                className="inline-flex items-center justify-center rounded-xl bg-white/0 px-6 py-3 text-base font-semibold text-white ring-1 ring-inset ring-white/22 hover:bg-white/10 transition-colors"
+              >
+                Explore Pricing
+              </Link>
+            </div>
+
+            <ProductShowcase />
+          </div>
+        </div>
+
+        {/* Fade into white below hero */}
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-[linear-gradient(180deg,rgba(255,255,255,0),rgba(255,255,255,0.80)_45%,#ffffff_100%)]" />
+      </section>
+
+      {/* SECTION 5 placeholder anchor: nav items map to “How it works” cards */}
+      <div id="tutoring" ref={whiteSectionsStartRef} className="scroll-mt-28" />
+
+      {/* SECTION 3 — HOW IVYWAY WORKS (Cluely-style premium cards) */}
+      <section className="bg-white py-20 sm:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold text-[#0088CB]">How IvyWay works</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 sm:text-4xl">
+              How IvyWay helps students succeed
+            </h2>
+          </div>
+
+          <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className="group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
+              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_20%_10%,rgba(0,136,203,0.12),rgba(255,255,255,0))] opacity-90" />
+              <div className="relative">
+                <div className="flex items-start justify-between gap-6">
+                  <div>
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <BookOpen className="h-4 w-4 text-[#0088CB]" />
+                      IvyWay connects students with real tutors
+                    </div>
+                    <p className="mt-3 text-base leading-7 text-gray-600">
+                      Book tutoring by subject with verified providers from top schools.
+                    </p>
+                  </div>
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
+                    <CalendarCheck className="h-5 w-5 text-[#0088CB]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="college-counseling" className="scroll-mt-28 group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
+              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_85%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))] opacity-90" />
+              <div className="relative">
+                <div className="flex items-start justify-between gap-6">
+                  <div>
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <GraduationCap className="h-4 w-4 text-[#0088CB]" />
+                      College counseling from students already there
+                    </div>
+                    <p className="mt-3 text-base leading-7 text-gray-600">
+                      Get real admissions insight from mentors attending your target schools.
+                    </p>
+                  </div>
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
+                    <ShieldCheck className="h-5 w-5 text-[#0088CB]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div id="virtual-tours" className="scroll-mt-28 group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
+              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_15%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))] opacity-90" />
+              <div className="relative">
+                <div className="flex items-start justify-between gap-6">
+                  <div>
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <Map className="h-4 w-4 text-[#0088CB]" />
+                      Virtual campus tours
+                    </div>
+                    <p className="mt-3 text-base leading-7 text-gray-600">
+                      Explore campuses with real students—so your shortlist feels real before you commit.
+                    </p>
+                  </div>
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
+                    <Map className="h-5 w-5 text-[#0088CB]" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
+              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_85%_10%,rgba(0,136,203,0.12),rgba(255,255,255,0))] opacity-90" />
+              <div className="relative">
+                <div className="flex items-start justify-between gap-6">
+                  <div>
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
+                      <BrainCircuit className="h-4 w-4 text-[#0088CB]" />
+                      IvyWay AI support
+                    </div>
+                    <p className="mt-3 text-base leading-7 text-gray-600">
+                      Instant practice, planning, and feedback that reinforces what happens in sessions.
+                    </p>
+                  </div>
+                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
+                    <Sparkles className="h-5 w-5 text-[#0088CB]" />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Fade into the next section */}
-      <div className="h-16 bg-gradient-to-b from-black/70 to-white" />
-      {/* Features Section */}
-      <div id="features" className="bg-gray-50 py-32">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      {/* SECTION 4 — IVYWAY AI (premium minimal showcase) */}
+      <section id="ivyway-ai" className="scroll-mt-28 bg-white py-20 sm:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl text-center">
-            <h2 className="text-4xl font-bold tracking-tight text-black sm:text-5xl">
-              Everything you need to succeed
+            <p className="text-sm font-semibold text-[#0088CB]">IvyWay AI</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 sm:text-4xl">
+              Instant academic help with IvyWay AI
             </h2>
-            <p className="mt-4 text-xl leading-8 text-gray-600">
-              A complete platform built for modern learning
+            <p className="mt-5 text-lg leading-8 text-gray-600">
+              Your AI tutor for studying, planning, problem solving, flashcards, quizzes, and smarter learning.
             </p>
           </div>
-          <div className="mx-auto mt-20 max-w-2xl sm:mt-24 lg:mt-28 lg:max-w-none">
-            <dl className="grid max-w-xl grid-cols-1 gap-x-12 gap-y-16 lg:max-w-none lg:grid-cols-2">
-              <div className="relative rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-                <div className="absolute top-6 left-6">
-                  <svg className="h-6 w-7 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" opacity="0.75" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M18 19.128v-.003c0-1.113-.285-2.16-.786-3.07M18 19.128v.106A12.318 12.318 0 0111.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M15 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" transform="translate(-3 0)" />
-                  </svg>
-                </div>
-                <dt className="mt-8 text-lg font-semibold leading-7 text-black">
-                  Unified Platform
-                </dt>
-                <dd className="mt-3 text-base leading-7 text-gray-600">
-                  Tutoring, counseling, mentorship, and AI tools all in one place
-                </dd>
-              </div>
-              <div className="relative rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-                <div className="absolute top-6 left-6">
-                  <svg className="h-6 w-6 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                  </svg>
-                </div>
-                <dt className="mt-8 text-lg font-semibold leading-7 text-black">
-                  Flexible Scheduling
-                </dt>
-                <dd className="mt-3 text-base leading-7 text-gray-600">
-                  Book or offer sessions any time that works for you
-                </dd>
-              </div>
-              <div className="relative rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-                <div className="absolute top-6 left-6">
-                  <svg className="h-6 w-6 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
-                  </svg>
-                </div>
-                <dt className="mt-8 text-lg font-semibold leading-7 text-black">
-                  Secure Payments
-                </dt>
-                <dd className="mt-3 text-base leading-7 text-gray-600">
-                  Stripe-powered payouts for providers and checkout for buyers
-                </dd>
-              </div>
-              <div className="relative rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-                <div className="absolute top-6 left-6">
-                  <svg className="h-6 w-6 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-                  </svg>
-                </div>
-                <dt className="mt-8 text-lg font-semibold leading-7 text-black">
-                  Global Access
-                </dt>
-                <dd className="mt-3 text-base leading-7 text-gray-600">
-                  Connect with educators and learners from anywhere in the world
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-      </div>
-      {/* How It Works Section */}
-      <div id="how-it-works" className="bg-white py-32">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-3xl text-center">
-            <h2 className="text-4xl font-bold tracking-tight text-black sm:text-5xl">
-              How it works
-            </h2>
-            <p className="mt-4 text-xl leading-8 text-gray-600">
-              Get started in three simple steps
-            </p>
-          </div>
-          <div className="mx-auto mt-20 max-w-4xl">
-            <div className="flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-4">
-              {/* Step 1 */}
-              <div className="flex flex-col items-center text-center flex-1">
-                <div className="flex h-16 w-16 items-center justify-center mb-4">
-                  <svg className="h-8 w-8 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold leading-7 text-black">
-                  Create your account
-                </h3>
-                <p className="mt-3 text-base leading-7 text-gray-600">
-                  Sign up in seconds with email or social login.
-                </p>
-              </div>
 
-              {/* Connector Line */}
-              <div className="hidden lg:block flex-shrink-0 w-16 h-0 border-t-2 border-dashed border-gray-300"></div>
-              <div className="lg:hidden w-0 h-16 border-l-2 border-dashed border-gray-300"></div>
-
-              {/* Step 2 */}
-              <div className="flex flex-col items-center text-center flex-1">
-                <div className="flex h-16 w-16 items-center justify-center mb-4">
-                  <svg className="h-8 w-8 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+          <div className="mx-auto mt-12 max-w-5xl">
+            <div className="relative overflow-hidden rounded-[32px] border border-gray-200 bg-[linear-gradient(180deg,#ffffff,#fbfdff)] shadow-[0_30px_90px_rgba(2,10,23,0.08)]">
+              <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_50%_0%,rgba(0,136,203,0.16),rgba(255,255,255,0))]" />
+              <div className="relative p-6 sm:p-8">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-950">AI Tutor workspace</div>
+                    <div className="mt-1 text-sm text-gray-600">
+                      Turn a topic into a plan, then practice until it sticks.
+                    </div>
+                  </div>
+                  <Link
+                    href={primaryCtaHref}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#0088CB] px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] transition-colors"
+                  >
+                    Try IvyWay AI <ArrowRight className="h-4 w-4" />
+                  </Link>
                 </div>
-                <h3 className="text-lg font-semibold leading-7 text-black">
-                  Choose your role
-                </h3>
-                <p className="mt-3 text-base leading-7 text-gray-600">
-                  Student, tutor, or counselor.
-                </p>
-              </div>
 
-              {/* Connector Line */}
-              <div className="hidden lg:block flex-shrink-0 w-16 h-0 border-t-2 border-dashed border-gray-300"></div>
-              <div className="lg:hidden w-0 h-16 border-l-2 border-dashed border-gray-300"></div>
+                <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-12">
+                  <div className="lg:col-span-7 rounded-3xl border border-gray-200 bg-white p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs font-semibold text-gray-900">Problem solving</div>
+                      <div className="rounded-full bg-[#0088CB]/10 px-3 py-1 text-xs font-semibold text-[#0088CB] ring-1 ring-[#0088CB]/15">
+                        Step-by-step
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="h-2 w-5/6 rounded-full bg-gray-100" />
+                      <div className="h-2 w-full rounded-full bg-gray-100" />
+                      <div className="h-2 w-2/3 rounded-full bg-gray-100" />
+                      <div className="mt-4 h-2 w-4/6 rounded-full bg-[#0088CB]/12" />
+                      <div className="h-2 w-full rounded-full bg-[#0088CB]/10" />
+                      <div className="h-2 w-3/4 rounded-full bg-[#0088CB]/10" />
+                    </div>
+                  </div>
 
-              {/* Step 3 */}
-              <div className="flex flex-col items-center text-center flex-1">
-                <div className="flex h-16 w-16 items-center justify-center mb-4">
-                  <svg className="h-8 w-8 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
+                  <div className="lg:col-span-5 grid grid-cols-1 gap-4">
+                    <div className="rounded-3xl border border-gray-200 bg-white p-5">
+                      <div className="text-xs font-semibold text-gray-900">Flashcards</div>
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <div className="h-20 rounded-2xl bg-gray-50 ring-1 ring-gray-200" />
+                        <div className="h-20 rounded-2xl bg-gray-50 ring-1 ring-gray-200" />
+                      </div>
+                      <div className="mt-3 h-2 w-3/5 rounded-full bg-gray-100" />
+                    </div>
+
+                    <div className="rounded-3xl border border-gray-200 bg-white p-5">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-semibold text-gray-900">Quiz mode</div>
+                        <div className="h-8 w-20 rounded-full bg-gray-50 ring-1 ring-gray-200" />
+                      </div>
+                      <div className="mt-4 space-y-2">
+                        <div className="h-2 w-11/12 rounded-full bg-gray-100" />
+                        <div className="h-2 w-10/12 rounded-full bg-gray-100" />
+                        <div className="mt-3 grid grid-cols-2 gap-3">
+                          <div className="h-10 rounded-2xl bg-gray-50 ring-1 ring-gray-200" />
+                          <div className="h-10 rounded-2xl bg-gray-50 ring-1 ring-gray-200" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <h3 className="text-lg font-semibold leading-7 text-black">
-                  Start learning or earning
-                </h3>
-                <p className="mt-3 text-base leading-7 text-gray-600">
-                  Book sessions or offer your expertise to help others succeed.
-                </p>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Testimonials Section */}
-      <div id="testimonials" className="bg-gray-50 py-32">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+      {/* SECTION 5 — TRUST / SOCIAL PROOF (keep logos; upgrade feature grid) */}
+      <section className="border-y border-gray-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
           <div className="mx-auto max-w-3xl text-center">
-            <h2 className="text-4xl font-bold tracking-tight text-black sm:text-5xl">
-              What our community says
+            <p className="text-sm font-semibold text-[#0088CB]">Trust-first by design</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 sm:text-4xl">
+              Serious support, with less noise.
             </h2>
-            <p className="mt-4 text-xl leading-8 text-gray-600">
-              Join thousands of students and educators who trust IvyWay
+            <p className="mt-5 text-lg leading-8 text-gray-600">
+              IvyWay combines expert human guidance and AI learning tools—so families and schools can understand progress at a glance.
             </p>
           </div>
-          <div className="mx-auto mt-20 grid max-w-2xl grid-cols-1 gap-8 lg:mx-0 lg:max-w-none lg:grid-cols-3">
-            <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-              <div className="flex items-center gap-1 text-[#0088CB]">
-                {[...Array(5)].map((_, i) => (
-                  <svg key={i} className="h-5 w-5 fill-current" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                ))}
-              </div>
-              <p className="mt-4 text-base leading-7 text-black">
-                "I was struggling with AP Calculus until I found an amazing tutor on IvyWay. The one-on-one sessions made all the difference, and I went from barely passing to acing my exams. The platform made it so easy to find someone who actually understood how I learn."
-              </p>
-              <p className="mt-6 text-sm font-semibold text-black">Sarah Caruso</p>
-            </div>
-            <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-              <div className="flex items-center gap-1 text-[#0088CB]">
-                {[...Array(5)].map((_, i) => (
-                  <svg key={i} className="h-5 w-5 fill-current" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                ))}
-              </div>
-              <p className="mt-4 text-base leading-7 text-black">
-                "IvyWay has been a game-changer for my career. I'm able to earn a strong income by counseling students on my own schedule, and the platform handles all the logistics. It's made it incredibly easy to monetize my expertise while maintaining the flexibility I need."
-              </p>
-              <p className="mt-6 text-sm font-semibold text-black">Michael Chen</p>
-            </div>
-            <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-              <div className="flex items-center gap-1 text-[#0088CB]">
-                {[...Array(5)].map((_, i) => (
-                  <svg key={i} className="h-5 w-5 fill-current" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                ))}
-              </div>
-              <p className="mt-4 text-base leading-7 text-black">
-                "My daughter had her heart set on Yale, and IvyWay connected her with a current Yale student who also works as a counselor on the platform. She helped with everything from application strategy to understanding campus life. The guidance was invaluable, and my daughter felt much more prepared throughout the process."
-              </p>
-              <p className="mt-6 text-sm font-semibold text-black">Greg Peterson</p>
+
+          <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-12">
+            {[
+              {
+                title: 'Clear matching',
+                desc: 'Tutors and counselors aligned to goals, level, and learning style.',
+                icon: GraduationCap,
+              },
+              {
+                title: 'End-to-end sessions',
+                desc: 'Scheduling, notes, and follow-ups in one place.',
+                icon: CalendarCheck,
+              },
+              {
+                title: 'Progress visibility',
+                desc: 'Families and schools stay aligned without micromanaging.',
+                icon: ShieldCheck,
+              },
+              {
+                title: 'IvyWay AI',
+                desc: 'Practice, feedback, and next steps between sessions.',
+                icon: Sparkles,
+              },
+            ].map((f, idx) => {
+              const Icon = f.icon;
+              const span = idx < 2 ? 'lg:col-span-6' : 'lg:col-span-6';
+              return (
+                <div
+                  key={f.title}
+                  className={[
+                    span,
+                    'relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_24px_70px_rgba(2,10,23,0.07)]',
+                  ].join(' ')}
+                >
+                  <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_30%_0%,rgba(0,136,203,0.14),rgba(255,255,255,0))]" />
+                  <div className="relative flex items-start justify-between gap-6">
+                    <div className="min-w-0">
+                      <div className="text-lg font-semibold tracking-tight text-gray-950">{f.title}</div>
+                      <p className="mt-3 text-base leading-7 text-gray-600">{f.desc}</p>
+                    </div>
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
+                      <Icon className="h-5 w-5 text-[#0088CB]" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Keep this credibility strip exactly (required) */}
+          <div className="mt-14 sm:mt-16">
+            <p className="text-center text-sm font-semibold text-gray-700">
+              Trusted by top schools, students, and educators
+            </p>
+            <div className="mt-4">
+              <SchoolCarousel />
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* CTA */}
-      <SignupPreview />
+      {/* SECTION 6 — “Built for students” features (3 across) */}
+      <section className="bg-white py-20 sm:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold text-[#0088CB]">Built for education</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 sm:text-4xl">
+              Built for students. Trusted by families.
+            </h2>
+          </div>
+
+          <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-3">
+            {[
+              {
+                title: 'Personalized Learning',
+                desc: 'Support that adapts to the student—goals, pace, and confidence included.',
+                icon: BookOpen,
+              },
+              {
+                title: 'Verified Tutors & Counselors',
+                desc: 'Real people, real experience—selected for quality and accountability.',
+                icon: ShieldCheck,
+              },
+              {
+                title: 'Secure Sessions + Progress Tracking',
+                desc: 'Everything stays organized: sessions, notes, next steps, and momentum.',
+                icon: CalendarCheck,
+              },
+            ].map((c) => {
+              const Icon = c.icon;
+              return (
+                <div
+                  key={c.title}
+                  className="relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]"
+                >
+                  <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_50%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))]" />
+                  <div className="relative">
+                    <div className="flex items-center justify-between">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
+                        <Icon className="h-5 w-5 text-[#0088CB]" />
+                      </div>
+                    </div>
+                    <div className="mt-6 text-lg font-semibold tracking-tight text-gray-950">{c.title}</div>
+                    <p className="mt-3 text-base leading-7 text-gray-600">{c.desc}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* SECTION 7 — FAQ */}
+      <section id="faq" className="scroll-mt-28 bg-white py-20 sm:py-28">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-semibold text-[#0088CB]">FAQ</p>
+            <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 sm:text-4xl">
+              Answers, without the fluff.
+            </h2>
+          </div>
+
+          <div className="mx-auto mt-12 max-w-3xl">
+            <FAQAccordion
+              items={[
+                {
+                  question: 'How does IvyWay tutoring work?',
+                  answer:
+                    'Choose a subject, pick a verified tutor, and book sessions that fit your schedule. After each session, you’ll get clear next steps—and IvyWay AI can help you practice between sessions.',
+                },
+                {
+                  question: 'What is IvyWay AI?',
+                  answer:
+                    'IvyWay AI is your academic co-pilot for studying, planning, flashcards, quizzes, and problem solving—built to reinforce real tutoring and counseling work, not replace it.',
+                },
+                {
+                  question: 'How are tutors verified?',
+                  answer:
+                    'We review provider backgrounds and experience before they can offer sessions. Quality and accountability are built into the platform experience.',
+                },
+                {
+                  question: 'Can I book college counseling by school?',
+                  answer:
+                    'Yes. You can book counseling aligned to your target schools and application strategy, with mentors who have direct, relevant experience.',
+                },
+                {
+                  question: 'Are virtual tours live?',
+                  answer:
+                    'Yes. Virtual tours are hosted by real students who can show you campus and answer questions with honest, current perspective.',
+                },
+                {
+                  question: 'Do you offer monthly plans?',
+                  answer:
+                    'Yes. Monthly options are available depending on service type. You can always review what’s included before checkout.',
+                },
+              ]}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* SECTION 8 — FINAL CTA + minimal footer, fading back into IvyWay blue */}
+      <section ref={bottomBlueStartRef} className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,#ffffff_0%,#eaf6ff_28%,#0b5f96_78%,#063a63_100%)]" />
+        <div className="absolute -top-40 left-1/2 h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[#0088CB]/20 blur-3xl" />
+        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
+          <div className="mx-auto max-w-3xl text-center">
+            <h2 className="text-balance text-3xl font-semibold tracking-tight text-white sm:text-5xl leading-[1.04]">
+              Education that helps during the journey, not after.
+            </h2>
+            <p className="mt-6 text-lg leading-8 text-white/80">
+              Start with IvyWay today.
+            </p>
+            <div className="mt-10 flex justify-center">
+              <Link
+                href={primaryCtaHref}
+                className="inline-flex items-center justify-center rounded-xl bg-white px-7 py-3.5 text-base font-semibold text-[#06233A] shadow-sm hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
+              >
+                {primaryCtaLabel}
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-16 border-t border-white/14 pt-10">
+            <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
+              <div className="text-sm font-semibold text-white/85">IvyWay</div>
+              <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-medium text-white/75">
+                <Link href="/" className="hover:text-white transition-colors">
+                  About
+                </Link>
+                <Link href="/pricing" className="hover:text-white transition-colors">
+                  Pricing
+                </Link>
+                <a href="mailto:support@ivyway.com" className="hover:text-white transition-colors">
+                  Support
+                </a>
+                <Link href="/terms" className="hover:text-white transition-colors">
+                  Legal
+                </Link>
+              </div>
+            </div>
+            <div className="mt-8 text-center text-xs text-white/55">
+              &copy; {new Date().getFullYear()} IvyWay. All rights reserved.
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Scroll to Top Button */}
       {showScrollTop && (

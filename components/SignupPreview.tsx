@@ -39,63 +39,86 @@ export default function SignupPreview() {
   };
 
   return (
-    <div id="create-account" className="border-t border-gray-200 bg-white py-32">
-      <div className="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-bold tracking-tight text-black sm:text-5xl">
-            Join the Waitlist
-          </h2>
-          <p className="mt-4 text-xl leading-8 text-gray-600">
-            Be the first to know when we launch new features
-          </p>
-        </div>
-
-        {submitted ? (
-          <div className="rounded-md bg-green-50 p-4 border border-green-200 text-center">
-            <p className="text-sm font-medium text-green-800">
-              Thanks! You're on the list. We'll be in touch soon.
+    <section id="create-account" className="border-t border-gray-200 bg-gray-950">
+      <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-12 lg:gap-12 items-start">
+          <div className="lg:col-span-6">
+            <p className="text-sm font-semibold text-[#5bbcff]">Final step</p>
+            <h2 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+              Start with IvyWay.
+            </h2>
+            <p className="mt-4 text-lg leading-8 text-white/80">
+              Join the waitlist for new features, or create an account to book tutoring and counseling.
             </p>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="waitlist-email" className="sr-only">
-                Email address
-              </label>
-              <input
-                type="email"
-                id="waitlist-email"
-                name="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full rounded-md border border-gray-300 px-4 py-3 text-black placeholder-gray-400 focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB] focus:ring-offset-0"
-                placeholder="Enter your email address"
-              />
+
+          <div className="lg:col-span-6">
+            {submitted ? (
+              <div className="rounded-2xl border border-white/15 bg-white/5 p-5">
+                <p className="text-sm font-semibold text-white">You’re on the list.</p>
+                <p className="mt-1 text-sm text-white/75">We’ll reach out with updates and early access.</p>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="flex flex-col gap-3 sm:flex-row">
+                <label htmlFor="waitlist-email" className="sr-only">
+                  Email address
+                </label>
+                <input
+                  type="email"
+                  id="waitlist-email"
+                  name="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full flex-1 rounded-md border border-white/15 bg-white/5 px-4 py-3 text-white placeholder-white/45 focus:border-[#0088CB] focus:outline-none focus:ring-2 focus:ring-[#0088CB]/40"
+                  placeholder="Email address"
+                />
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="inline-flex items-center justify-center rounded-md bg-[#0088CB] px-6 py-3 font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmitting ? 'Joining...' : 'Join waitlist'}
+                </button>
+              </form>
+            )}
+
+            <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <a
+                href="/auth/register"
+                className="inline-flex items-center justify-center rounded-md bg-white px-5 py-3 text-sm font-semibold text-gray-950 hover:bg-white/90 transition-colors"
+              >
+                Book a Session
+              </a>
+              <a
+                href="/auth/register"
+                className="inline-flex items-center justify-center rounded-md bg-white/5 px-5 py-3 text-sm font-semibold text-white ring-1 ring-inset ring-white/15 hover:bg-white/10 transition-colors"
+              >
+                Find Your Mentor
+              </a>
+              <a
+                href="/auth/register"
+                className="inline-flex items-center justify-center rounded-md bg-white/5 px-5 py-3 text-sm font-semibold text-white ring-1 ring-inset ring-white/15 hover:bg-white/10 transition-colors"
+              >
+                Join as a Tutor
+              </a>
+              <a
+                href="/auth/register"
+                className="inline-flex items-center justify-center rounded-md bg-white/5 px-5 py-3 text-sm font-semibold text-white ring-1 ring-inset ring-white/15 hover:bg-white/10 transition-colors"
+              >
+                Start with IvyWay AI
+              </a>
             </div>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full rounded-md bg-[#0088CB] px-6 py-3.5 text-base font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSubmitting ? 'Joining...' : 'Join Waitlist'}
-            </button>
-          </form>
-        )}
-
-        <div className="mt-8 text-center">
-          <p className="text-sm text-gray-600">
-            Ready to get started?{' '}
-            <a
-              href="/auth/register"
-              className="font-medium text-[#0088CB] hover:underline"
-            >
-              Create an account
-            </a>
-          </p>
+            <p className="mt-6 text-sm text-white/70">
+              Already have an account?{' '}
+              <a href="/auth/login" className="font-semibold text-white hover:underline">
+                Log in
+              </a>
+            </p>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

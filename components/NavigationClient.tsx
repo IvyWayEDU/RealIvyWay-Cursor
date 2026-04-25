@@ -96,18 +96,24 @@ export default function NavigationClient() {
 
   const dashboardLink = getDashboardLink();
 
+  const navItemClass =
+    'inline-flex items-center rounded-full px-4 py-2 text-sm font-medium text-gray-900 ' +
+    'transition-all duration-200 ease-out ' +
+    'hover:bg-gray-100/75 hover:ring-1 hover:ring-white/80 hover:shadow-[0_10px_24px_rgba(2,10,23,0.06)] ' +
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/35';
+
   return (
-    <nav className="border-b border-gray-200 bg-white shadow-sm">
+    <nav className="border-b border-gray-200 bg-[linear-gradient(180deg,#0088CB_0px,#0088CB_10px,#ffffff_10px,#ffffff_100%)] shadow-[0_10px_26px_rgba(2,10,23,0.06)]">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 sm:h-20 items-center justify-between">
           <div className="flex items-center">
-            <Link href={session ? getDashboardRoute(session.roles) : "/"} className="flex items-center">
+            <Link href={session ? getDashboardRoute(session.roles) : "/"} className="flex items-center pl-2 sm:pl-3">
               <Image
                 src="/logo/ivyway-logo.png"
                 alt="IvyWay"
                 width={260}
                 height={94}
-                className="h-10 sm:h-12 md:h-14 w-auto"
+                className="h-12 sm:h-14 md:h-16 lg:h-[72px] w-auto"
                 priority
               />
             </Link>
@@ -116,7 +122,7 @@ export default function NavigationClient() {
             <div className="ml-10 flex items-baseline space-x-4">
               <Link
                 href="/"
-                className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                className={navItemClass}
               >
                 Home
               </Link>
@@ -124,7 +130,7 @@ export default function NavigationClient() {
                 <button
                   onClick={() => setShowServicesDropdown(!showServicesDropdown)}
                   onMouseEnter={() => setShowServicesDropdown(true)}
-                  className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                  className={navItemClass}
                 >
                   Services
                 </button>
@@ -133,13 +139,13 @@ export default function NavigationClient() {
                     className="absolute left-0 mt-1 w-48 z-[60]"
                     onMouseLeave={() => setShowServicesDropdown(false)}
                   >
-                    <div className="bg-gray-50 rounded-lg py-2 space-y-1 shadow-lg">
+                    <div className="rounded-2xl border border-gray-200 bg-white/90 py-2 shadow-[0_18px_60px_rgba(2,10,23,0.16)] ring-1 ring-white/60 backdrop-blur-xl">
                       <button
                         onClick={() => {
                           setShowServicesDropdown(false);
                           router.push('/pricing#tutoring-plans');
                         }}
-                        className="block w-full text-left px-4 py-2 text-sm text-black hover:text-[#0088CB] hover:underline transition-colors"
+                        className="block w-full text-left rounded-xl px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100/70 hover:ring-1 hover:ring-white/70 hover:text-[#0088CB] transition-all"
                       >
                         Tutoring
                       </button>
@@ -148,7 +154,7 @@ export default function NavigationClient() {
                           setShowServicesDropdown(false);
                           router.push('/pricing#college-counseling');
                         }}
-                        className="block w-full text-left px-4 py-2 text-sm text-black hover:text-[#0088CB] hover:underline transition-colors"
+                        className="block w-full text-left rounded-xl px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100/70 hover:ring-1 hover:ring-white/70 hover:text-[#0088CB] transition-all"
                       >
                         College
                       </button>
@@ -157,7 +163,7 @@ export default function NavigationClient() {
                           setShowServicesDropdown(false);
                           router.push('/pricing#ai-tools');
                         }}
-                        className="block w-full text-left px-4 py-2 text-sm text-black hover:text-[#0088CB] hover:underline transition-colors"
+                        className="block w-full text-left rounded-xl px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100/70 hover:ring-1 hover:ring-white/70 hover:text-[#0088CB] transition-all"
                       >
                         IvyWay AI
                       </button>
@@ -167,19 +173,19 @@ export default function NavigationClient() {
               </div>
               <Link
                 href="/pricing"
-                className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                className={navItemClass}
               >
                 Pricing
               </Link>
               <Link
                 href="/pricing#payments-faq"
-                className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                className={navItemClass}
               >
                 FAQ
               </Link>
               <a
                 href="mailto:support@ivyway.com"
-                className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                className={navItemClass}
               >
                 Contact
               </a>
@@ -193,7 +199,7 @@ export default function NavigationClient() {
                 {dashboardLink && (
                   <Link
                     href={dashboardLink}
-                    className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                    className={navItemClass}
                   >
                     Dashboard
                   </Link>
@@ -202,7 +208,7 @@ export default function NavigationClient() {
                   <span className="text-sm text-gray-700">{session.name}</span>
                   <button
                     onClick={handleLogout}
-                    className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                    className={navItemClass}
                   >
                     Sign out
                   </button>
@@ -212,7 +218,7 @@ export default function NavigationClient() {
               <>
                 <Link
                   href="/auth/login"
-                  className="rounded-md px-3 py-2 text-sm font-medium text-black hover:bg-gray-100"
+                  className={navItemClass}
                 >
                   Log in
                 </Link>
@@ -220,7 +226,7 @@ export default function NavigationClient() {
                   onClick={() => {
                     window.location.href = "/#create-account";
                   }}
-                  className="rounded-md bg-[#0088CB] px-4 py-2 text-sm font-medium text-white hover:bg-[#0077B3]"
+                  className="rounded-xl bg-[#0088CB] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_16px_44px_rgba(0,136,203,0.26)] hover:bg-[#0077B3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/35 transition-colors"
                 >
                   Sign up
                 </button>

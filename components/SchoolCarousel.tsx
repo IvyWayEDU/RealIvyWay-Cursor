@@ -39,7 +39,7 @@ export default function SchoolCarousel({ className }: SchoolCarouselProps) {
                 height={42}
                 sizes="180px"
                 loading="lazy"
-                className="hero-logos-logo"
+                className="ivyway-school-carousel-logo"
               />
             ))}
           </div>

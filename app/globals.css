@@ -171,57 +171,9 @@ body {
 }
 
 /* ===============================
-   LANDING: SCHOOL CAROUSEL (HERO)
+   LANDING: SCHOOL CAROUSEL
    Scoped to SchoolCarousel.tsx classnames
 ================================ */
-
-.hero-logos-overlay {
-  position: absolute;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(1200px, 92%);
-  padding: 14px 28px 18px;
-  border-radius: 18px;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  background: rgba(255, 255, 255, 0.25);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
-  text-align: center;
-  z-index: 5;
-}
-
-.hero-logos-title {
-  color: white;
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.5px;
-  margin-bottom: 12px;
-  text-align: center;
-}
-
-.hero-logos-carousel {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.hero-logos-logo,
-.hero-logos-carousel img {
-  height: 42px;
-  width: auto;
-  object-fit: contain;
-  opacity: 0.9;
-  transition: opacity 0.3s ease;
-  background: transparent;
-}
-
-.hero-logos-logo:hover,
-.hero-logos-carousel img:hover {
-  opacity: 1;
-}
 
 .ivyway-school-carousel-viewport {
   position: relative;
@@ -243,6 +195,24 @@ body {
   animation: scroll 28s linear infinite;
 }
 
+.ivyway-school-carousel-logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+  opacity: 0.72;
+  filter: grayscale(100%) contrast(1.05);
+  transition: opacity 200ms ease, filter 200ms ease, transform 200ms ease;
+  background: transparent;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.ivyway-school-carousel-logo:hover {
+  opacity: 0.95;
+  filter: grayscale(0%) contrast(1);
+  transform: translateY(-1px);
+}
+
 @keyframes scroll {
   from {
     transform: translateX(0);
@@ -254,25 +224,12 @@ body {
 }
 
 @media (max-width: 640px) {
-  .hero-logos-overlay {
-    bottom: max(16px, env(safe-area-inset-bottom));
-    width: min(1200px, 94%);
-    padding: 12px 14px 14px;
-    border-radius: 16px;
-  }
-
-  .hero-logos-title {
-    font-size: 13px;
-    margin-bottom: 10px;
-  }
-
-  .hero-logos-logo,
-  .hero-logos-carousel img {
-    height: 34px;
-  }
-
   .ivyway-school-carousel-track {
     gap: 48px;
     animation-duration: 28s;
+  }
+
+  .ivyway-school-carousel-logo {
+    height: 34px;
   }
 }

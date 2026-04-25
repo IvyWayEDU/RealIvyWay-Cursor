@@ -19,7 +19,7 @@ export default function PublicLayoutClient({
     <div className="public-layout flex min-h-screen flex-col bg-white">
       {!isAuthPage && !isLandingPage && <Navigation />}
       <main className="flex-1 bg-white">{children}</main>
-      {!isAuthPage && <Footer />}
+      {!isAuthPage && !isLandingPage && <Footer />}
     </div>
   );
 }
