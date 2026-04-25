@@ -24,6 +24,12 @@ export async function POST(request: NextRequest) {
       );
     }
     const session = auth.session;
+    void request;
+
+    // SECURITY: migration must be admin-only
+    if (!Array.isArray(session.roles) || !session.roles.includes('admin')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     // Run migration
     const updatedCount = await updateExistingCreditsTo31Days();

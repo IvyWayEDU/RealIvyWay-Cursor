@@ -5,7 +5,10 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
 
 const DISABLE_FILE_STORAGE = true;
 
-const DEV_ADMIN_EMAIL = 'provider@gmail.com';
+// Dev-only bootstrap admin (optional). NEVER enable in production.
+const DEV_BOOTSTRAP_ADMIN_EMAIL = String(process.env.DEV_BOOTSTRAP_ADMIN_EMAIL || '')
+  .trim()
+  .toLowerCase();
 
 function assertFilesystemAllowed(): void {
   if (DISABLE_FILE_STORAGE) {
@@ -34,34 +37,40 @@ export async function getUsers(): Promise<User[]> {
     .map((row: any) => row?.data)
     .filter(Boolean) as User[];
 
-  // Dev convenience / safety: ensure the intended bootstrap admin user is actually admin.
-  // NOTE: We only ADD the admin role; we do not remove admin from other users.
-  const normalized = users.map((user) => {
+  // Normalize suspension flags for consistent downstream behavior.
+  const normalizedBase = users.map((user) => {
     if (!user) return user;
-
     const isSuspended = Boolean((user as any).isSuspended) || (user as any).status === 'suspended';
     const status: 'active' | 'suspended' = isSuspended ? 'suspended' : 'active';
-
-    if (user?.email?.toLowerCase?.() !== DEV_ADMIN_EMAIL) {
-      return { ...user, isSuspended, status };
-    }
-
-    const roles = Array.isArray((user as any).roles) ? (user as any).roles : [];
-    const nextRoles = Array.from(new Set([...roles, 'provider', 'admin'])) as UserRole[];
-    return { ...user, roles: nextRoles, isSuspended, status };
+    return { ...user, isSuspended, status };
   });
 
-  // Best-effort: persist the bootstrap admin normalization so the DB doesn't drift.
-  try {
-    const admin = normalized.find((u) => u?.email?.toLowerCase?.() === DEV_ADMIN_EMAIL);
-    if (admin?.id) {
-      await updateUser(admin.id, { roles: admin.roles } as any);
+  // Dev convenience / safety: optionally ensure a bootstrap admin user is actually admin.
+  // NOTE: This is DEV-ONLY and must never run in production.
+  if (process.env.NODE_ENV !== 'production' && DEV_BOOTSTRAP_ADMIN_EMAIL) {
+    // We only ADD the admin role; we do not remove admin from other users.
+    const normalized = normalizedBase.map((user) => {
+      if (!user) return user;
+      if (user?.email?.toLowerCase?.() !== DEV_BOOTSTRAP_ADMIN_EMAIL) return user;
+      const roles = Array.isArray((user as any).roles) ? (user as any).roles : [];
+      const nextRoles = Array.from(new Set([...roles, 'provider', 'admin'])) as UserRole[];
+      return { ...user, roles: nextRoles } as any;
+    });
+
+    // Best-effort: persist the bootstrap admin normalization so the DB doesn't drift in dev.
+    try {
+      const admin = normalized.find((u) => u?.email?.toLowerCase?.() === DEV_BOOTSTRAP_ADMIN_EMAIL);
+      if (admin?.id) {
+        await updateUser(admin.id, { roles: admin.roles } as any);
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
+
+    return normalized;
   }
 
-  return normalized;
+  return normalizedBase;
 }
 
 export async function saveUsers(users: User[]): Promise<void> {
