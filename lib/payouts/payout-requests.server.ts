@@ -249,26 +249,57 @@ export async function createPayoutRequest(args: {
 
   if (hasSupabaseConfigured()) {
     const supabase = getSupabaseAdmin();
-    const fullPayloadObject = pr;
+    // IMPORTANT: Align with real Supabase schema (no "metadata" column).
+    // Insert only actual columns from `public.payout_requests`.
     const insertData = {
       id: pr.id,
       provider_id: pr.providerId,
       amount_cents: pr.amountCents,
       status: 'pending' as const,
-      payout_method: pr.payoutMethod ?? null,
-      metadata: {
-        ...fullPayloadObject,
-      },
-    } as const;
 
-    console.log('FINAL INSERT PAYLOAD:', insertData);
+      allocations: pr.allocations?.length ? (pr.allocations as any) : null,
+      allocations_inferred: pr.allocationsInferred === true ? true : null,
+
+      payout_method: pr.payoutMethod ?? null,
+      payout_destination_masked: pr.payoutDestinationMasked ?? null,
+      payout_destination: pr.payoutDestination ?? null,
+
+      bank_name: pr.bankName ?? null,
+      bank_account_number: pr.bankAccountNumber ?? null,
+      bank_routing_number: pr.bankRoutingNumber ?? null,
+      bank_country: pr.bankCountry ?? null,
+      account_holder_name: pr.accountHolderName ?? null,
+
+      wise_email: pr.wiseEmail ?? null,
+      paypal_email: pr.paypalEmail ?? null,
+      zelle_contact: pr.zelleContact ?? null,
+
+      stripe_transfer_id: pr.stripeTransferId ?? null,
+      approved_at: null,
+      paid_at: null,
+    } as const;
 
     const { data, error } = await supabase
       .from('payout_requests')
       .insert(insertData as any)
       .select('*')
       .single();
-    if (error) throw error;
+    if (error) {
+      // Fail loudly (and avoid logging sensitive payout destination details).
+      console.error('[createPayoutRequest] Supabase insert failed', {
+        payoutRequestId: pr.id,
+        providerId: pr.providerId,
+        amountCents: pr.amountCents,
+        status: 'pending',
+        supabase: {
+          code: (error as any)?.code,
+          message: (error as any)?.message,
+          details: (error as any)?.details,
+          hint: (error as any)?.hint,
+        },
+      });
+      throw error;
+    }
     return rowToPayoutRequest(data as any);
   }
 
