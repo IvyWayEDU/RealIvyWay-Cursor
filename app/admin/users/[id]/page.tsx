@@ -2,8 +2,8 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getUserById, getUsers } from '@/lib/auth/storage';
 import { getSessionsReadOnly } from '@/lib/sessions/storage';
-import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { getReviewsByProviderId } from '@/lib/reviews/storage.server';
+import { getProviderEarningsBalance } from '@/lib/earnings/balances.server';
 
 export default async function AdminUserDetailPage({
   params,
@@ -14,17 +14,18 @@ export default async function AdminUserDetailPage({
   const user = await getUserById(id);
   if (!user) return notFound();
 
-  const [sessions, allUsers, reviews] = await Promise.all([
+  const roles: string[] = Array.isArray((user as any)?.roles) ? (user as any).roles : [];
+  const isProvider = roles.includes('provider') || roles.includes('tutor') || roles.includes('counselor');
+
+  const [sessions, allUsers, reviews, balance] = await Promise.all([
     getSessionsReadOnly(),
     getUsers(),
     getReviewsByProviderId(id),
+    isProvider ? getProviderEarningsBalance(id) : Promise.resolve(null),
   ]);
 
   const related = (sessions as any[]).filter((s) => s?.studentId === user.id || s?.providerId === user.id);
   const providerSessions = (sessions as any[]).filter((s) => s?.providerId === user.id);
-
-  const roles: string[] = Array.isArray((user as any)?.roles) ? (user as any).roles : [];
-  const isProvider = roles.includes('provider') || roles.includes('tutor') || roles.includes('counselor');
 
   function fmtDate(iso: string | null | undefined): string {
     if (!iso) return '—';
@@ -92,17 +93,12 @@ export default async function AdminUserDetailPage({
     );
   });
 
-  const totalLifetimeEarningsCents = completedProviderSessions.reduce(
-    (sum, s) => sum + calculateProviderPayoutCentsFromSession(s as any),
-    0
-  );
-  const totalWithdrawnCents = completedProviderSessions
-    .filter((s) => {
-      const ps = String((s as any)?.payoutStatus || 'available');
-      return ps === 'paid' || ps === 'paid_out';
-    })
-    .reduce((sum, s) => sum + calculateProviderPayoutCentsFromSession(s as any), 0);
-  const availableBalanceCents = Math.max(0, totalLifetimeEarningsCents - totalWithdrawnCents);
+  const balanceAvailableCents = balance ? Math.max(0, Math.floor(Number((balance as any).availableCents || 0))) : 0;
+  const balancePendingCents = balance ? Math.max(0, Math.floor(Number((balance as any).pendingCents || 0))) : 0;
+  const balanceWithdrawnCents = balance ? Math.max(0, Math.floor(Number((balance as any).withdrawnCents || 0))) : 0;
+  const totalLifetimeEarningsCents = Math.max(0, balanceAvailableCents + balancePendingCents + balanceWithdrawnCents);
+  const totalWithdrawnCents = balanceWithdrawnCents;
+  const availableBalanceCents = balanceAvailableCents;
 
   function money(cents: number): string {
     return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
@@ -210,9 +206,6 @@ export default async function AdminUserDetailPage({
                   <dd className="mt-1 text-lg font-semibold text-gray-900">{money(availableBalanceCents)}</dd>
                 </div>
               </dl>
-              <div className="mt-3 text-xs text-gray-500">
-                Withdrawn is derived from sessions marked <span className="font-mono">payoutStatus=paid/paid_out</span>.
-              </div>
             </div>
           ) : null}
 

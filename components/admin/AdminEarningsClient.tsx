@@ -16,7 +16,6 @@ type SessionRow = {
   providerId: string;
   providerName?: string;
   status?: string;
-  payoutStatus?: string;
   provider_payout_cents?: number;
   ivyway_take_cents?: number;
   total_charge_cents?: number;
@@ -202,15 +201,16 @@ export default function AdminEarningsClient(props: {
   const totals = useMemo(() => {
     let platform = 0;
     let provider = 0;
-    let pendingPayouts = 0;
     for (const s of completedSessions) {
       platform += Number(s.ivyway_take_cents || 0);
       provider += Number(s.provider_payout_cents || 0);
-      const ps = String(s.payoutStatus || 'available');
-      if (ps === 'pending_payout' || ps === 'approved') pendingPayouts += Number(s.provider_payout_cents || 0);
+    }
+    let pendingPayouts = 0;
+    for (const b of Object.values(balances || {})) {
+      pendingPayouts += Number((b as any)?.pendingCents || 0);
     }
     return { platform, provider, pendingPayouts };
-  }, [completedSessions]);
+  }, [completedSessions, balances]);
 
   const providerRows = useMemo(() => {
     const byProviderSessions = new Map<string, SessionRow[]>();
@@ -222,32 +222,22 @@ export default function AdminEarningsClient(props: {
 
     return providers.map((p) => {
       const ps = byProviderSessions.get(p.id) || [];
-      const earnings = ps.reduce((sum, s) => sum + Number(s.provider_payout_cents || 0), 0);
-      const withdrawn = ps
-        .filter((s) => {
-          const st = String(s.payoutStatus || 'available');
-          return st === 'paid' || st === 'paid_out';
-        })
-        .reduce((sum, s) => sum + Number(s.provider_payout_cents || 0), 0);
       const completedCount = ps.length;
-      const pending = ps.filter((s) => {
-        const st = String(s.payoutStatus || 'available');
-        return st === 'pending_payout' || st === 'approved';
-      }).length;
       const account = bankByProvider.get(p.id) || null;
       const balance = balances[p.id] || null;
+      const balanceAvailableCents = balance ? Number(balance.availableCents || 0) : 0;
+      const balancePendingCents = balance ? Number(balance.pendingCents || 0) : 0;
+      const balanceWithdrawnCents = balance ? Number(balance.withdrawnCents || 0) : 0;
+      const earningsCents = Math.max(0, Math.floor(balanceAvailableCents + balancePendingCents + balanceWithdrawnCents));
       return {
         providerId: p.id,
         name: p.name || p.email || p.id,
         email: p.email || '',
         completedCount,
-        earningsCents: earnings,
-        withdrawnCents: withdrawn, // session-derived (legacy)
-        availableCents: Math.max(0, earnings - withdrawn), // session-derived (legacy)
-        pendingCount: pending,
-        balanceAvailableCents: balance ? balance.availableCents : 0,
-        balancePendingCents: balance ? balance.pendingCents : 0,
-        balanceWithdrawnCents: balance ? balance.withdrawnCents : 0,
+        earningsCents,
+        balanceAvailableCents: Math.max(0, Math.floor(balanceAvailableCents)),
+        balancePendingCents: Math.max(0, Math.floor(balancePendingCents)),
+        balanceWithdrawnCents: Math.max(0, Math.floor(balanceWithdrawnCents)),
         balanceUpdatedAt: balance ? balance.updatedAt : '',
         bank: account ? `${account.bankName} ••••${account.last4}` : '—',
       };
@@ -263,19 +253,6 @@ export default function AdminEarningsClient(props: {
       return name.includes(q) || email.includes(q);
     });
   }, [providerRows, providerSearch]);
-
-  async function setPayoutStatus(sessionId: string, payoutStatus: string) {
-    setWorking(sessionId);
-    setError(null);
-    try {
-      await post('/api/admin/payouts/set-status', { sessionId, payoutStatus });
-      router.refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to update payout status');
-    } finally {
-      setWorking(null);
-    }
-  }
 
   async function approvePayoutRequest(payoutRequestId: string) {
     setWorking(payoutRequestId);
@@ -347,16 +324,6 @@ export default function AdminEarningsClient(props: {
     }
   }
 
-  const actionableSessions = useMemo(() => {
-    return completedSessions
-      .filter((s) => {
-        const ps = String(s.payoutStatus || 'available');
-        return ps === 'pending_payout' || ps === 'approved' || ps === 'available' || ps === 'locked';
-      })
-      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
-      .slice(0, 50);
-  }, [completedSessions]);
-
   return (
     <div className="space-y-6">
       <div>
@@ -376,7 +343,7 @@ export default function AdminEarningsClient(props: {
           <div className="mt-2 text-2xl font-semibold text-gray-900">{money(totals.provider)}</div>
         </div>
         <div className="rounded-lg bg-white p-5 shadow-sm ring-1 ring-gray-200">
-          <div className="text-sm text-gray-500">Pending payouts (sessions)</div>
+          <div className="text-sm text-gray-500">Pending payouts (financial)</div>
           <div className="mt-2 text-2xl font-semibold text-gray-900">{money(totals.pendingPayouts)}</div>
         </div>
       </div>
@@ -531,65 +498,6 @@ export default function AdminEarningsClient(props: {
               )}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-          <div className="text-sm font-semibold text-gray-900">Payout queue (recent)</div>
-          <div className="text-sm text-gray-500">{actionableSessions.length}</div>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {actionableSessions.map((s) => {
-            const busy = working === s.id;
-            const ps = String(s.payoutStatus || 'available');
-            return (
-              <div key={s.id} className={['px-4 py-3 flex items-center justify-between gap-3', busy ? 'opacity-70' : ''].join(' ')}>
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-gray-900 truncate">{s.providerName || s.providerId}</div>
-                  <div className="mt-1 text-xs text-gray-600 font-mono truncate">{s.id}</div>
-                  <div className="mt-1 text-xs text-gray-500">
-                    payoutStatus: <span className="font-semibold">{ps}</span> • {money(Number(s.provider_payout_cents || 0))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/admin/users/${encodeURIComponent(String(s.providerId || ''))}`}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-50"
-                  >
-                    View Profile
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => setPayoutStatus(s.id, 'approved')}
-                    disabled={busy}
-                    className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPayoutStatus(s.id, 'locked')}
-                    disabled={busy}
-                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Hold
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPayoutStatus(s.id, 'paid')}
-                    disabled={busy}
-                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    Mark paid
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-          {actionableSessions.length === 0 && (
-            <div className="px-4 py-10 text-center text-sm text-gray-600">No payout actions pending.</div>
-          )}
         </div>
       </div>
 

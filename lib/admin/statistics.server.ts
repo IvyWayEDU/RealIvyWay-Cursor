@@ -4,6 +4,7 @@ import { getUsers } from '@/lib/auth/storage';
 import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { getReviews } from '@/lib/reviews/storage.server';
 import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
+import { listAllPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 
 type CanonicalServiceType = 'tutoring' | 'test_prep' | 'college_counseling' | 'virtual_tour';
 
@@ -77,6 +78,11 @@ export type AdminStatistics = {
 function safeNumber(v: unknown): number {
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function clampCents(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
 }
 
 function clamp01(n: number): number {
@@ -219,11 +225,24 @@ function monthKeysBackFromNow(count: number, nowMs: number): string[] {
   return out.reverse();
 }
 
+function payoutRequestBucket(pr: PayoutRequest): 'pending' | 'approved' | 'paid' | 'other' {
+  const st = String(pr?.status || '').trim().toLowerCase();
+  if (st === 'pending' || st === 'pending_admin_review') return 'pending';
+  if (st === 'approved' || st === 'processing') return 'approved';
+  if (st === 'paid' || st === 'completed') return 'paid';
+  return 'other';
+}
+
 export async function getAdminStatistics(args?: { months?: number }): Promise<AdminStatistics> {
   const nowMs = Date.now();
   const months = Math.max(3, Math.min(36, Math.floor(args?.months ?? 12)));
 
-  const [users, sessions, reviews] = await Promise.all([getUsers(), getSessionsReadOnly(), getReviews()]);
+  const [users, sessions, reviews, payoutRequests] = await Promise.all([
+    getUsers(),
+    getSessionsReadOnly(),
+    getReviews(),
+    listAllPayoutRequests(),
+  ]);
   const allSessions = sessions as any[];
   const userById = new Map<string, any>((users as any[]).filter((u) => typeof u?.id === 'string').map((u) => [u.id, u]));
 
@@ -279,8 +298,15 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
   let flaggedSessions = 0;
 
   let totalProviderEarningsCents = 0;
-  let totalWithdrawnCents = 0;
-  let pendingPayoutsCents = 0;
+  let totalWithdrawnCents = 0; // financial truth: payout_requests (paid/completed)
+  let pendingPayoutsCents = 0; // financial truth: payout_requests (pending/approved/processing)
+
+  for (const pr of payoutRequests || []) {
+    const amt = clampCents((pr as any)?.amountCents);
+    const b = payoutRequestBucket(pr as any);
+    if (b === 'paid') totalWithdrawnCents += amt;
+    if (b === 'pending' || b === 'approved') pendingPayoutsCents += amt;
+  }
 
   const anyNoShowSessionIds = new Set<string>();
   const providerAgg = new Map<
@@ -340,13 +366,6 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
       const eligible = Boolean(s?.providerEligibleForPayout === true);
       const providerPayoutCents = eligible ? calculateProviderPayoutCentsFromSession(s as any) : 0;
       totalProviderEarningsCents += providerPayoutCents;
-
-      const payoutStatus = String(s?.payoutStatus || 'available');
-      if (payoutStatus === 'paid' || payoutStatus === 'paid_out') {
-        totalWithdrawnCents += providerPayoutCents;
-      } else if (payoutStatus === 'pending_payout' || payoutStatus === 'approved' || payoutStatus === 'locked') {
-        pendingPayoutsCents += providerPayoutCents;
-      }
 
       // Top providers (completed sessions only)
       const providerId = typeof s?.providerId === 'string' ? s.providerId.trim() : '';

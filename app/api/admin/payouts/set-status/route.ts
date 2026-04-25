@@ -4,7 +4,9 @@ import { getSessionById, updateSession } from '@/lib/sessions/storage';
 import { appendAdminAuditEntry } from '@/lib/audit/adminAudit.server';
 import { handleApiError } from '@/lib/errorHandler';
 
-const ALLOWED = new Set(['available', 'locked', 'pending_payout', 'approved', 'paid', 'paid_out']);
+// Deprecated endpoint: session.payoutStatus is NOT the financial source of truth.
+// We keep this route only for non-financial "hold/unhold" controls.
+const ALLOWED = new Set(['available', 'locked']);
 
 export async function POST(request: NextRequest) {
   const authResult = await auth.requireAdmin();
@@ -16,7 +18,13 @@ export async function POST(request: NextRequest) {
     const payoutStatus = String((body as any)?.payoutStatus ?? '').trim();
     if (!sessionId) return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
     if (!ALLOWED.has(payoutStatus)) {
-      return NextResponse.json({ error: 'Invalid payoutStatus' }, { status: 400 });
+      return NextResponse.json(
+        {
+          error:
+            'Invalid payoutStatus. Session payoutStatus is deprecated for financial payouts; use payout_requests approval/mark-paid flows. Allowed here: available, locked.',
+        },
+        { status: 400 }
+      );
     }
 
     const existing = await getSessionById(sessionId);

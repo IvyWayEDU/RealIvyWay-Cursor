@@ -96,6 +96,15 @@ export default async function AdminSessionDetailPage({
     s?.stripePaymentIntentId ? getStripeRefundsForPaymentIntent(String(s.stripePaymentIntentId)) : Promise.resolve(null),
   ]);
 
+  const financialPayoutStatus = (() => {
+    const kinds = new Set<string>((timeline?.events || []).map((e) => String((e as any)?.kind || '')));
+    if (kinds.has('payout_sent')) return 'paid';
+    if (kinds.has('withdrawal_approved')) return 'approved';
+    if (kinds.has('withdrawal_requested')) return 'pending_payout';
+    if (kinds.has('provider_earnings_credited')) return 'available';
+    return '—';
+  })();
+
   const providerPayoutCents = calculateProviderPayoutCentsFromSession(session as any);
   const grossCents = Math.max(0, getSessionGrossCents(session as any));
   const platformFeeCents = Math.max(0, Math.floor(grossCents - providerPayoutCents));
@@ -272,8 +281,8 @@ export default async function AdminSessionDetailPage({
                   <div className="mt-1 text-xs text-gray-500 font-mono">platformFeeCents={platformFeeCents}</div>
                 </div>
                 <div>
-                  <div className="text-sm text-gray-600">Payout status</div>
-                  <div className="mt-1 text-sm text-gray-900">{String(s.payoutStatus ?? '—')}</div>
+                  <div className="text-sm text-gray-600">Payout status (financial)</div>
+                  <div className="mt-1 text-sm text-gray-900">{financialPayoutStatus}</div>
                 </div>
                 <div>
                   <div className="text-sm text-gray-600">Payout eligibility</div>
