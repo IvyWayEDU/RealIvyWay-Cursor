@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { getSessionById } from '@/lib/sessions/storage';
+import { getSessionByIdReadOnly } from '@/lib/sessions/storage';
 import { readCredits } from '@/lib/earnings/credits.server';
 import { getPayoutRequestById, listProviderPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 
@@ -82,7 +82,7 @@ export async function getAdminSessionPaymentTimeline(sessionId: string): Promise
   payoutRequestIds: string[];
   events: PaymentTimelineEvent[];
 }> {
-  const session = await getSessionById(sessionId);
+  const session = await getSessionByIdReadOnly(sessionId);
   if (!session) {
     return { sessionId, providerId: null, payoutRequestIds: [], events: [] };
   }

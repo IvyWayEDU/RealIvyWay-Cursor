@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getUserById, getUsers } from '@/lib/auth/storage';
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import { getReviewsByProviderId } from '@/lib/reviews/storage.server';
 
@@ -15,7 +15,7 @@ export default async function AdminUserDetailPage({
   if (!user) return notFound();
 
   const [sessions, allUsers, reviews] = await Promise.all([
-    getSessions(),
+    getSessionsReadOnly(),
     getUsers(),
     getReviewsByProviderId(id),
   ]);

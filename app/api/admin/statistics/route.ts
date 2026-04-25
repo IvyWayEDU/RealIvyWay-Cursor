@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth/middleware';
 import { getAdminStatistics } from '@/lib/admin/statistics.server';
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { getUsers } from '@/lib/auth/storage';
 import { listAllPayoutRequests } from '@/lib/payouts/payout-requests.server';
 import { handleApiError } from '@/lib/errorHandler';
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     const stats = await getAdminStatistics({ months: 12 });
 
     if (exportKind === 'earnings') {
-      const [users, sessions] = await Promise.all([getUsers(), getSessions()]);
+      const [users, sessions] = await Promise.all([getUsers(), getSessionsReadOnly()]);
       const userById = new Map<string, any>((users as any[]).filter((u) => typeof u?.id === 'string').map((u) => [u.id, u]));
 
       const providerAgg = new Map<
@@ -211,7 +211,7 @@ export async function GET(request: NextRequest) {
 
     if (exportKind === 'sessions') {
       // Export session-level rows (useful for owners to pivot in Excel).
-      const sessions = (await getSessions()) as any[];
+      const sessions = (await getSessionsReadOnly()) as any[];
       const rows: Array<Array<unknown>> = [
         [
           'id',

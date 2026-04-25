@@ -5,7 +5,7 @@ import { getProviderByUserId } from '@/lib/providers/storage';
 import { normalizePayoutMethod, payoutMethodLabel } from '@/lib/payouts/payout-snapshot';
 import { getAdminPayoutPaymentTimeline } from '@/lib/admin/payment-timeline.server';
 import PaymentTimeline from '@/components/admin/PaymentTimeline';
-import { getSessionById } from '@/lib/sessions/storage';
+import { getSessionByIdReadOnly } from '@/lib/sessions/storage';
 
 function money(cents: number): string {
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format((cents || 0) / 100);
@@ -80,7 +80,7 @@ export default async function AdminPayoutRecordPage(props: { params: { payoutId:
     allocations
       .filter((a) => a.sessionId && a.sessionId !== '__unattributed__')
       .map(async (a) => {
-        const s = await getSessionById(a.sessionId);
+        const s = await getSessionByIdReadOnly(a.sessionId);
         const ss: any = s as any;
         return {
           sessionId: a.sessionId,

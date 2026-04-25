@@ -1,8 +1,8 @@
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import AdminSessionsClient from '@/components/admin/AdminSessionsClient';
 
 export default async function AdminSessionsPage() {
-  const sessions = await getSessions();
+  const sessions = await getSessionsReadOnly();
 
   const sorted = [...sessions].sort((a: any, b: any) => {
     const aEnd = new Date(a?.scheduledEndTime || a?.endTime || a?.scheduledEnd || 0).getTime();

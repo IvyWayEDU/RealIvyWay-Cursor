@@ -1,5 +1,5 @@
 import { getUsers } from '@/lib/auth/storage';
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { readCredits } from '@/lib/earnings/credits.server';
 import AdminEarningsClient from '@/components/admin/AdminEarningsClient';
 import { listPendingPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
@@ -142,7 +142,7 @@ function payoutDestinationLabelFromProvider(details?: PayoutDetailsSummary): str
 export default async function AdminEarningsPayoutsPage() {
   const [users, sessions, credits, bankAccounts, balances, payoutRequests, providers] = await Promise.all([
     getUsers(),
-    getSessions(),
+    getSessionsReadOnly(),
     readCredits(),
     listBankAccounts(),
     readProviderEarningsBalances(),

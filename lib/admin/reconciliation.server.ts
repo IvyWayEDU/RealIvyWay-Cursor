@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { listAllPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 import { readCredits } from '@/lib/earnings/credits.server';
@@ -126,7 +126,7 @@ export async function getAdminReconciliation(args?: { days?: number }): Promise<
   const days = Math.max(7, Math.min(365, Math.floor(args?.days ?? 30)));
 
   const [sessions, payoutRequests, credits, adjustmentsCents] = await Promise.all([
-    getSessions(),
+    getSessionsReadOnly(),
     listAllPayoutRequests(),
     readCredits(),
     sumProviderAdjustmentsCents(),

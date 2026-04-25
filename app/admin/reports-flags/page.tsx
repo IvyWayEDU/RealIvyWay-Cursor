@@ -1,4 +1,4 @@
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import Link from 'next/link';
 
 function isNoShowStatus(status: string): boolean {
@@ -16,7 +16,7 @@ function isNoShowStatus(status: string): boolean {
 }
 
 export default async function AdminReportsFlagsPage() {
-  const sessions = await getSessions();
+  const sessions = await getSessionsReadOnly();
   const all = sessions as any[];
 
   const noShows = all.filter((s) => isNoShowStatus(String(s?.status || '')));

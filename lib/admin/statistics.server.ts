@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { getUsers } from '@/lib/auth/storage';
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { getReviews } from '@/lib/reviews/storage.server';
 import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
 
@@ -223,7 +223,7 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
   const nowMs = Date.now();
   const months = Math.max(3, Math.min(36, Math.floor(args?.months ?? 12)));
 
-  const [users, sessions, reviews] = await Promise.all([getUsers(), getSessions(), getReviews()]);
+  const [users, sessions, reviews] = await Promise.all([getUsers(), getSessionsReadOnly(), getReviews()]);
   const allSessions = sessions as any[];
   const userById = new Map<string, any>((users as any[]).filter((u) => typeof u?.id === 'string').map((u) => [u.id, u]));
 

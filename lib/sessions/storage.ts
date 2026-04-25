@@ -659,7 +659,7 @@ function normalizeSessionShape(session: any, userNameById: Map<string, string>, 
  *
  * This runs on every session read to ensure we NEVER persist "upcoming" as a DB status.
  */
-export async function getSessions(): Promise<Session[]> {
+async function getSessionsInternal(args: { allowSideEffects: boolean }): Promise<Session[]> {
   const raw = await readSessionsRaw();
   const nowMs = Date.now();
   const nowISO = new Date(nowMs).toISOString();
@@ -700,104 +700,106 @@ export async function getSessions(): Promise<Session[]> {
       localChanged = true;
     }
 
-    // PRODUCTION CRITICAL: auto-credit provider earnings when a session resolves to completed.
-    // The resolver is the single source of truth for time-based completion; crediting must stay in sync.
-    try {
-      const statusNow = typeof (s as any)?.status === 'string' ? String((s as any).status).trim() : '';
-      const alreadyCredited = Boolean((s as any)?.earningsCredited);
-      const providerId = typeof (s as any)?.providerId === 'string' ? String((s as any).providerId).trim() : '';
-      const eligible =
-        (s as any)?.providerEligibleForPayout === true ||
-        (s as any)?.provider_eligible_for_payout === true ||
-        (s as any)?.providerEarned === true;
-      const withheld =
-        (s as any)?.providerEarned === false ||
-        (s as any)?.providerEligibleForPayout === false ||
-        (s as any)?.payoutStatus === 'none';
+    if (args.allowSideEffects) {
+      // PRODUCTION CRITICAL: auto-credit provider earnings when a session resolves to completed.
+      // The resolver is the single source of truth for time-based completion; crediting must stay in sync.
+      try {
+        const statusNow = typeof (s as any)?.status === 'string' ? String((s as any).status).trim() : '';
+        const alreadyCredited = Boolean((s as any)?.earningsCredited);
+        const providerId = typeof (s as any)?.providerId === 'string' ? String((s as any).providerId).trim() : '';
+        const eligible =
+          (s as any)?.providerEligibleForPayout === true ||
+          (s as any)?.provider_eligible_for_payout === true ||
+          (s as any)?.providerEarned === true;
+        const withheld =
+          (s as any)?.providerEarned === false ||
+          (s as any)?.providerEligibleForPayout === false ||
+          (s as any)?.payoutStatus === 'none';
 
-      if (statusNow === 'completed' && !alreadyCredited && providerId && eligible && !withheld) {
-        const joined = typeof (s as any)?.providerJoinedAt === 'string' && String((s as any).providerJoinedAt).trim().length > 0;
-        if (joined) {
-          const { calculateProviderPayoutCentsFromSession } = await import('@/lib/earnings/calc');
-          const { addCreditForSession, creditExistsForSession } = await import('@/lib/earnings/credits.server');
-          const amountCents = Math.max(0, Math.floor(calculateProviderPayoutCentsFromSession(s as any)));
-          if (amountCents > 0) {
-            // Idempotent by sessionId (credit store + DB uniqueness)
-            const exists = await creditExistsForSession(String((s as any).id || ''));
-            if (!exists) {
-              await addCreditForSession({
-                providerId,
-                sessionId: String((s as any).id || ''),
-                amountCents,
-              });
+        if (statusNow === 'completed' && !alreadyCredited && providerId && eligible && !withheld) {
+          const joined = typeof (s as any)?.providerJoinedAt === 'string' && String((s as any).providerJoinedAt).trim().length > 0;
+          if (joined) {
+            const { calculateProviderPayoutCentsFromSession } = await import('@/lib/earnings/calc');
+            const { addCreditForSession, creditExistsForSession } = await import('@/lib/earnings/credits.server');
+            const amountCents = Math.max(0, Math.floor(calculateProviderPayoutCentsFromSession(s as any)));
+            if (amountCents > 0) {
+              // Idempotent by sessionId (credit store + DB uniqueness)
+              const exists = await creditExistsForSession(String((s as any).id || ''));
+              if (!exists) {
+                await addCreditForSession({
+                  providerId,
+                  sessionId: String((s as any).id || ''),
+                  amountCents,
+                });
+              }
+              (s as any).earningsCredited = true;
+              (s as any).earningsCreditedAt = (s as any)?.earningsCreditedAt || nowISO;
+              (s as any).updatedAt = nowISO;
+              localChanged = true;
             }
-            (s as any).earningsCredited = true;
-            (s as any).earningsCreditedAt = (s as any)?.earningsCreditedAt || nowISO;
-            (s as any).updatedAt = nowISO;
+          }
+        }
+      } catch (e) {
+        const errorDetail =
+          e instanceof Error
+            ? { name: e.name, message: e.message, stack: e.stack }
+            : e && typeof e === 'object'
+              ? e
+              : { message: String(e) };
+        console.warn('[earnings] auto-credit failed (non-blocking)', {
+          sessionId: String((s as any)?.id || ''),
+          error: errorDetail,
+        });
+      }
+
+      // Transactional email triggers (no-show only) when we auto-resolve lifecycle.
+      // - Provider no-show: status transitions into `provider_no_show`
+      // - Student no-show: status transitions into `completed` with `flagNoShowStudent=true`
+      try {
+        const statusNow = typeof (s as any)?.status === 'string' ? String((s as any).status).trim() : '';
+        const noShowPartyNow = typeof (s as any)?.noShowParty === 'string' ? String((s as any).noShowParty).trim().toLowerCase() : '';
+        const flagNoShowStudentNow = Boolean((s as any)?.flagNoShowStudent);
+
+        const transitionedToProviderNoShow = beforeStatus !== 'provider_no_show' && statusNow === 'provider_no_show';
+        if (transitionedToProviderNoShow) {
+          const alreadyStudent = Boolean((s as any)?.providerNoShowEmailStudentSentAt);
+          const alreadyProvider = Boolean((s as any)?.providerNoShowEmailProviderSentAt);
+          if (!alreadyStudent || !alreadyProvider) {
+            const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+            const sendResult = await sendNoShowEmailsForSession(s as any);
+            const sentAt = new Date().toISOString();
+            if (sendResult.studentEmailSent) (s as any).providerNoShowEmailStudentSentAt = sentAt;
+            if (sendResult.providerEmailSent) (s as any).providerNoShowEmailProviderSentAt = sentAt;
+            if (sendResult.studentEmailSent && sendResult.providerEmailSent) (s as any).providerNoShowEmailsSentAt = sentAt;
+            (s as any).updatedAt = sentAt;
             localChanged = true;
           }
         }
-      }
-    } catch (e) {
-      const errorDetail =
-        e instanceof Error
-          ? { name: e.name, message: e.message, stack: e.stack }
-          : e && typeof e === 'object'
-            ? e
-            : { message: String(e) };
-      console.warn('[earnings] auto-credit failed (non-blocking)', {
-        sessionId: String((s as any)?.id || ''),
-        error: errorDetail,
-      });
-    }
 
-    // Transactional email triggers (no-show only) when we auto-resolve lifecycle.
-    // - Provider no-show: status transitions into `provider_no_show`
-    // - Student no-show: status transitions into `completed` with `flagNoShowStudent=true`
-    try {
-      const statusNow = typeof (s as any)?.status === 'string' ? String((s as any).status).trim() : '';
-      const noShowPartyNow = typeof (s as any)?.noShowParty === 'string' ? String((s as any).noShowParty).trim().toLowerCase() : '';
-      const flagNoShowStudentNow = Boolean((s as any)?.flagNoShowStudent);
-
-      const transitionedToProviderNoShow = beforeStatus !== 'provider_no_show' && statusNow === 'provider_no_show';
-      if (transitionedToProviderNoShow) {
-        const alreadyStudent = Boolean((s as any)?.providerNoShowEmailStudentSentAt);
-        const alreadyProvider = Boolean((s as any)?.providerNoShowEmailProviderSentAt);
-        if (!alreadyStudent || !alreadyProvider) {
-          const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
-          const sendResult = await sendNoShowEmailsForSession(s as any);
-          const sentAt = new Date().toISOString();
-          if (sendResult.studentEmailSent) (s as any).providerNoShowEmailStudentSentAt = sentAt;
-          if (sendResult.providerEmailSent) (s as any).providerNoShowEmailProviderSentAt = sentAt;
-          if (sendResult.studentEmailSent && sendResult.providerEmailSent) (s as any).providerNoShowEmailsSentAt = sentAt;
-          (s as any).updatedAt = sentAt;
-          localChanged = true;
+        const becameStudentNoShow =
+          !beforeFlagNoShowStudent &&
+          flagNoShowStudentNow &&
+          (noShowPartyNow === 'student' || statusNow === 'student_no_show');
+        if (becameStudentNoShow) {
+          const alreadyStudent = Boolean((s as any)?.studentNoShowEmailStudentSentAt);
+          const alreadyProvider = Boolean((s as any)?.studentNoShowEmailProviderSentAt);
+          if (!alreadyStudent || !alreadyProvider) {
+            const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
+            const sendResult = await sendNoShowEmailsForSession(s as any);
+            const sentAt = new Date().toISOString();
+            if (sendResult.studentEmailSent) (s as any).studentNoShowEmailStudentSentAt = sentAt;
+            if (sendResult.providerEmailSent) (s as any).studentNoShowEmailProviderSentAt = sentAt;
+            if (sendResult.studentEmailSent && sendResult.providerEmailSent) (s as any).studentNoShowEmailsSentAt = sentAt;
+            (s as any).updatedAt = sentAt;
+            localChanged = true;
+          }
         }
+      } catch (e) {
+        console.warn('[email] no-show email trigger failed (non-blocking)', {
+          sessionId: String((s as any)?.id || ''),
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
-
-      const becameStudentNoShow =
-        !beforeFlagNoShowStudent &&
-        flagNoShowStudentNow &&
-        (noShowPartyNow === 'student' || statusNow === 'student_no_show');
-      if (becameStudentNoShow) {
-        const alreadyStudent = Boolean((s as any)?.studentNoShowEmailStudentSentAt);
-        const alreadyProvider = Boolean((s as any)?.studentNoShowEmailProviderSentAt);
-        if (!alreadyStudent || !alreadyProvider) {
-          const { sendNoShowEmailsForSession } = await import('@/lib/email/transactional');
-          const sendResult = await sendNoShowEmailsForSession(s as any);
-          const sentAt = new Date().toISOString();
-          if (sendResult.studentEmailSent) (s as any).studentNoShowEmailStudentSentAt = sentAt;
-          if (sendResult.providerEmailSent) (s as any).studentNoShowEmailProviderSentAt = sentAt;
-          if (sendResult.studentEmailSent && sendResult.providerEmailSent) (s as any).studentNoShowEmailsSentAt = sentAt;
-          (s as any).updatedAt = sentAt;
-          localChanged = true;
-        }
-      }
-    } catch (e) {
-      console.warn('[email] no-show email trigger failed (non-blocking)', {
-        sessionId: String((s as any)?.id || ''),
-        error: e instanceof Error ? e.message : String(e),
-      });
     }
 
     // Keep legacy/invalid sessions as-is (normalized shape only). Strict validation is best-effort.
@@ -807,11 +809,25 @@ export async function getSessions(): Promise<Session[]> {
   }
 
   // Persist only if we made safe canonicalizations (never shrink the dataset).
-  if (changed) {
+  if (args.allowSideEffects && changed) {
     await saveSessions(next);
   }
 
   return next;
+}
+
+export async function getSessions(): Promise<Session[]> {
+  return getSessionsInternal({ allowSideEffects: true });
+}
+
+/**
+ * Read-only sessions view for admin/analytics pages.
+ *
+ * Must NEVER write to the DB, credit earnings, or trigger transactional emails.
+ * This returns the same normalized/computed view as `getSessions()` but with side effects disabled.
+ */
+export async function getSessionsReadOnly(): Promise<Session[]> {
+  return getSessionsInternal({ allowSideEffects: false });
 }
 
 // Write sessions to file
@@ -876,6 +892,24 @@ export async function getSessionById(id: string): Promise<Session | null> {
   if (patch && typeof (patch as any).status === 'string' && String((patch as any).status).trim()) {
     // Persist best-effort; lenient to avoid legacy shape blocking lifecycle transitions.
     await updateSessionLenient(String((session as any)?.id || id), patch);
+    return { ...(session as any), ...(patch as any) } as Session;
+  }
+
+  return session;
+}
+
+/**
+ * Read-only single-session fetch for admin pages.
+ *
+ * It MAY compute a best-effort derived lifecycle patch in-memory for display,
+ * but it must NEVER persist changes or trigger side effects.
+ */
+export async function getSessionByIdReadOnly(id: string): Promise<Session | null> {
+  const session = await readSessionByIdRaw(id);
+  if (!session) return null;
+
+  const patch = resolveSessionStatusByTime(session, Date.now());
+  if (patch && typeof (patch as any).status === 'string' && String((patch as any).status).trim()) {
     return { ...(session as any), ...(patch as any) } as Session;
   }
 

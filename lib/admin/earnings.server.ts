@@ -2,7 +2,7 @@ import 'server-only';
 
 import { getUsers } from '@/lib/auth/storage';
 import { getProviders } from '@/lib/providers/storage';
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { listAllPayoutRequests, type PayoutRequest } from '@/lib/payouts/payout-requests.server';
 import { calculateProviderPayoutCentsFromSession } from '@/lib/earnings/calc';
 import type { Session } from '@/lib/models/types';
@@ -184,7 +184,7 @@ export async function getAdminEarningsAnalytics(): Promise<AdminEarningsAnalytic
   const [users, providers, sessions, payoutRequests] = await Promise.all([
     getUsers(),
     getProviders(),
-    getSessions(),
+    getSessionsReadOnly(),
     listAllPayoutRequests(),
   ]);
 

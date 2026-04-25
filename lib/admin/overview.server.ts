@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { getUsers } from '@/lib/auth/storage';
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { getAllSupportTickets } from '@/lib/support/ticketingStorage';
 import { calculateProviderPayoutCentsFromSession, getSessionGrossCents } from '@/lib/earnings/calc';
@@ -36,7 +36,7 @@ export type AdminOverviewStats = {
 };
 
 export async function getAdminOverviewStats(): Promise<AdminOverviewStats> {
-  const [users, sessions, supportTickets] = await Promise.all([getUsers(), getSessions(), getAllSupportTickets()]);
+  const [users, sessions, supportTickets] = await Promise.all([getUsers(), getSessionsReadOnly(), getAllSupportTickets()]);
 
   const totalUsers = users.length;
   const totalStudents = users.filter(studentCountFromUser).length;

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getSessionById } from '@/lib/sessions/storage';
+import { getSessionByIdReadOnly } from '@/lib/sessions/storage';
 import { getAdminSessionPaymentTimeline } from '@/lib/admin/payment-timeline.server';
 import PaymentTimeline from '@/components/admin/PaymentTimeline';
 import { getUserById } from '@/lib/auth/storage';
@@ -84,7 +84,7 @@ export default async function AdminSessionDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await getSessionById(id);
+  const session = await getSessionByIdReadOnly(id);
   if (!session) return notFound();
 
   const s: any = session as any;

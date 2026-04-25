@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-import { getSessions } from '@/lib/sessions/storage';
+import { getSessionsReadOnly } from '@/lib/sessions/storage';
 
 function normalize(v: unknown): string {
   return typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -99,7 +99,7 @@ function RowList(props: { title: string; subtitle: string; rows: any[] }) {
 }
 
 export default async function AdminFlaggedSessionsPage() {
-  const sessions = (await getSessions()) as any[];
+  const sessions = (await getSessionsReadOnly()) as any[];
   const all = Array.isArray(sessions) ? sessions : [];
 
   const providerNoShows = all.filter(isProviderNoShow).sort((a, b) => sessionSortKeyMs(b) - sessionSortKeyMs(a));
