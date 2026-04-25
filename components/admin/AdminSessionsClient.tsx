@@ -7,8 +7,10 @@ import { useRouter } from 'next/navigation';
 type SessionRow = {
   id: string;
   studentName?: string;
+  studentEmail?: string;
   studentId?: string;
   providerName?: string;
+  providerEmail?: string;
   providerId?: string;
   serviceType?: string;
   serviceTypeId?: string;
@@ -337,24 +339,54 @@ export default function AdminSessionsClient(props: { initialSessions: SessionRow
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
+    const tokens = q.split(/\s+/g).filter(Boolean).slice(0, 8);
     return sessions.filter((s) => {
+      const studentEmail =
+        (typeof s.studentEmail === 'string' && s.studentEmail) ||
+        (typeof (s as any)?.student_email === 'string' && (s as any).student_email) ||
+        (typeof (s as any)?.student?.email === 'string' && (s as any).student.email) ||
+        (typeof (s as any)?.studentEmailAddress === 'string' && (s as any).studentEmailAddress) ||
+        '';
+      const providerEmail =
+        (typeof s.providerEmail === 'string' && s.providerEmail) ||
+        (typeof (s as any)?.provider_email === 'string' && (s as any).provider_email) ||
+        (typeof (s as any)?.provider?.email === 'string' && (s as any).provider.email) ||
+        (typeof (s as any)?.providerEmailAddress === 'string' && (s as any).providerEmailAddress) ||
+        '';
+      const zoomMeetingId =
+        (typeof s.zoomMeetingId === 'string' && s.zoomMeetingId) ||
+        (typeof (s as any)?.zoom_meeting_id === 'string' && (s as any).zoom_meeting_id) ||
+        (typeof (s as any)?.meeting?.id === 'string' && (s as any).meeting.id) ||
+        (typeof (s as any)?.meetingId === 'string' && (s as any).meetingId) ||
+        '';
+
       const hay = [
         s.id,
         s.studentName,
         s.studentId,
+        studentEmail,
         s.providerName,
         s.providerId,
+        providerEmail,
         s.serviceType,
         s.serviceTypeId,
+        (s as any)?.service_type,
         s.subject,
+        (s as any)?.sessionSubject,
         s.topic,
+        (s as any)?.sessionTopic,
         s.status,
-        s.zoomMeetingId,
+        (s as any)?.sessionStatus,
+        zoomMeetingId,
       ]
-        .filter(Boolean)
+        .filter((v) => v != null && String(v).trim().length > 0)
         .join(' ')
         .toLowerCase();
-      return hay.includes(q);
+
+      for (const t of tokens) {
+        if (!hay.includes(t)) return false;
+      }
+      return true;
     });
   }, [sessions, query]);
 

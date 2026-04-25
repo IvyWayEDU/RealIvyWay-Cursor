@@ -536,12 +536,22 @@ export default function AdminPayoutsClient(props: { initialPayoutRequests: Payou
       const amountDollarsTrimmed = amountDollars2.replace(/\.00$/, '');
 
       const providerLabel = r.providerName || r.providerEmail || r.providerId || '';
+      const stripeTransferId = typeof (r as any)?.stripeTransferId === 'string' ? (r as any).stripeTransferId : '';
+      const stripePayoutRef =
+        (typeof (r as any)?.stripePayoutId === 'string' && (r as any).stripePayoutId) ||
+        (typeof (r as any)?.stripe_payout_id === 'string' && (r as any).stripe_payout_id) ||
+        (typeof (r as any)?.stripeTransferReference === 'string' && (r as any).stripeTransferReference) ||
+        (typeof (r as any)?.stripe_transfer_reference === 'string' && (r as any).stripe_transfer_reference) ||
+        '';
       const searchText = [
         providerLabel,
         r.providerEmail || '',
         r.id || '',
+        r.providerId || '',
         r.payoutMethod || '',
         r.payoutDestination || '',
+        stripeTransferId || '',
+        stripePayoutRef || '',
         status,
         amountDollars2,
         amountDollarsTrimmed,
