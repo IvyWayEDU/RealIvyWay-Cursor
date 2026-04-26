@@ -77,6 +77,68 @@ body {
   animation: slide-up 0.3s ease-out;
 }
 
+/* ===============================
+   LANDING: FINAL CTA (CLUELY-STYLE)
+   Subtle float + alternating glow
+================================ */
+
+@keyframes ivyway-float-soft {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0);
+  }
+}
+
+@keyframes ivyway-glow-a {
+  0%,
+  44% {
+    box-shadow: 0 18px 70px rgba(0, 136, 203, 0.06);
+    border-color: rgba(255, 255, 255, 0.55);
+  }
+  50%,
+  94% {
+    box-shadow: 0 26px 90px rgba(0, 136, 203, 0.16);
+    border-color: rgba(255, 255, 255, 0.85);
+  }
+  100% {
+    box-shadow: 0 18px 70px rgba(0, 136, 203, 0.06);
+    border-color: rgba(255, 255, 255, 0.55);
+  }
+}
+
+@keyframes ivyway-glow-b {
+  0%,
+  44% {
+    box-shadow: 0 26px 90px rgba(0, 136, 203, 0.16);
+    border-color: rgba(255, 255, 255, 0.85);
+  }
+  50%,
+  94% {
+    box-shadow: 0 18px 70px rgba(0, 136, 203, 0.06);
+    border-color: rgba(255, 255, 255, 0.55);
+  }
+  100% {
+    box-shadow: 0 26px 90px rgba(0, 136, 203, 0.16);
+    border-color: rgba(255, 255, 255, 0.85);
+  }
+}
+
+.ivyway-finalcta-float {
+  animation: ivyway-float-soft 9s ease-in-out infinite;
+  will-change: transform;
+}
+
+.ivyway-finalcta-glow-a {
+  animation: ivyway-glow-a 8s ease-in-out infinite;
+}
+
+.ivyway-finalcta-glow-b {
+  animation: ivyway-glow-b 8s ease-in-out infinite;
+}
+
 /* Stripe-specific UI fixes belong in `app/checkout/checkout.css` so they don't impact the full platform. */
 
 /* ===============================

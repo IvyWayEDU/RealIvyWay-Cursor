@@ -253,9 +253,8 @@ export default function Home() {
   const menuRef = useRef<HTMLDivElement>(null);
   const whiteSectionsStartRef = useRef<HTMLDivElement>(null);
   const bottomBlueStartRef = useRef<HTMLElement>(null);
-  const sectionTopsRef = useRef<{ whiteStart: number; bottomBlueStart: number }>({
+  const sectionTopsRef = useRef<{ whiteStart: number }>({
     whiteStart: 0,
-    bottomBlueStart: Number.POSITIVE_INFINITY,
   });
 
   useEffect(() => {
@@ -263,9 +262,6 @@ export default function Home() {
       sectionTopsRef.current.whiteStart = whiteSectionsStartRef.current
         ? whiteSectionsStartRef.current.getBoundingClientRect().top + window.scrollY
         : 0;
-      sectionTopsRef.current.bottomBlueStart = bottomBlueStartRef.current
-        ? bottomBlueStartRef.current.getBoundingClientRect().top + window.scrollY
-        : Number.POSITIVE_INFINITY;
     };
 
     const handleScroll = () => {
@@ -276,9 +272,9 @@ export default function Home() {
       // Use a small forward-looking probe so the CTA feels like it transitions
       // as you enter each background region (premium, not abrupt).
       const probeY = y + 140;
-      const { whiteStart, bottomBlueStart } = sectionTopsRef.current;
-      const nextVariant: 'light' | 'brand' =
-        probeY >= bottomBlueStart - 120 ? 'light' : probeY >= whiteStart ? 'brand' : 'light';
+      const { whiteStart } = sectionTopsRef.current;
+      // Once the CTA becomes brand-blue (past the hero), keep it blue through the footer.
+      const nextVariant: 'light' | 'brand' = probeY >= whiteStart ? 'brand' : 'light';
 
       setFloatingCtaVariant((prev) => (prev === nextVariant ? prev : nextVariant));
     };
@@ -528,13 +524,13 @@ export default function Home() {
 
           <div className="mx-auto max-w-4xl text-center pt-[124px] sm:pt-[144px]">
             <h1 className="text-balance text-4xl font-semibold tracking-tight text-white sm:text-6xl md:text-7xl leading-[1.02]">
-              #1 Platform for Tutoring, College Counseling &amp; IvyWay AI
+              #1 Platform for Tutoring, College Counseling &amp; AI Study Tools
             </h1>
 
             <p className="mx-auto mt-6 max-w-2xl text-pretty text-lg leading-8 text-white/80 sm:text-xl">
-              Real mentors. Real tutors. Real college guidance.
+              Real tutors. Real guidance. Real college students.
               <br className="hidden sm:block" />
-              Powered by IvyWay AI.
+              Powered by IvyWay AI
             </p>
 
             <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
@@ -569,46 +565,43 @@ export default function Home() {
           <div className="mx-auto max-w-3xl text-center">
             <p className="text-sm font-semibold text-[#0088CB]">How IvyWay works</p>
             <h2 className="mt-4 text-3xl font-semibold tracking-tight text-gray-950 sm:text-4xl">
-              How IvyWay helps students succeed
+              IvyWay helps students succeed
             </h2>
           </div>
 
           <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
-              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_20%_10%,rgba(0,136,203,0.12),rgba(255,255,255,0))] opacity-90" />
+            <div className="group relative overflow-hidden rounded-[32px] border border-gray-200/70 bg-white p-9 sm:p-10 shadow-[0_28px_80px_rgba(2,10,23,0.06)] ring-1 ring-black/5">
+              <div className="absolute inset-0 bg-[radial-gradient(900px_480px_at_20%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))] opacity-90" />
               <div className="relative">
-                <div className="flex items-start justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <span className="mt-1.5 inline-flex h-2.5 w-2.5 flex-none rounded-full bg-[#0088CB] shadow-[0_8px_24px_rgba(0,136,203,0.25)]" />
                   <div>
-                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
-                      <BookOpen className="h-4 w-4 text-[#0088CB]" />
-                      IvyWay connects students with real tutors
+                    <div className="text-base font-semibold tracking-tight text-gray-950">
+                      IvyWay connects students with experienced tutors
                     </div>
                     <p className="mt-3 text-base leading-7 text-gray-600">
-                      Book tutoring by subject with verified providers from top schools.
+                      Whether you’re preparing for an exam, mastering a difficult subject, or learning new languages, IvyWay connects you with experienced tutors who can help you succeed.
                     </p>
-                  </div>
-                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
-                    <CalendarCheck className="h-5 w-5 text-[#0088CB]" />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div id="college-counseling" className="scroll-mt-28 group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
-              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_85%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))] opacity-90" />
+            <div
+              id="college-counseling"
+              className="scroll-mt-28 group relative overflow-hidden rounded-[32px] border border-gray-200/70 bg-white p-9 sm:p-10 shadow-[0_28px_80px_rgba(2,10,23,0.06)] ring-1 ring-black/5"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(900px_480px_at_85%_0%,rgba(0,136,203,0.08),rgba(255,255,255,0))] opacity-90" />
               <div className="relative">
-                <div className="flex items-start justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <span className="mt-1.5 inline-flex h-2.5 w-2.5 flex-none rounded-full bg-[#0088CB] shadow-[0_8px_24px_rgba(0,136,203,0.25)]" />
                   <div>
-                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
-                      <GraduationCap className="h-4 w-4 text-[#0088CB]" />
-                      College counseling from students already there
+                    <div className="text-base font-semibold tracking-tight text-gray-950">
+                      College counseling from real college students
                     </div>
                     <p className="mt-3 text-base leading-7 text-gray-600">
-                      Get real admissions insight from mentors attending your target schools.
+                      Get real admissions insight from alumni and students attending your target schools.
                     </p>
-                  </div>
-                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
-                    <ShieldCheck className="h-5 w-5 text-[#0088CB]" />
                   </div>
                 </div>
               </div>
@@ -616,41 +609,34 @@ export default function Home() {
           </div>
 
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div id="virtual-tours" className="scroll-mt-28 group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
-              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_15%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))] opacity-90" />
+            <div
+              id="virtual-tours"
+              className="scroll-mt-28 group relative overflow-hidden rounded-[32px] border border-gray-200/70 bg-white p-9 sm:p-10 shadow-[0_28px_80px_rgba(2,10,23,0.06)] ring-1 ring-black/5"
+            >
+              <div className="absolute inset-0 bg-[radial-gradient(900px_480px_at_18%_0%,rgba(0,136,203,0.08),rgba(255,255,255,0))] opacity-90" />
               <div className="relative">
-                <div className="flex items-start justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <span className="mt-1.5 inline-flex h-2.5 w-2.5 flex-none rounded-full bg-[#0088CB] shadow-[0_8px_24px_rgba(0,136,203,0.25)]" />
                   <div>
-                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
-                      <Map className="h-4 w-4 text-[#0088CB]" />
-                      Virtual campus tours
-                    </div>
+                    <div className="text-base font-semibold tracking-tight text-gray-950">Virtual campus tours</div>
                     <p className="mt-3 text-base leading-7 text-gray-600">
-                      Explore campuses with real students—so your shortlist feels real before you commit.
+                      Save yourself a trip and virtually explore campuses with real students before you visit.
                     </p>
-                  </div>
-                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
-                    <Map className="h-5 w-5 text-[#0088CB]" />
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_22px_60px_rgba(2,10,23,0.06)]">
-              <div className="absolute inset-0 bg-[radial-gradient(800px_420px_at_85%_10%,rgba(0,136,203,0.12),rgba(255,255,255,0))] opacity-90" />
+            <div className="group relative overflow-hidden rounded-[32px] border border-gray-200/70 bg-white p-9 sm:p-10 shadow-[0_28px_80px_rgba(2,10,23,0.06)] ring-1 ring-black/5">
+              <div className="absolute inset-0 bg-[radial-gradient(900px_480px_at_85%_10%,rgba(0,136,203,0.10),rgba(255,255,255,0))] opacity-90" />
               <div className="relative">
-                <div className="flex items-start justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <span className="mt-1.5 inline-flex h-2.5 w-2.5 flex-none rounded-full bg-[#0088CB] shadow-[0_8px_24px_rgba(0,136,203,0.25)]" />
                   <div>
-                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-gray-900">
-                      <BrainCircuit className="h-4 w-4 text-[#0088CB]" />
-                      IvyWay AI support
-                    </div>
+                    <div className="text-base font-semibold tracking-tight text-gray-950">IvyWay AI</div>
                     <p className="mt-3 text-base leading-7 text-gray-600">
-                      Instant practice, planning, and feedback that reinforces what happens in sessions.
+                      Solve questions instantly, compete against friends, generate practice quizzes, and much more. Unlock smarter studying with IvyWay AI.
                     </p>
-                  </div>
-                  <div className="hidden sm:flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
-                    <Sparkles className="h-5 w-5 text-[#0088CB]" />
                   </div>
                 </div>
               </div>
@@ -884,6 +870,11 @@ export default function Home() {
                     'Choose a subject, pick a verified tutor, and book sessions that fit your schedule. After each session, you’ll get clear next steps—and IvyWay AI can help you practice between sessions.',
                 },
                 {
+                  question: 'How does College Counseling work?',
+                  answer:
+                    'We connect students with real college students currently attending the schools they are interested in. This gives families direct insight into academics, campus life, admissions expectations, and the real student experience. Instead of generic advice, students get guidance from mentors who have actually gone through the process and understand what it takes to succeed at that specific school.',
+                },
+                {
                   question: 'What is IvyWay AI?',
                   answer:
                     'IvyWay AI is your academic co-pilot for studying, planning, flashcards, quizzes, and problem solving—built to reinforce real tutoring and counseling work, not replace it.',
@@ -915,46 +906,128 @@ export default function Home() {
       </section>
 
       {/* SECTION 8 — FINAL CTA + minimal footer, fading back into IvyWay blue */}
-      <section ref={bottomBlueStartRef} className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,#ffffff_0%,#eaf6ff_28%,#0b5f96_78%,#063a63_100%)]" />
-        <div className="absolute -top-40 left-1/2 h-[620px] w-[620px] -translate-x-1/2 rounded-full bg-[#0088CB]/20 blur-3xl" />
+      <section ref={bottomBlueStartRef} className="relative overflow-hidden -mt-px">
+        {/* Full-width, seamless white → IvyWay blue transition (no edge patches) */}
+        <div
+          aria-hidden
+          className="absolute left-1/2 top-0 h-full w-screen -translate-x-1/2 bg-[linear-gradient(180deg,#ffffff_0%,#ffffff_22%,#f6fcff_42%,#eef8ff_62%,#e6f5ff_78%,#d9f0ff_92%,#ffffff_100%)]"
+        />
+        <div
+          aria-hidden
+          className="absolute left-1/2 -bottom-44 h-[720px] w-screen -translate-x-1/2 bg-[radial-gradient(760px_420px_at_50%_78%,rgba(0,136,203,0.18),rgba(0,136,203,0.00)_70%)]"
+        />
         <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
-          <div className="mx-auto max-w-3xl text-center">
-            <h2 className="text-balance text-3xl font-semibold tracking-tight text-white sm:text-5xl leading-[1.04]">
-              Education that helps during the journey, not after.
-            </h2>
-            <p className="mt-6 text-lg leading-8 text-white/80">
-              Start with IvyWay today.
-            </p>
-            <div className="mt-10 flex justify-center">
-              <Link
-                href={primaryCtaHref}
-                className="inline-flex items-center justify-center rounded-xl bg-white px-7 py-3.5 text-base font-semibold text-[#06233A] shadow-sm hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
-              >
-                {primaryCtaLabel}
-              </Link>
+          <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-12 lg:gap-10">
+            {/* Left: CTA (Cluely-style, left aligned) */}
+            <div className="lg:col-span-6">
+              <h2 className="text-balance text-3xl font-semibold tracking-tight text-[#06233A] sm:text-5xl leading-[1.04] text-left">
+                Education without friction.
+                <br />
+                Guidance without guesswork.
+              </h2>
+              <p className="mt-7 text-xl font-medium leading-8 text-[#06233A]/80 text-left">
+                Start with IvyWay today.
+              </p>
+              <div className="mt-10 flex justify-start">
+                <Link
+                  href={primaryCtaHref}
+                  className="inline-flex items-center justify-center rounded-xl bg-[#0088CB] px-7 py-3.5 text-base font-semibold text-white shadow-[0_18px_60px_rgba(0,136,203,0.26)] hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB]/35 transition-colors"
+                >
+                  Get Started
+                </Link>
+              </div>
+            </div>
+
+            {/* Right: floating premium UI elements */}
+            <div className="lg:col-span-6">
+              <div className="relative mx-auto h-[320px] w-full max-w-[520px]">
+                <div
+                  aria-hidden
+                  className="absolute inset-0 bg-[radial-gradient(520px_240px_at_55%_60%,rgba(0,136,203,0.14),rgba(255,255,255,0)_72%)] blur-2xl"
+                />
+
+                <div
+                  className={[
+                    'ivyway-finalcta-float ivyway-finalcta-glow-a',
+                    'absolute left-6 top-10 sm:left-10',
+                    'w-[270px] rounded-[26px] border bg-white/55 backdrop-blur-xl',
+                    'shadow-[0_22px_80px_rgba(2,10,23,0.08)]',
+                  ].join(' ')}
+                >
+                  <div className="p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="h-9 w-9 rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15" />
+                        <div className="text-sm font-semibold text-[#06233A]">Quick match</div>
+                      </div>
+                      <div className="rounded-full bg-white/60 px-3 py-1 text-xs font-semibold text-[#06233A]/70 ring-1 ring-white/70">
+                        Live
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      <div className="h-2 w-4/5 rounded-full bg-[#06233A]/10" />
+                      <div className="h-2 w-11/12 rounded-full bg-[#06233A]/8" />
+                      <div className="h-2 w-2/3 rounded-full bg-[#0088CB]/14" />
+                    </div>
+                    <div className="mt-5 flex items-center gap-2">
+                      <div className="h-8 flex-1 rounded-2xl bg-white/55 ring-1 ring-white/70" />
+                      <div className="h-8 w-10 rounded-2xl bg-[#0088CB]/12 ring-1 ring-[#0088CB]/18" />
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className={[
+                    'ivyway-finalcta-float ivyway-finalcta-glow-b',
+                    'absolute bottom-8 right-6 sm:right-10',
+                    'w-[300px] rounded-[28px] border bg-white/55 backdrop-blur-xl',
+                    'shadow-[0_22px_80px_rgba(2,10,23,0.08)]',
+                    'animation-delay-[1100ms]',
+                  ].join(' ')}
+                >
+                  <div className="p-5">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold text-[#06233A]">IvyWay AI</div>
+                      <div className="h-9 w-9 rounded-2xl bg-white/60 ring-1 ring-white/70" />
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <div className="h-14 rounded-2xl bg-white/55 ring-1 ring-white/70" />
+                      <div className="h-14 rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/16" />
+                      <div className="h-14 rounded-2xl bg-white/50 ring-1 ring-white/70" />
+                    </div>
+                    <div className="mt-4 flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full bg-[#0088CB]/50" />
+                      <div className="h-2 w-2 rounded-full bg-[#06233A]/15" />
+                      <div className="h-2 w-2 rounded-full bg-[#06233A]/10" />
+                      <div className="ml-auto rounded-full bg-[#06233A]/5 px-3 py-1 text-xs font-semibold text-[#06233A]/70 ring-1 ring-white/70">
+                        Guided
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="mt-16 border-t border-white/14 pt-10">
+          <div className="mt-16 border-t border-[#06233A]/10 pt-10">
             <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
-              <div className="text-sm font-semibold text-white/85">IvyWay</div>
-              <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-medium text-white/75">
-                <Link href="/" className="hover:text-white transition-colors">
+              <div className="text-sm font-semibold text-[#06233A]">IvyWay</div>
+              <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-medium text-[#06233A]/70">
+                <Link href="/" className="hover:text-[#06233A] transition-colors">
                   About
                 </Link>
-                <Link href="/pricing" className="hover:text-white transition-colors">
+                <Link href="/pricing" className="hover:text-[#06233A] transition-colors">
                   Pricing
                 </Link>
-                <a href="mailto:support@ivyway.com" className="hover:text-white transition-colors">
+                <a href="mailto:support@ivyway.com" className="hover:text-[#06233A] transition-colors">
                   Support
                 </a>
-                <Link href="/terms" className="hover:text-white transition-colors">
+                <Link href="/terms" className="hover:text-[#06233A] transition-colors">
                   Legal
                 </Link>
               </div>
             </div>
-            <div className="mt-8 text-center text-xs text-white/55">
+            <div className="mt-8 text-center text-xs text-[#06233A]/50">
               &copy; {new Date().getFullYear()} IvyWay. All rights reserved.
             </div>
           </div>

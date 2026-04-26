@@ -11,6 +11,7 @@ import CompletedSessionsSection from '@/components/CompletedSessionsSection';
 import ConfirmedSessionsSection from '@/components/ConfirmedSessionsSection';
 import MessagesSection from '@/components/MessagesSection';
 import IvyWayAICard from '@/components/IvyWayAICard';
+import { getFirstName } from '@/lib/auth/displayName';
 import { getSession } from '@/lib/auth/session';
 
 export default async function StudentDashboard() {
@@ -24,12 +25,21 @@ export default async function StudentDashboard() {
     redirect('/dashboard/provider');
   }
 
+  const firstName = getFirstName(session.name);
+
   return (
     <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Welcome back</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            Welcome back
+            {firstName ? (
+              <>
+                , <span className="text-[#0088CB]">{firstName}</span>
+              </>
+            ) : null}
+          </h1>
           <p className="mt-2 text-sm text-gray-600">
             Manage your sessions and track your progress.
           </p>

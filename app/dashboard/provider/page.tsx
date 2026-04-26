@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { getOnboardingStatus } from '@/lib/auth/onboarding';
+import { getFirstName } from '@/lib/auth/displayName';
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
 import UpcomingSessionsSection from '@/components/UpcomingSessionsSection';
 import ProviderEarningsSnapshotClient from '@/components/ProviderEarningsSnapshotClient';
@@ -36,13 +37,21 @@ export default async function ProviderDashboard() {
   }
 
   const earnings = await getProviderEarningsSummary(session.userId);
+  const firstName = getFirstName(session.name);
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Welcome back</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
+            Welcome back
+            {firstName ? (
+              <>
+                , <span className="text-[#0088CB]">{firstName}</span>
+              </>
+            ) : null}
+          </h1>
           <p className="mt-2 text-sm text-gray-600">
             Manage your sessions and track your earnings.
           </p>
