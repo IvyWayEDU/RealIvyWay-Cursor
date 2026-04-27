@@ -24,9 +24,9 @@ export default function FAQAccordion({ items }: FAQAccordionProps) {
         <div key={index} className="border-b border-gray-200">
           <button
             onClick={() => toggleItem(index)}
-            className="flex w-full items-center justify-between py-6 text-left hover:opacity-80 transition-opacity"
+            className="flex w-full items-center justify-between py-6 text-left hover:opacity-90 transition-opacity"
           >
-            <dt className="text-lg font-semibold leading-7 text-black pr-8 flex-1">
+            <dt className="flex-1 pr-8 text-base font-medium leading-7 tracking-[-0.01em] text-gray-950 sm:text-lg">
               {item.question}
             </dt>
             <svg
@@ -46,7 +46,7 @@ export default function FAQAccordion({ items }: FAQAccordionProps) {
             </svg>
           </button>
           {openIndex === index && (
-            <dd className="pb-6 pl-0 pr-12 text-base leading-7 text-gray-600">
+            <dd className="pb-6 pl-0 pr-12 text-sm leading-[1.7] text-gray-600 sm:text-base sm:leading-7">
               {item.answer}
             </dd>
           )}
