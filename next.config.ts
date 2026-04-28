@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
     // not an incorrectly inferred parent directory.
     root: __dirname,
   },
+  images: {
+    formats: ["image/avif", "image/webp"],
+  },
 };
 
 export default nextConfig;

@@ -3,11 +3,25 @@ import type { Metadata } from 'next';
 import PublicLayoutClient from '@/components/PublicLayoutClient';
 import LandingHeroHeader from '@/components/LandingHeroHeader';
 import LegalPageLayout from '@/components/LegalPageLayout';
+import { SITE_NAME } from '@/lib/seo/site';
 
 export const metadata: Metadata = {
-  title: 'Terms of Service | IvyWay',
+  title: `Terms of Service | ${SITE_NAME}`,
   description:
     'IvyWay Terms of Service governing access to and use of the IvyWay platform.',
+  alternates: { canonical: '/terms' },
+  openGraph: {
+    title: `Terms of Service | ${SITE_NAME}`,
+    description: 'IvyWay Terms of Service governing access to and use of the IvyWay platform.',
+    url: '/terms',
+    images: [{ url: '/opengraph-image', width: 1200, height: 630, alt: `${SITE_NAME} preview` }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `Terms of Service | ${SITE_NAME}`,
+    description: 'IvyWay Terms of Service governing access to and use of the IvyWay platform.',
+    images: ['/twitter-image'],
+  },
 };
 
 export default function TermsPage() {

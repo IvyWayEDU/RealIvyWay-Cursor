@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { SITE_NAME, getSiteUrl } from "@/lib/seo/site";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,11 +15,39 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://ivywayedu.com"
-  ),
-  title: "IvyWay - Education Platform",
-  description: "Connect with quality education providers and unlock your learning potential",
+  metadataBase: new URL(getSiteUrl()),
+  title: {
+    default: `${SITE_NAME} | Tutoring, College Counseling & IvyWay AI`,
+    template: `%s | ${SITE_NAME}`,
+  },
+  description:
+    "Premium academic support: 1:1 tutoring, college counseling, SAT/ACT test prep, virtual college tours, and IvyWay AI study tools.",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} | Tutoring, College Counseling & IvyWay AI`,
+    description:
+      "Premium academic support: 1:1 tutoring, college counseling, SAT/ACT test prep, virtual college tours, and IvyWay AI study tools.",
+    url: "/",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: `${SITE_NAME} preview`,
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE_NAME} | Tutoring, College Counseling & IvyWay AI`,
+    description:
+      "Premium academic support: 1:1 tutoring, college counseling, SAT/ACT test prep, virtual college tours, and IvyWay AI study tools.",
+    images: ["/twitter-image"],
+  },
   icons: {
     icon: [
       { url: "/favicon.ico?v=2" },

@@ -137,7 +137,7 @@ export default function GameModeLandingClient() {
               {isCreating ? 'Creating...' : 'Create Quiz Battle'}
             </button>
             <a
-              href="/pricing"
+              href="/#pricing"
               className="inline-flex w-full items-center justify-center rounded-md border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-900 shadow-sm transition-colors hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] sm:w-auto"
             >
               Premium Feature

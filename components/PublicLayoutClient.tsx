@@ -16,10 +16,13 @@ export default function PublicLayoutClient({
   const isLandingPage = pathname === '/';
   // Legal pages use the landing-style hero header.
   const isLegalPage = pathname === '/privacy' || pathname === '/terms';
+  // Marketing pages also use the landing-style hero header.
+  const isMarketingPage = pathname === '/faq' || pathname === '/contact' || pathname === '/ivyway-ai';
+  const isHeroHeaderPage = isLandingPage || isLegalPage || isMarketingPage;
 
   return (
     <div className="public-layout flex min-h-screen flex-col bg-white">
-      {!isAuthPage && !isLandingPage && !isLegalPage && <Navigation />}
+      {!isAuthPage && !isHeroHeaderPage && <Navigation />}
       <main className="flex-1 bg-white">{children}</main>
       {!isAuthPage && !isLandingPage && <Footer />}
     </div>

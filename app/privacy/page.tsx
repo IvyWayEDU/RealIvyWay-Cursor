@@ -3,11 +3,25 @@ import type { Metadata } from 'next';
 import PublicLayoutClient from '@/components/PublicLayoutClient';
 import LandingHeroHeader from '@/components/LandingHeroHeader';
 import LegalPageLayout from '@/components/LegalPageLayout';
+import { SITE_NAME } from '@/lib/seo/site';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy | IvyWay',
+  title: `Privacy Policy | ${SITE_NAME}`,
   description:
     'IvyWay Privacy Policy describing how we collect, use, and share information.',
+  alternates: { canonical: '/privacy' },
+  openGraph: {
+    title: `Privacy Policy | ${SITE_NAME}`,
+    description: 'IvyWay Privacy Policy describing how we collect, use, and share information.',
+    url: '/privacy',
+    images: [{ url: '/opengraph-image', width: 1200, height: 630, alt: `${SITE_NAME} preview` }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: `Privacy Policy | ${SITE_NAME}`,
+    description: 'IvyWay Privacy Policy describing how we collect, use, and share information.',
+    images: ['/twitter-image'],
+  },
 };
 
 export default function PrivacyPage() {

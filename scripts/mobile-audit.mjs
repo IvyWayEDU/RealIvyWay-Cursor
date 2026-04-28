@@ -8,7 +8,7 @@ const outDir = path.resolve(process.cwd(), ".mobile-audit");
 
 const routes = [
   "/",
-  "/pricing",
+  "/#pricing",
   "/auth/login",
   "/auth/register",
   "/checkout",

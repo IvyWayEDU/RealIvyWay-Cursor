@@ -937,7 +937,7 @@ export default function Home() {
                           alt="IvyWay results collage"
                           fill
                           sizes="(min-width: 1024px) 420px, 92vw"
-                          quality={95}
+                          quality={88}
                           className="object-cover"
                         />
                       </div>

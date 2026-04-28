@@ -143,7 +143,7 @@ export default function NavigationClient() {
                       <button
                         onClick={() => {
                           setShowServicesDropdown(false);
-                          router.push('/pricing#tutoring-plans');
+                          router.push('/#pricing');
                         }}
                         className="block w-full text-left rounded-xl px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100/70 hover:ring-1 hover:ring-white/70 hover:text-[#0088CB] transition-all"
                       >
@@ -152,7 +152,7 @@ export default function NavigationClient() {
                       <button
                         onClick={() => {
                           setShowServicesDropdown(false);
-                          router.push('/pricing#college-counseling');
+                          router.push('/#pricing');
                         }}
                         className="block w-full text-left rounded-xl px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100/70 hover:ring-1 hover:ring-white/70 hover:text-[#0088CB] transition-all"
                       >
@@ -161,7 +161,7 @@ export default function NavigationClient() {
                       <button
                         onClick={() => {
                           setShowServicesDropdown(false);
-                          router.push('/pricing#ai-tools');
+                          router.push('/#ivyway-ai');
                         }}
                         className="block w-full text-left rounded-xl px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-100/70 hover:ring-1 hover:ring-white/70 hover:text-[#0088CB] transition-all"
                       >
@@ -172,13 +172,13 @@ export default function NavigationClient() {
                 )}
               </div>
               <Link
-                href="/pricing"
+                href="/#pricing"
                 className={navItemClass}
               >
                 Pricing
               </Link>
               <Link
-                href="/pricing#payments-faq"
+                href="/#faq"
                 className={navItemClass}
               >
                 FAQ
@@ -300,7 +300,7 @@ export default function NavigationClient() {
                 Home
               </Link>
               <Link
-                href="/pricing"
+                href="/#pricing"
                 onClick={() => setShowMobileMenu(false)}
                 className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
               >
@@ -309,7 +309,7 @@ export default function NavigationClient() {
               <button
                 onClick={() => {
                   setShowMobileMenu(false);
-                  router.push('/pricing#tutoring-plans');
+                  router.push('/#pricing');
                 }}
                 className="block w-full text-left rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
               >
@@ -318,7 +318,7 @@ export default function NavigationClient() {
               <button
                 onClick={() => {
                   setShowMobileMenu(false);
-                  router.push('/pricing#college-counseling');
+                  router.push('/#pricing');
                 }}
                 className="block w-full text-left rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
               >
@@ -327,14 +327,14 @@ export default function NavigationClient() {
               <button
                 onClick={() => {
                   setShowMobileMenu(false);
-                  router.push('/pricing#ai-tools');
+                  router.push('/#ivyway-ai');
                 }}
                 className="block w-full text-left rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
               >
                 IvyWay AI
               </button>
               <Link
-                href="/pricing#payments-faq"
+                href="/#faq"
                 onClick={() => setShowMobileMenu(false)}
                 className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
               >

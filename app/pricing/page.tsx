@@ -1,7 +1,7 @@
-import { redirect } from 'next/navigation';
+import { permanentRedirect } from 'next/navigation';
 
 export default function PricingPage() {
-  redirect('/#pricing');
+  // Pricing lives on the landing page only (/#pricing).
+  // Keep /pricing as a compatibility entrypoint.
+  permanentRedirect('/#pricing');
 }
-
-
