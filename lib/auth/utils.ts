@@ -5,6 +5,12 @@ import { UserRole } from './types';
  * Priority: Admin > Student > Provider (Tutor/Counselor)
  */
 export function getDashboardRoute(roles: UserRole[]): string {
+  // If a user is authenticated but has not chosen a role yet,
+  // force them into the mandatory post-signup role selection flow.
+  if (!Array.isArray(roles) || roles.length === 0) {
+    return '/onboarding/role';
+  }
+
   if (roles.includes('admin')) {
     return '/admin';
   }
@@ -26,9 +32,9 @@ export function getDashboardRoute(roles: UserRole[]): string {
  * Validates that roles are valid and follow business rules
  */
 export function validateRoles(roles: UserRole[]): { valid: boolean; error?: string } {
-  if (roles.length === 0) {
-    return { valid: false, error: 'At least one role must be selected' };
-  }
+  // Roles may be empty immediately after account creation.
+  // We enforce role selection via `/onboarding/role` instead of blocking signup.
+  if (!Array.isArray(roles) || roles.length === 0) return { valid: true };
   
   // Admin role cannot be combined with other roles (only manual assignment)
   if (roles.includes('admin') && roles.length > 1) {

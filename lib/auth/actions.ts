@@ -1,14 +1,12 @@
 'use server';
 
 import { hashPassword, verifyPassword } from './crypto';
-import { createUser, getUserByEmail } from './storage';
+import { createUser, getUserByEmail, getUsers } from './storage';
 import { createSession, deleteSession } from './session';
 import { getDashboardRoute, validateRoles } from './utils';
 import { UserRole } from './types';
 import { redirect } from 'next/navigation';
 import crypto from 'crypto';
-import { createProvider } from '@/lib/providers/storage';
-import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
 import { sendWelcomeEmailForUser } from '@/lib/email/transactional';
 
 export interface SignupResult {
@@ -26,9 +24,7 @@ export interface LoginResult {
 export async function signup(
   name: string,
   email: string,
-  password: string,
-  roles: UserRole[],
-  role?: 'student' | 'provider' | 'admin'
+  password: string
 ): Promise<SignupResult> {
   // Validate inputs
   if (!name || !email || !password) {
@@ -45,11 +41,21 @@ export async function signup(
     return { success: false, error: 'Invalid email address' };
   }
 
-  // Validate roles
-  const roleValidation = validateRoles(roles);
-  if (!roleValidation.valid) {
-    return { success: false, error: roleValidation.error };
+  // Roles are selected AFTER account creation (mandatory `/onboarding/role`).
+  // Still allow dev-only admin bootstrap for the very first user.
+  let roles: UserRole[] = [];
+  try {
+    const existing = await getUsers();
+    if (existing.length === 0 && process.env.NODE_ENV !== 'production') {
+      roles = ['admin'];
+    }
+  } catch {
+    // If bootstrap check fails, proceed with unassigned roles.
   }
+
+  // Validate roles (allows empty)
+  const roleValidation = validateRoles(roles);
+  if (!roleValidation.valid) return { success: false, error: roleValidation.error };
 
   // Check if user already exists
   const existingUser = await getUserByEmail(email);
@@ -73,52 +79,6 @@ export async function signup(
   try {
     const created = await createUser(user as any);
 
-    // Ensure Stripe customer exists for students (best-effort; do not block signup if Stripe isn't configured)
-    if (Array.isArray(created.roles) && created.roles.includes('student')) {
-      try {
-        await ensureStripeCustomerForUser(created.id);
-      } catch (e) {
-        console.warn('[STRIPE] Failed to create customer during signup (non-blocking):', e);
-      }
-    }
-
-    // Create provider profile if role is provider
-    if (role === 'provider' && roles.includes('provider')) {
-      const nameParts = name.trim().split(' ');
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.slice(1).join(' ') || '';
-      const displayName = name.trim();
-
-      await createProvider({
-        id: user.id, // Provider ID matches user ID
-        userId: user.id,
-        providerType: 'tutor', // Default to tutor, can be changed later
-        displayName,
-        firstName: firstName || undefined,
-        lastName: lastName || undefined,
-        bio: undefined,
-        profileImageUrl: undefined,
-        coverImageUrl: undefined,
-        phoneNumber: undefined,
-        website: undefined,
-        location: undefined,
-        timezone: undefined,
-        qualifications: [],
-        certifications: [],
-        yearsOfExperience: undefined,
-        subjects: [],
-        gradeLevels: [],
-        availabilityStatus: 'available',
-        workingHours: undefined,
-        institutionType: undefined,
-        accreditation: undefined,
-        studentCapacity: undefined,
-        profileComplete: false,
-        verified: false,
-        active: true,
-      });
-    }
-
     // Create session
     await createSession(created.id, created.email, created.name, created.roles);
 
@@ -129,12 +89,8 @@ export async function signup(
       console.warn('[email] welcome email failed (non-blocking)', e);
     }
 
-    // Get redirect route
-    // If provider, redirect to onboarding instead of dashboard
-    let redirectTo = getDashboardRoute(created.roles);
-    if (role === 'provider' && roles.includes('provider')) {
-      redirectTo = '/onboarding/provider';
-    }
+    // Get redirect route (forces /onboarding/role when roles are unassigned)
+    const redirectTo = getDashboardRoute(created.roles);
 
     return { success: true, redirectTo };
   } catch (error) {

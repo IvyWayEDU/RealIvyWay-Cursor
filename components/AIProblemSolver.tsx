@@ -20,7 +20,7 @@ export default function AIProblemSolver() {
               />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900">AI Learning Assistant</h2>
+          <h2 className="text-xl font-semibold text-gray-900">IvyWay AI</h2>
         </div>
         <p className="mt-1 text-sm text-gray-500">
           All-in-one AI tools to help you study smarter, faster, and more efficiently

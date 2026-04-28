@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import PublicLayoutClient from '@/components/PublicLayoutClient';
+import LandingHeroHeader from '@/components/LandingHeroHeader';
 import LegalPageLayout from '@/components/LegalPageLayout';
 
 export const metadata: Metadata = {
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   return (
     <PublicLayoutClient>
+      <LandingHeroHeader />
       <LegalPageLayout
         title="Terms of Service"
         description="These Terms govern your access to and use of IvyWay."
@@ -243,9 +245,9 @@ export default function TermsPage() {
             For questions about these Terms, contact{' '}
             <a
               className="font-semibold text-[#0088CB] hover:text-[#0077B3] underline underline-offset-4"
-              href="mailto:support@ivyway.com"
+              href="mailto:contact@ivywayedu.com"
             >
-              support@ivyway.com
+              contact@ivywayedu.com
             </a>
             .
           </p>

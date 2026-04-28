@@ -184,7 +184,7 @@ export default function NavigationClient() {
                 FAQ
               </Link>
               <a
-                href="mailto:support@ivyway.com"
+                href="mailto:contact@ivywayedu.com"
                 className={navItemClass}
               >
                 Contact
@@ -341,7 +341,7 @@ export default function NavigationClient() {
                 FAQ
               </Link>
               <a
-                href="mailto:support@ivyway.com"
+                href="mailto:contact@ivywayedu.com"
                 onClick={() => setShowMobileMenu(false)}
                 className="block rounded-md px-3 py-3 text-base font-semibold text-gray-900 hover:bg-gray-50"
               >

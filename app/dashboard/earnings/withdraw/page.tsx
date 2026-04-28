@@ -15,6 +15,10 @@ export default async function WithdrawPage() {
   const session = await getSession();
   if (!session) redirect('/auth/login');
 
+  if (!Array.isArray((session as any).roles) || (session as any).roles.length === 0) {
+    redirect('/onboarding/role');
+  }
+
   if (!isProvider(session as any)) redirect('/dashboard/student');
 
   const providerId = session.userId;

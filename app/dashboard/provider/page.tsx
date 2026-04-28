@@ -11,10 +11,25 @@ import { getSession } from '@/lib/auth/session';
 import { getOnboardingStatus } from '@/lib/auth/onboarding';
 import { getFirstName } from '@/lib/auth/displayName';
 import { getProviderEarningsSummary } from '@/lib/earnings/summary.server';
+import { getProviderByUserId } from '@/lib/providers/storage';
 import UpcomingSessionsSection from '@/components/UpcomingSessionsSection';
 import ProviderEarningsSnapshotClient from '@/components/ProviderEarningsSnapshotClient';
 import IvyWayAICard from '@/components/IvyWayAICard';
 import MessagesSection from '@/components/MessagesSection';
+import ProviderAvailabilityPrompt from '@/components/ProviderAvailabilityPrompt';
+
+function providerHasAnyAvailability(provider: any | null | undefined): boolean {
+  const raw = provider && typeof provider === 'object' ? (provider as any).availability : null;
+  const arr = Array.isArray(raw) ? raw : [];
+  if (arr.length === 0) return false;
+  for (const entry of arr) {
+    if (!entry || typeof entry !== 'object') continue;
+    const blocks = Array.isArray((entry as any).blocks) ? (entry as any).blocks : [];
+    const days = Array.isArray((entry as any).days) ? (entry as any).days : [];
+    if (blocks.length > 0 || days.length > 0) return true;
+  }
+  return false;
+}
 
 export default async function ProviderDashboard() {
   // Verify session exists
@@ -22,6 +37,10 @@ export default async function ProviderDashboard() {
   
   if (!session) {
     redirect('/auth/login');
+  }
+
+  if (!Array.isArray(session.roles) || session.roles.length === 0) {
+    redirect('/onboarding/role');
   }
 
   // Check if user is a provider
@@ -36,11 +55,20 @@ export default async function ProviderDashboard() {
     redirect('/onboarding/provider');
   }
 
-  const earnings = await getProviderEarningsSummary(session.userId);
+  const [earnings, provider] = await Promise.all([
+    getProviderEarningsSummary(session.userId),
+    getProviderByUserId(session.userId).catch(() => null),
+  ]);
+
+  const dismissedAt = (onboardingStatus.user as any)?.availabilityPromptDismissedAt;
+  const dismissed = typeof dismissedAt === 'string' ? dismissedAt.trim().length > 0 : Boolean(dismissedAt);
+  const hasAvailability = providerHasAnyAvailability(provider);
+  const shouldShowAvailabilityPrompt = !dismissed && !hasAvailability;
   const firstName = getFirstName(session.name);
 
   return (
     <div className="space-y-8">
+      <ProviderAvailabilityPrompt show={shouldShowAvailabilityPrompt} />
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

@@ -50,9 +50,9 @@ export default function LegalPageLayout({
               Questions? Contact{' '}
               <a
                 className="font-semibold text-[#0088CB] hover:text-[#0077B3] underline underline-offset-4"
-                href="mailto:support@ivyway.com"
+                href="mailto:contact@ivywayedu.com"
               >
-                support@ivyway.com
+                contact@ivywayedu.com
               </a>
               .
             </p>

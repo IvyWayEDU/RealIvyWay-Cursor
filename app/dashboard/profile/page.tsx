@@ -11,6 +11,10 @@ export default async function ProfilePage() {
     redirect('/auth/login');
   }
 
+  if (!Array.isArray(session.roles) || session.roles.length === 0) {
+    redirect('/onboarding/role');
+  }
+
   // Get full user data
   const user = await getUserById(session.userId);
   if (!user) {

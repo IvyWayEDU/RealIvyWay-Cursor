@@ -18,7 +18,6 @@ const SUPPORTED_TUTORING_SUBJECTS = new Set([
   'science',
   'history',
   'languages',
-  'computer_science',
   'test_prep',
 ]);
 
@@ -91,7 +90,6 @@ function canonicalSubjectToEligibilityLabel(subject: string): string {
   const canonical = normalizeSubjectId(String(subject ?? '').trim()) || String(subject ?? '').trim();
   if (canonical === 'math') return 'Math';
   if (canonical === 'english') return 'English';
-  if (canonical === 'computer_science') return 'Computer Science';
   if (canonical === 'languages') return 'Languages';
   if (canonical === 'test_prep') return 'Test Prep';
   return canonical;

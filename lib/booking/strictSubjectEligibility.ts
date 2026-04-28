@@ -30,7 +30,6 @@ export function normalizeBookingSubjectId(input: unknown): string | null {
     languages: 'languages',
     'foreign languages': 'languages',
     'foreign language': 'languages',
-    'computer science': 'computer_science',
     'test prep': 'test_prep',
     testprep: 'test_prep',
     'test preparation': 'test_prep',

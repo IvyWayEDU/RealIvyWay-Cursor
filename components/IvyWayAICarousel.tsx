@@ -18,7 +18,7 @@ function prefersReducedMotion(): boolean {
 
 export default function IvyWayAICarousel({
   slides,
-  autoRotateMs = 5200,
+  autoRotateMs = 4200,
 }: {
   slides: IvyWayAISlide[];
   autoRotateMs?: number;

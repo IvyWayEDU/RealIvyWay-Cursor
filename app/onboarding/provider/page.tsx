@@ -11,6 +11,10 @@ export default async function OnboardingProviderPage() {
     redirect('/auth/login');
   }
 
+  if (!Array.isArray(session.roles) || session.roles.length === 0) {
+    redirect('/onboarding/role');
+  }
+
   // Check if user is a provider
   const isProvider = session.roles.includes('provider');
   if (!isProvider) {

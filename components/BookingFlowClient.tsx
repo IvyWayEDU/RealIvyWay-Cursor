@@ -196,7 +196,6 @@ const TUTORING_SUBJECTS = [
   'History & Social Studies',
   'English & Language Arts',
   'Foreign Languages',
-  'Computer Science',
 ];
 
 // Topic lists for each tutoring subject
@@ -298,28 +297,6 @@ const TUTORING_TOPICS: Record<string, string[]> = {
     'AP Language Prep',
     'IB Language Prep',
   ],
-  'Computer Science': [
-    'Computer Basics',
-    'Programming Fundamentals',
-    'Python',
-    'Java',
-    'C++',
-    'JavaScript',
-    'Web Development',
-    'HTML & CSS',
-    'React',
-    'Data Structures',
-    'Algorithms',
-    'Object-Oriented Programming',
-    'Databases',
-    'SQL',
-    'Cybersecurity',
-    'Machine Learning Basics',
-    'Artificial Intelligence Basics',
-    'AP Computer Science A',
-    'AP Computer Science Principles',
-    'IB Computer Science',
-  ],
 };
 
 // Test Prep subjects - standardized tests only
@@ -401,7 +378,7 @@ const TIME_SLOTS = [
   'Friday, Jan 19 - 2:00 PM',
 ];
 
-// Extended provider type to support language capabilities for Foreign Languages and topic capabilities for Computer Science
+// Extended provider type to support language capabilities for Foreign Languages
 type Provider = {
   id: string;
   name: string;
@@ -410,7 +387,6 @@ type Provider = {
   role: 'Tutor' | 'Counselor'; // Role-based filtering: Tutors for tutoring/test-prep, Counselors for counseling
   subject: string; // Subject for tutors/test-prep, or school tag for counselors
   languages?: string[]; // Only for Foreign Languages tutors
-  topics?: string[]; // Only for Computer Science tutors
   schoolTags?: string[]; // Schools the counselor is tagged with (for college counseling)
 };
 
@@ -421,7 +397,6 @@ const MOCK_PROVIDERS: Provider[] = [
   { id: '5', name: 'Dr. Lisa Wang', school: 'Princeton University', rating: 4.9, role: 'Tutor', subject: 'History & Social Studies' },
   { id: '6', name: 'Prof. James Wilson', school: 'Columbia University', rating: 4.8, role: 'Tutor', subject: 'English & Language Arts' },
   { id: '7', name: 'Dr. Maria Garcia', school: 'UCLA', rating: 4.7, role: 'Tutor', subject: 'Foreign Languages', languages: ['Spanish', 'French', 'Portuguese'] },
-  { id: '8', name: 'Prof. Robert Taylor', school: 'Carnegie Mellon', rating: 4.9, role: 'Tutor', subject: 'Computer Science', topics: ['Python', 'Java', 'Data Structures', 'Algorithms', 'AP Computer Science A'] },
   { id: '11', name: 'Dr. Yuki Tanaka', school: 'UC Berkeley', rating: 4.8, role: 'Tutor', subject: 'Foreign Languages', languages: ['Japanese', 'Korean', 'Mandarin'] },
   { id: '12', name: 'Prof. Hans Mueller', school: 'Cornell University', rating: 4.9, role: 'Tutor', subject: 'Foreign Languages', languages: ['German', 'French', 'Russian'] },
   
@@ -525,7 +500,7 @@ const providerSupportsSelectedOffering = (
 
 // Check if at least one active tutor is available for a given subject or test
 // STRICT MATCHING: Only Tutors with exact subject/test match
-// For tutoring: subject-only matching (except Foreign Languages and Computer Science which require topic-level matching)
+// For tutoring: subject-only matching (Foreign Languages requires topic-level language matching)
 function hasTutorAvailableForSubject(service: Service, subject: Subject, topic: Topic = null): boolean {
   if (!subject || !service) return false;
   
@@ -558,31 +533,7 @@ function hasTutorAvailableForSubject(service: Service, subject: Subject, topic: 
     });
   }
   
-  // Computer Science requires topic-level matching
-  if (service === 'tutoring' && normalizedSubject === 'computer science') {
-    if (!topic) return false; // Need a specific CS topic selected
-    
-    // Normalize topic (CS topic name) for matching
-    const normalizedTopic = topic.trim().toLowerCase();
-    
-    // STRICT: Check if any TUTOR teaches Computer Science AND has the specific topic
-    return MOCK_PROVIDERS.some((provider) => {
-      // Must be a Tutor
-      if (provider.role !== 'Tutor') return false;
-      
-      const providerSubjectNormalized = normalizeSubjectName(provider.subject);
-      if (providerSubjectNormalized !== 'computer science') return false;
-      
-      // Check if provider teaches this specific CS topic
-      if (!provider.topics || provider.topics.length === 0) return false;
-      
-      return provider.topics.some((csTopic) => {
-        return normalizeSubjectName(csTopic) === normalizedTopic;
-      });
-    });
-  }
-  
-  // For all other subjects (non-language, non-CS), check subject-level matching only
+  // For all other subjects (non-language), check subject-level matching only
   // Topic is ignored - selecting a subject means tutor can teach all topics
   // STRICT: Only Tutors with exact subject match
   return MOCK_PROVIDERS.some((provider) => {

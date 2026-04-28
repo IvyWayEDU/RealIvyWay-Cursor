@@ -4,9 +4,7 @@ import { hashPassword } from '@/lib/auth/crypto';
 import { createSession } from '@/lib/auth/session';
 import { UserRole } from '@/lib/auth/types';
 import { getUsers } from '@/lib/auth/storage';
-import { createProvider } from '@/lib/providers/storage';
 import crypto from 'crypto';
-import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
 import { handleApiError } from '@/lib/errorHandler';
 import { sendWelcomeEmailForUser } from '@/lib/email/transactional';
 
@@ -18,7 +16,7 @@ export async function POST(request: NextRequest) {
     });
 
     const body = await request.json();
-    const { name, email, password, role } = body;
+    const { name, email, password } = body;
     
     // Validate input
     if (!name || !email || !password) {
@@ -49,20 +47,12 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    // Validate role
-    const validRoles: UserRole[] = ['student', 'provider', 'admin'];
-    let userRole: UserRole = role && validRoles.includes(role) ? role : 'student';
-    
-    // Admin bootstrap: first user in dev mode becomes admin
+    // Roles are selected AFTER account creation (mandatory `/onboarding/role`).
+    // Admin bootstrap: first user in dev mode becomes admin.
+    let roles: UserRole[] = [];
     const users = await getUsers();
     if (users.length === 0 && process.env.NODE_ENV !== 'production') {
-      userRole = 'admin';
-    } else if (role === 'admin') {
-      // Only allow admin role in dev mode, and only if no users exist
-      return NextResponse.json(
-        { error: 'Admin role cannot be assigned during registration' },
-        { status: 400 }
-      );
+      roles = ['admin'];
     }
     
     // Check if user already exists
@@ -83,54 +73,8 @@ export async function POST(request: NextRequest) {
       name: name.trim(),
       email: email.toLowerCase().trim(),
       passwordHash,
-      roles: [userRole],
+      roles,
     });
-
-    // Ensure Stripe customer exists for student users (best-effort; do not block registration)
-    if (userRole === 'student') {
-      try {
-        await ensureStripeCustomerForUser(user.id);
-      } catch (e) {
-        console.warn('[STRIPE] Failed to create customer during registration (non-blocking):', e);
-      }
-    }
-    
-    // Create provider profile if role is provider
-    if (userRole === 'provider') {
-      const nameParts = name.trim().split(' ');
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.slice(1).join(' ') || '';
-      const displayName = name.trim();
-
-      await createProvider({
-        id: user.id, // Provider ID matches user ID
-        userId: user.id,
-        providerType: 'tutor', // Default to tutor, can be changed later
-        displayName,
-        firstName: firstName || undefined,
-        lastName: lastName || undefined,
-        bio: undefined,
-        profileImageUrl: undefined,
-        coverImageUrl: undefined,
-        phoneNumber: undefined,
-        website: undefined,
-        location: undefined,
-        timezone: undefined,
-        qualifications: [],
-        certifications: [],
-        yearsOfExperience: undefined,
-        subjects: [],
-        gradeLevels: [],
-        availabilityStatus: 'available',
-        workingHours: undefined,
-        institutionType: undefined,
-        accreditation: undefined,
-        studentCapacity: undefined,
-        profileComplete: false,
-        verified: false,
-        active: true,
-      });
-    }
     
     // Create session
     await createSession(user.id, user.email, user.name, user.roles);

@@ -11,7 +11,7 @@ interface ProviderProfileClientProps {
 }
 
 // Academic subjects only (Test Prep is selected via Services UX, but stored as subject "test_prep").
-const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages', 'computer_science'] as const;
+const COMMON_SUBJECT_KEYS = ['math', 'english', 'science', 'history', 'languages'] as const;
 type SubjectKey = (typeof COMMON_SUBJECT_KEYS)[number];
 
 const SUBJECT_LABELS: Record<string, string> = {
@@ -20,7 +20,6 @@ const SUBJECT_LABELS: Record<string, string> = {
   science: 'Science',
   history: 'History',
   languages: 'Languages',
-  computer_science: 'Computer Science',
   test_prep: 'Test Prep',
 };
 
@@ -133,7 +132,9 @@ export default function ProviderProfileClient({ initialUser }: ProviderProfileCl
   const hasService = (key: string) => services.includes(key);
   const isTutor = hasService('tutoring');
   const hasTestPrepSubject = Array.isArray(subjects) && subjects.includes('test_prep');
-  const academicSubjects = Array.isArray(subjects) ? subjects.filter((s) => s !== 'test_prep') : [];
+  const academicSubjects = Array.isArray(subjects)
+    ? subjects.filter((s) => s !== 'test_prep' && s !== 'computer_science')
+    : [];
   const hasLanguagesSubject = Array.isArray(subjects) && subjects.includes('languages');
 
   // Keep dependent fields consistent with enabled services.

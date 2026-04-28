@@ -18,7 +18,6 @@ function normalizeSubject(s: unknown): string | null {
   if (val === 'science') return 'science';
   if (val === 'history') return 'history';
   if (val === 'languages') return 'languages';
-  if (val === 'computer science') return 'computer_science';
   if (val === 'test prep') return 'test_prep';
 
   return null;
@@ -103,7 +102,6 @@ function canonicalSubjectToEligibilityLabel(subject: string): string {
   const canonical = normalizeSubjectId(String(subject ?? '').trim()) || String(subject ?? '').trim();
   if (canonical === 'math') return 'Math';
   if (canonical === 'english') return 'English';
-  if (canonical === 'computer_science') return 'Computer Science';
   if (canonical === 'languages') return 'Languages';
   if (canonical === 'test_prep') return 'Test Prep';
   return canonical;

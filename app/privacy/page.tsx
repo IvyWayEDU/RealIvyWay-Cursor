@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import PublicLayoutClient from '@/components/PublicLayoutClient';
+import LandingHeroHeader from '@/components/LandingHeroHeader';
 import LegalPageLayout from '@/components/LegalPageLayout';
 
 export const metadata: Metadata = {
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 export default function PrivacyPage() {
   return (
     <PublicLayoutClient>
+      <LandingHeroHeader />
       <LegalPageLayout
         title="Privacy Policy"
         description="This policy explains how IvyWay collects, uses, and shares information."
@@ -218,9 +220,9 @@ export default function PrivacyPage() {
             Contact us at{' '}
             <a
               className="font-semibold text-[#0088CB] hover:text-[#0077B3] underline underline-offset-4"
-              href="mailto:support@ivyway.com"
+              href="mailto:contact@ivywayedu.com"
             >
-              support@ivyway.com
+              contact@ivywayedu.com
             </a>{' '}
             with questions about this Privacy Policy.
           </p>

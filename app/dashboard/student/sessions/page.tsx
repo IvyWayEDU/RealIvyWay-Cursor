@@ -16,6 +16,10 @@ export default async function StudentSessionsPage() {
     redirect('/auth/login');
   }
 
+  if (!Array.isArray(session.roles) || session.roles.length === 0) {
+    redirect('/onboarding/role');
+  }
+
   const isStudent = session.roles.includes('student');
   if (!isStudent) {
     redirect('/dashboard/sessions');

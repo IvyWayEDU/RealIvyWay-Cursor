@@ -9,6 +9,10 @@ export default async function AvailabilityPage() {
     redirect('/auth/login');
   }
 
+  if (!Array.isArray(session.roles) || session.roles.length === 0) {
+    redirect('/onboarding/role');
+  }
+
   // Only providers can access this page
   if (!session.roles.includes('provider')) {
     redirect('/dashboard');

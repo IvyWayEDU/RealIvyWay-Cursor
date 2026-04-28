@@ -18,6 +18,10 @@ export default async function EarningsPage() {
     redirect('/auth/login');
   }
 
+  if (!Array.isArray((session as any).roles) || (session as any).roles.length === 0) {
+    redirect('/onboarding/role');
+  }
+
   if (!isProvider(session as any)) {
     redirect('/dashboard/student');
   }

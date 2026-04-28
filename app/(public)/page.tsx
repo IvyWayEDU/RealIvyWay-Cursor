@@ -28,11 +28,11 @@ const ivyWayAiSlides: IvyWayAISlide[] = [
     alt: 'IvyWay AI dashboard',
   },
   {
-    key: 'ai-chat',
-    label: 'AI Chat',
-    caption: 'Ask anything, we have the answer',
-    src: '/images/ai-showcase/ivyway-ai-chat.png',
-    alt: 'IvyWay AI chat',
+    key: 'quiz',
+    label: 'Quiz Generator',
+    caption: 'Create quizzes and adjust difficulty to your liking',
+    src: '/images/ai-showcase/ivyway-ai-quiz.png',
+    alt: 'IvyWay AI quiz generator',
   },
   {
     key: 'game-mode',
@@ -42,13 +42,6 @@ const ivyWayAiSlides: IvyWayAISlide[] = [
     alt: 'IvyWay AI game mode dashboard',
   },
   {
-    key: 'multiplayer',
-    label: 'Multiplayer',
-    caption: 'Play solo or battle against friends with our variety of game modes',
-    src: '/images/ai-showcase/ivyway-ai-multiplayer.png',
-    alt: 'IvyWay AI multiplayer',
-  },
-  {
     key: 'flashcards',
     label: 'Flashcards',
     caption: 'Generate flash cards for any topic',
@@ -56,11 +49,11 @@ const ivyWayAiSlides: IvyWayAISlide[] = [
     alt: 'IvyWay AI flashcards',
   },
   {
-    key: 'quiz',
-    label: 'Quiz Generator',
-    caption: 'Create quizzes and adjust difficulty to your liking',
-    src: '/images/ai-showcase/ivyway-ai-quiz.png',
-    alt: 'IvyWay AI quiz generator',
+    key: 'ai-chat',
+    label: 'AI Chat',
+    caption: 'Ask anything, we have the answer',
+    src: '/images/ai-showcase/ivyway-ai-chat.png',
+    alt: 'IvyWay AI chat',
   },
   {
     key: 'planner',
@@ -68,6 +61,13 @@ const ivyWayAiSlides: IvyWayAISlide[] = [
     caption: 'Easily set your schedule with our AI planner',
     src: '/images/ai-showcase/ivyway-ai-planner.png',
     alt: 'IvyWay AI planner',
+  },
+  {
+    key: 'multiplayer',
+    label: 'Multiplayer',
+    caption: 'Play solo or battle against friends with our variety of game modes',
+    src: '/images/ai-showcase/ivyway-ai-multiplayer.png',
+    alt: 'IvyWay AI multiplayer',
   },
 ];
 
@@ -348,15 +348,18 @@ export default function Home() {
 
   // Handle smooth scrolling when navigating to page with hash
   useEffect(() => {
-    if (window.location.hash === '#create-account') {
-      // Small delay to ensure DOM is ready
-      setTimeout(() => {
-        const element = document.getElementById('create-account');
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
-    }
+    const raw = window.location.hash ?? '';
+    if (!raw.startsWith('#')) return;
+    const id = raw.slice(1);
+    if (!id) return;
+
+    // Small delay to ensure DOM is ready.
+    const t = window.setTimeout(() => {
+      const element = document.getElementById(id);
+      if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+
+    return () => window.clearTimeout(t);
   }, []);
 
   // Check for session cookie on client side
@@ -532,22 +535,13 @@ export default function Home() {
               </Link>
 
               <div className="hidden md:flex flex-1 justify-center">
-                <nav className="flex items-center gap-2 lg:gap-3">
-                  <button onClick={() => scrollToSection('tutoring')} className={heroNavItemClass}>
-                    Tutoring
-                  </button>
-                  <button onClick={() => scrollToSection('college-counseling')} className={heroNavItemClass}>
-                    College Counseling
-                  </button>
-                  <button onClick={() => scrollToSection('virtual-tours')} className={heroNavItemClass}>
-                    Virtual Tours
-                  </button>
+                <nav className="flex items-center justify-center gap-2 lg:gap-3">
                   <button onClick={() => scrollToSection('ivyway-ai')} className={heroNavItemClass}>
                     IvyWay AI
                   </button>
-                  <Link href="/pricing" className={heroNavItemClass}>
+                  <button onClick={() => scrollToSection('pricing')} className={heroNavItemClass}>
                     Pricing
-                  </Link>
+                  </button>
                   <button onClick={() => scrollToSection('faq')} className={heroNavItemClass}>
                     FAQ
                   </button>
@@ -583,10 +577,8 @@ export default function Home() {
                   <div className="absolute top-full right-0 mt-2 w-80 rounded-2xl border border-white/12 bg-[#071d31]/85 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl z-50 md:hidden">
                     <div className="p-2 space-y-1">
                       {[
-                        { id: 'tutoring', label: 'Tutoring' },
-                        { id: 'college-counseling', label: 'College Counseling' },
-                        { id: 'virtual-tours', label: 'Virtual Tours' },
                         { id: 'ivyway-ai', label: 'IvyWay AI' },
+                        { id: 'pricing', label: 'Pricing' },
                         { id: 'faq', label: 'FAQ' },
                       ].map((item) => (
                         <button
@@ -597,13 +589,6 @@ export default function Home() {
                           {item.label}
                         </button>
                       ))}
-                      <Link
-                        href="/pricing"
-                        onClick={() => setShowMenu(false)}
-                        className="block rounded-xl px-3 py-2.5 text-sm font-semibold text-white/90 hover:bg-white/10 hover:ring-1 hover:ring-white/22 hover:backdrop-blur-xl transition-all"
-                      >
-                        Pricing
-                      </Link>
 
                       <div className="my-2 border-t border-white/10" />
 
@@ -652,7 +637,11 @@ export default function Home() {
                 {primaryCtaLabel}
               </Link>
               <Link
-                href="/pricing"
+                href="#pricing"
+                onClick={(e) => {
+                  e.preventDefault();
+                  scrollToSection('pricing');
+                }}
                 className="inline-flex items-center justify-center rounded-xl bg-white/0 px-6 py-3 text-base font-semibold text-white ring-1 ring-inset ring-white/22 hover:bg-white/10 transition-colors"
               >
                 Explore Pricing
@@ -797,82 +786,132 @@ export default function Home() {
         </div>
       </section>
 
-      {/* SECTION 5 — TRUST / SOCIAL PROOF (keep logos; upgrade feature grid) */}
-      <section className="border-y border-gray-200 bg-white">
+      {/* SECTION 5 — TRANSPARENT PRICING (Cluely-style spacing, IvyWay content) */}
+      <section id="pricing" className="scroll-mt-28 border-y border-gray-200 bg-white">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16 sm:py-20">
           <div className="mx-auto max-w-3xl text-center" data-ivyway-reveal>
             <p className="text-xs font-semibold tracking-[0.14em] uppercase text-[#0088CB]">
-              Trust-first by design
+              Transparent pricing
             </p>
             <h2 className="mt-4 text-3xl font-semibold tracking-[-0.02em] text-gray-950 sm:text-4xl leading-[1.08]">
-              Serious support, with less noise.
+              Simple pricing. Clear results.
             </h2>
             <p className="mt-5 text-base leading-[1.7] text-gray-600 sm:text-lg">
-              IvyWay combines expert human guidance and AI learning tools—so families and schools can understand progress at a glance.
+              Choose the support that fits your goals—from tutoring and counseling to test prep and IvyWay AI.
             </p>
           </div>
 
-          <div className="mt-12 grid grid-cols-1 gap-6 lg:grid-cols-12">
-            {[
-              {
-                title: 'Clear matching',
-                desc: 'Tutors and counselors aligned to goals, level, and learning style.',
-                icon: GraduationCap,
-              },
-              {
-                title: 'End-to-end sessions',
-                desc: 'Scheduling, notes, and follow-ups in one place.',
-                icon: CalendarCheck,
-              },
-              {
-                title: 'Progress visibility',
-                desc: 'Families and schools stay aligned without micromanaging.',
-                icon: ShieldCheck,
-              },
-              {
-                title: 'IvyWay AI',
-                desc: 'Practice, feedback, and next steps between sessions.',
-                icon: Sparkles,
-              },
-            ].map((f, idx) => {
-              const Icon = f.icon;
-              const span = idx < 2 ? 'lg:col-span-6' : 'lg:col-span-6';
-              return (
-                <div
-                  key={f.title}
-                  className={[
-                    span,
-                    'relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-8 shadow-[0_24px_70px_rgba(2,10,23,0.07)]',
-                  ].join(' ')}
-                  data-ivyway-reveal
-                  data-ivyway-delay={`${idx * 120}ms`}
-                >
-                  <div className="absolute inset-0 bg-[radial-gradient(900px_460px_at_30%_0%,rgba(0,136,203,0.14),rgba(255,255,255,0))]" />
-                  <div className="relative flex items-start justify-between gap-6">
-                    <div className="min-w-0">
-                      <div className="text-base font-medium tracking-[-0.01em] text-gray-950 sm:text-lg">
-                        {f.title}
+          <div className="mt-12">
+            <div className="-mx-4 flex flex-nowrap gap-6 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0 lg:overflow-visible">
+              {[
+                {
+                  title: 'Tutoring',
+                  startingAt: 'Starting at $69/session',
+                  secondaryPrice: 'Monthly package: $249 for 4 sessions per month',
+                  description:
+                    '1:1 academic support with expert tutors across multiple subjects.',
+                },
+                {
+                  title: 'College Counseling',
+                  startingAt: 'Starting at $89/session',
+                  secondaryPrice: 'Monthly package: $299 for 4 sessions per month',
+                  description: 'Guidance from real college students for admissions, essays, and planning.',
+                },
+                {
+                  title: 'Test Prep',
+                  startingAt: 'Starting at $149/session',
+                  secondaryPrice: 'Monthly package: $499 for 4 sessions per month',
+                  description: 'SAT, ACT, and advanced exam preparation built for stronger results.',
+                },
+                {
+                  title: 'Virtual Tours',
+                  startingAt: 'Starting at $124/session',
+                  secondaryPrice: 'Private guided campus tours with real students from your target schools',
+                  description:
+                    'Experience real college life through personalized campus tours led by students already attending your dream school.',
+                },
+              ].map((tier, idx) => {
+                return (
+                  <div
+                    key={tier.title}
+                    className={[
+                      'group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-[0_24px_70px_rgba(2,10,23,0.07)] ring-1 ring-black/5',
+                      'flex-none w-[280px] sm:w-[320px] lg:w-auto lg:flex-1',
+                      'p-8 sm:p-9',
+                      'h-[390px] sm:h-[420px]',
+                    ].join(' ')}
+                    data-ivyway-reveal
+                    data-ivyway-delay={`${idx * 140}ms`}
+                  >
+                    <div className="absolute inset-0 bg-[radial-gradient(900px_520px_at_30%_0%,rgba(0,136,203,0.10),rgba(255,255,255,0))]" />
+                    <div className="relative flex h-full flex-col items-center text-center">
+                      <div className="text-2xl font-semibold tracking-[-0.03em] text-gray-950 sm:text-[28px] leading-[1.08]">
+                        {tier.title}
                       </div>
-                      <p className="mt-2.5 text-sm leading-[1.7] text-gray-600 sm:text-base sm:leading-7">
-                        {f.desc}
+
+                      <div className="mt-4">
+                        <div className="text-base font-semibold tracking-[-0.02em] text-gray-950 sm:text-lg">
+                          {tier.startingAt}
+                        </div>
+                        <div className="mt-1.5 text-sm leading-[1.6] text-gray-600 sm:text-[15px]">
+                          {tier.secondaryPrice}
+                        </div>
+                      </div>
+
+                      <p className="mt-6 flex-1 text-sm leading-[1.75] text-gray-600 sm:text-base sm:leading-7">
+                        {tier.description}
+                      </p>
+
+                      <div className="w-full pt-7">
+                        <Link
+                          href="/auth/register"
+                          className="inline-flex w-full items-center justify-center rounded-xl bg-[#0088CB] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] transition-colors"
+                        >
+                          Get Started
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-8 sm:mt-10" data-ivyway-reveal data-ivyway-delay="220ms">
+              <div className="group relative overflow-hidden rounded-[28px] border border-gray-200 bg-white p-7 shadow-[0_24px_70px_rgba(2,10,23,0.07)] ring-1 ring-black/5 sm:p-8">
+                <div className="absolute inset-0 bg-[radial-gradient(1100px_520px_at_22%_0%,rgba(0,136,203,0.12),rgba(255,255,255,0))]" />
+                <div className="relative">
+                  <div className="grid grid-cols-1 gap-7 lg:grid-cols-12 lg:gap-10">
+                    <div className="lg:col-span-7">
+                      <div className="text-2xl font-semibold tracking-[-0.03em] text-gray-950 sm:text-[30px] leading-[1.08]">
+                        IvyWay AI
+                      </div>
+                      <p className="mt-4 text-sm leading-[1.75] text-gray-600 sm:text-base sm:leading-7">
+                        24/7 AI-powered academic support. Gain access to our problem solver, flashcard generator, custom quizzes, personal planner, and even battle against friends in our exclusive game mode.
                       </p>
                     </div>
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0088CB]/10 ring-1 ring-[#0088CB]/15">
-                      <Icon className="h-5 w-5 text-[#0088CB]" />
+
+                    <div className="lg:col-span-5 lg:flex lg:flex-col lg:items-stretch lg:justify-end">
+                      <div className="text-center lg:text-left">
+                        <div className="text-xl font-semibold tracking-[-0.02em] text-gray-950 sm:text-2xl leading-[1.1]">
+                          Prices as low as $5.20/month
+                        </div>
+                        <div className="mt-2.5 text-sm leading-[1.65] text-gray-600 sm:text-base sm:leading-7">
+                          Start your 3-day free trial and get 50% off your first billing cycle.
+                        </div>
+                      </div>
+
+                      <div className="mt-6">
+                        <Link
+                          href="/auth/register"
+                          className="inline-flex w-full items-center justify-center rounded-xl bg-[#0088CB] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] transition-colors"
+                        >
+                          Get Started
+                        </Link>
+                      </div>
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-
-          {/* Keep this credibility strip exactly (required) */}
-          <div className="mt-14 sm:mt-16" data-ivyway-reveal data-ivyway-delay="160ms">
-            <p className="text-center text-sm font-semibold text-gray-700">
-              Trusted by top schools, students, and educators
-            </p>
-            <div className="mt-4">
-              <SchoolCarousel />
+              </div>
             </div>
           </div>
         </div>
@@ -1138,25 +1177,78 @@ export default function Home() {
           </div>
 
           <div className="mt-16 border-t border-[#06233A]/10 pt-10">
-            <div className="flex flex-col items-center justify-between gap-6 sm:flex-row">
-              <div className="text-sm font-semibold text-[#06233A]">IvyWay</div>
-              <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm font-medium text-[#06233A]/70">
-                <Link href="/" className="hover:text-[#06233A] transition-colors">
-                  About
-                </Link>
-                <Link href="/pricing" className="hover:text-[#06233A] transition-colors">
-                  Pricing
-                </Link>
-                <a href="mailto:support@ivyway.com" className="hover:text-[#06233A] transition-colors">
-                  Support
-                </a>
-                <Link href="/terms" className="hover:text-[#06233A] transition-colors">
-                  Legal
-                </Link>
+            <div className="flex flex-col items-center justify-between gap-10 sm:flex-row sm:items-start">
+              <div className="text-center sm:text-left">
+                <div className="text-sm font-semibold text-[#06233A]">IvyWay</div>
+                <div className="mt-3 flex items-center justify-center gap-2 text-xs font-medium text-[#06233A]/55 sm:justify-start">
+                  <span
+                    aria-hidden
+                    className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)]"
+                  />
+                  <span>All systems operational</span>
+                </div>
+                <div className="mt-3 text-xs text-[#06233A]/50">
+                  &copy; 2026 IvyWay. All rights reserved.
+                </div>
               </div>
-            </div>
-            <div className="mt-8 text-center text-xs text-[#06233A]/50">
-              &copy; {new Date().getFullYear()} IvyWay. All rights reserved.
+
+              <div className="grid grid-cols-3 gap-x-10 gap-y-8 text-center sm:text-left">
+                <div>
+                  <div className="text-xs font-semibold tracking-[0.12em] text-[#06233A]">
+                    ABOUT
+                  </div>
+                  <div className="mt-3 space-y-2 text-sm font-medium text-[#06233A]/70">
+                    <Link
+                      href="#pricing"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        scrollToSection('pricing');
+                      }}
+                      className="block hover:text-[#06233A] transition-colors"
+                    >
+                      Pricing
+                    </Link>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold tracking-[0.12em] text-[#06233A]">
+                    SUPPORT
+                  </div>
+                  <div className="mt-3 space-y-2 text-sm font-medium text-[#06233A]/70">
+                    <Link
+                      href="#faq"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        scrollToSection('faq');
+                      }}
+                      className="block hover:text-[#06233A] transition-colors"
+                    >
+                      FAQ
+                    </Link>
+                    <a
+                      href="mailto:contact@ivywayedu.com"
+                      className="block hover:text-[#06233A] transition-colors"
+                    >
+                      Contact Us
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-semibold tracking-[0.12em] text-[#06233A]">
+                    LEGAL
+                  </div>
+                  <div className="mt-3 space-y-2 text-sm font-medium text-[#06233A]/70">
+                    <Link href="/privacy" className="block hover:text-[#06233A] transition-colors">
+                      Privacy Policy
+                    </Link>
+                    <Link href="/terms" className="block hover:text-[#06233A] transition-colors">
+                      Terms of Service
+                    </Link>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
