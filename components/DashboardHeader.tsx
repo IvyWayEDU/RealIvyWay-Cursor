@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/auth/types';
-import ClearDevSessionsButton from '@/components/admin/ClearDevSessionsButton';
 import { Bell } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -108,7 +107,6 @@ export default function DashboardHeader({ session }: DashboardHeaderProps) {
 
   return (
     <div className="flex items-center gap-4">
-      <ClearDevSessionsButton />
       <div className="flex items-center gap-3" ref={notificationsRef}>
         <div className="relative">
           <button

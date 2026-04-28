@@ -185,6 +185,20 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
     }
   }
 
+  async function promoteToAdmin(userId: string) {
+    setWorkingId(userId);
+    setError(null);
+    try {
+      const data = await post('/api/admin/users/promote-admin', { userId });
+      setUsers((prev) => prev.map((u) => (u.id === userId ? data.user : u)));
+      router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to promote user to admin');
+    } finally {
+      setWorkingId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -413,6 +427,14 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
                     <>
                       <button
                         type="button"
+                        onClick={() => promoteToAdmin(u.id)}
+                        disabled={busy}
+                        className="rounded-md border border-indigo-300 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                      >
+                        Make admin
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => changeRole(u.id, 'student')}
                         disabled={busy}
                         className="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-gray-50 disabled:opacity-50"
@@ -522,6 +544,14 @@ export default function AdminUsersClient(props: { initialUsers: UserRow[]; stats
 
                         {role !== 'admin' && (
                           <>
+                          <button
+                            type="button"
+                            onClick={() => promoteToAdmin(u.id)}
+                            disabled={busy}
+                            className="rounded-md border border-indigo-300 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                          >
+                            Make admin
+                          </button>
                             <button
                               type="button"
                               onClick={() => changeRole(u.id, 'student')}
