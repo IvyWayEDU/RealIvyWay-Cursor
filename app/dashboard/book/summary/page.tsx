@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
 import { formatUsdFromCents, getSessionPricingCents, Plan as PricingPlan, ServiceType as PricingServiceType } from '@/lib/pricing/catalog';
+import { ga4Event } from '@/lib/analytics/ga4';
 
 // Types matching BookingFlowClient
 type Service = 'tutoring' | 'counseling' | 'virtual-tour' | 'test-prep' | null;
@@ -209,6 +210,10 @@ export default function BookingSummaryPage() {
     }
   }, [router]);
 
+  useEffect(() => {
+    ga4Event('checkout_start', { page: '/dashboard/book/summary' });
+  }, []);
+
   const handlePay = async () => {
     if (!bookingState) return;
 
@@ -335,6 +340,14 @@ export default function BookingSummaryPage() {
           time: (session as any).displayTime || (session as any).time,
         })),
       };
+
+      ga4Event('checkout_start', {
+        source: 'booking_summary_pay',
+        service: bookingState.service,
+        plan: bookingState.plan,
+        subject: bookingState.subject,
+        schoolId: getSchoolId() || undefined,
+      });
 
       const response = await fetch('/api/checkout', {
         method: 'POST',

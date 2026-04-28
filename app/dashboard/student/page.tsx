@@ -50,6 +50,8 @@ export default async function StudentDashboard() {
         </div>
         <Link
           href="/dashboard/book"
+          data-ga-event="booking_session_start"
+          data-ga-label="student_dashboard_book_new_session"
           className="w-full sm:w-auto inline-flex items-center justify-center px-5 py-3 sm:py-2.5 bg-[#0088CB] text-white font-medium rounded-md hover:bg-[#0077B3] transition-colors"
         >
           Book a new session

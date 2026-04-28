@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { User } from '@/lib/auth/types';
 import { saveOnboardingProgress, completeOnboarding } from '@/lib/auth/onboarding';
+import { ga4Event } from '@/lib/analytics/ga4';
 import OnboardingStep1Photo from './OnboardingStep1Photo';
 import OnboardingStep2ProviderType from './OnboardingStep2ProviderType';
 import OnboardingStep3Schools from './OnboardingStep3Schools';
@@ -161,6 +162,8 @@ export default function OnboardingProviderClient({ initialUser }: OnboardingProv
         setIsSubmitting(false);
         return;
       }
+
+      ga4Event('provider_onboarding_complete', { flow: 'legacy_onboarding_provider_client' });
 
       // Redirect to dashboard
       router.push('/dashboard/provider');

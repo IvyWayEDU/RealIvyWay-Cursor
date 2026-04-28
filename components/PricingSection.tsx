@@ -27,6 +27,19 @@ function CheckIcon() {
 }
 
 function PricingCard({ plan }: { plan: PricingPlan }) {
+  const label = `pricing_section_${String(plan.title || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')}`;
+
+  const eventName =
+    typeof plan?.cta?.href === 'string' && plan.cta.href.startsWith('/checkout')
+      ? 'checkout_start'
+      : plan?.cta?.label === 'Get Started'
+        ? 'get_started_click'
+        : 'pricing_cta_click';
+
   return (
     <div className="flex flex-col rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
       <div className="flex items-center justify-between gap-4">
@@ -58,6 +71,8 @@ function PricingCard({ plan }: { plan: PricingPlan }) {
 
       <Link
         href={plan.cta.href}
+        data-ga-event={eventName}
+        data-ga-label={label}
         className="mt-8 inline-flex items-center justify-center rounded-md bg-[#0088CB] px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB]"
       >
         {plan.cta.label}

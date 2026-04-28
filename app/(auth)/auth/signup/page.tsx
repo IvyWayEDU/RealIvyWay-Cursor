@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signup } from '@/lib/auth/actions';
+import { ga4Event } from '@/lib/analytics/ga4';
 
 export default function Signup() {
   const router = useRouter();
@@ -17,6 +18,8 @@ export default function Signup() {
     const name = formData.get('name') as string;
     const email = formData.get('email') as string;
     const password = formData.get('password') as string;
+
+    ga4Event('sign_up_start', { method: 'email' });
     const result = await signup(name, email, password);
 
     if (result.success && result.redirectTo) {

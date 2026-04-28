@@ -226,6 +226,8 @@ export default function NavigationClient() {
                   onClick={() => {
                     window.location.href = "/#create-account";
                   }}
+                  data-ga-event="sign_up_start"
+                  data-ga-label="nav_signup"
                   className="rounded-xl bg-[#0088CB] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_16px_44px_rgba(0,136,203,0.26)] hover:bg-[#0077B3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0088CB]/35 transition-colors"
                 >
                   Sign up

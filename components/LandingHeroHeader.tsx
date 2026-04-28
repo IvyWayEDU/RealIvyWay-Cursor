@@ -112,13 +112,28 @@ export default function LandingHeroHeader() {
 
             <div className="hidden md:flex flex-1 justify-center">
               <nav className="flex items-center justify-center gap-2 lg:gap-3">
-                <button onClick={() => goToLandingSection('ivyway-ai')} className={heroNavItemClass}>
+                <button
+                  onClick={() => goToLandingSection('ivyway-ai')}
+                  data-ga-event="nav_click"
+                  data-ga-label="header_nav_ivyway_ai"
+                  className={heroNavItemClass}
+                >
                   IvyWay AI
                 </button>
-                <button onClick={() => goToLandingSection('pricing')} className={heroNavItemClass}>
+                <button
+                  onClick={() => goToLandingSection('pricing')}
+                  data-ga-event="nav_click"
+                  data-ga-label="header_nav_pricing"
+                  className={heroNavItemClass}
+                >
                   Pricing
                 </button>
-                <button onClick={() => goToLandingSection('faq')} className={heroNavItemClass}>
+                <button
+                  onClick={() => goToLandingSection('faq')}
+                  data-ga-event="nav_click"
+                  data-ga-label="header_nav_faq"
+                  className={heroNavItemClass}
+                >
                   FAQ
                 </button>
               </nav>
@@ -127,6 +142,8 @@ export default function LandingHeroHeader() {
             <div className="relative flex items-center gap-3 pr-1 sm:pr-2" ref={menuRef}>
               <Link
                 href={primaryCtaHref}
+                data-ga-event={dashboardLink ? 'nav_click' : 'get_started_click'}
+                data-ga-label={dashboardLink ? 'header_go_to_dashboard' : 'header_get_started'}
                 className="hidden sm:inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#06233A] shadow-[0_18px_50px_rgba(3,12,26,0.22)] hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
               >
                 {primaryCtaLabel}
@@ -171,6 +188,8 @@ export default function LandingHeroHeader() {
                     <Link
                       href={primaryCtaHref}
                       onClick={() => setShowMenu(false)}
+                      data-ga-event={dashboardLink ? 'nav_click' : 'get_started_click'}
+                      data-ga-label={dashboardLink ? 'header_mobile_go_to_dashboard' : 'header_mobile_get_started'}
                       className="flex items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-sm font-semibold text-[#06233A] shadow-sm hover:bg-white/95 transition-colors"
                     >
                       {primaryCtaLabel} <ArrowRight className="h-4 w-4" />

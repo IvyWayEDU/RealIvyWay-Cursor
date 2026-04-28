@@ -5,6 +5,7 @@ import Image from "next/image"
 import { useState } from "react"
 import { signup } from "@/lib/auth/actions"
 import Link from "next/link"
+import { ga4Event } from "@/lib/analytics/ga4"
 
 export default function RegisterClient() {
   const router = useRouter()
@@ -15,6 +16,8 @@ export default function RegisterClient() {
     e.preventDefault()
     setIsSubmitting(true)
     setError(null)
+
+    ga4Event('sign_up_start', { method: 'email' })
 
     const formData = new FormData(e.currentTarget)
     const name = formData.get("name") as string

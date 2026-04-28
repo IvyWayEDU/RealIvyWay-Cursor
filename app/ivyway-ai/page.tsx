@@ -54,6 +54,8 @@ export default function IvyWayAiMarketingPage() {
               <div className="mt-7">
                 <a
                   href="/auth/login"
+                  data-ga-event="get_started_click"
+                  data-ga-label="ivyway_ai_marketing_get_started"
                   className="inline-flex items-center justify-center rounded-xl bg-[#0088CB] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] transition-colors"
                 >
                   Get Started

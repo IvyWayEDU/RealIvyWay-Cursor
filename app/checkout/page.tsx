@@ -3,12 +3,18 @@
 import { Elements } from '@stripe/react-stripe-js';
 import { PaymentElement } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
+import { useEffect } from 'react';
 import './checkout.css';
+import { ga4Event } from '@/lib/analytics/ga4';
 
 const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
 const stripePromise = publishableKey ? loadStripe(publishableKey) : null;
 
 export default function CheckoutPage() {
+  useEffect(() => {
+    ga4Event('checkout_start', { page: '/checkout' });
+  }, []);
+
   if (!stripePromise) {
     return (
       <div className="checkout-container min-h-screen w-full bg-gray-50 flex justify-center py-12 px-4">

@@ -492,6 +492,8 @@ export default function Home() {
       >
         <Link
           href={primaryCtaHref}
+          data-ga-event="get_started_click"
+          data-ga-label="landing_floating_cta"
           className={[
             'inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold',
             'transition-colors duration-500 ease-out transition-shadow',
@@ -536,13 +538,28 @@ export default function Home() {
 
               <div className="hidden md:flex flex-1 justify-center">
                 <nav className="flex items-center justify-center gap-2 lg:gap-3">
-                  <button onClick={() => scrollToSection('ivyway-ai')} className={heroNavItemClass}>
+                  <button
+                    onClick={() => scrollToSection('ivyway-ai')}
+                    data-ga-event="nav_click"
+                    data-ga-label="landing_nav_ivyway_ai"
+                    className={heroNavItemClass}
+                  >
                     IvyWay AI
                   </button>
-                  <button onClick={() => scrollToSection('pricing')} className={heroNavItemClass}>
+                  <button
+                    onClick={() => scrollToSection('pricing')}
+                    data-ga-event="nav_click"
+                    data-ga-label="landing_nav_pricing"
+                    className={heroNavItemClass}
+                  >
                     Pricing
                   </button>
-                  <button onClick={() => scrollToSection('faq')} className={heroNavItemClass}>
+                  <button
+                    onClick={() => scrollToSection('faq')}
+                    data-ga-event="nav_click"
+                    data-ga-label="landing_nav_faq"
+                    className={heroNavItemClass}
+                  >
                     FAQ
                   </button>
                 </nav>
@@ -551,6 +568,8 @@ export default function Home() {
               <div className="relative flex items-center gap-3 pr-1 sm:pr-2" ref={menuRef}>
                 <Link
                   href={primaryCtaHref}
+                  data-ga-event="get_started_click"
+                  data-ga-label="landing_header_cta"
                   className="hidden sm:inline-flex items-center justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#06233A] shadow-[0_18px_50px_rgba(3,12,26,0.22)] hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
                 >
                   {primaryCtaLabel}
@@ -632,6 +651,8 @@ export default function Home() {
             >
               <Link
                 href={primaryCtaHref}
+                data-ga-event="get_started_click"
+                data-ga-label="landing_hero_primary"
                 className="inline-flex items-center justify-center rounded-xl bg-white px-6 py-3 text-base font-semibold text-[#06233A] shadow-sm hover:bg-white/95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white transition-colors"
               >
                 {primaryCtaLabel}
@@ -642,6 +663,8 @@ export default function Home() {
                   e.preventDefault();
                   scrollToSection('pricing');
                 }}
+                data-ga-event="pricing_cta_click"
+                data-ga-label="landing_hero_explore_pricing"
                 className="inline-flex items-center justify-center rounded-xl bg-white/0 px-6 py-3 text-base font-semibold text-white ring-1 ring-inset ring-white/22 hover:bg-white/10 transition-colors"
               >
                 Explore Pricing
@@ -865,6 +888,8 @@ export default function Home() {
                       <div className="w-full pt-7">
                         <Link
                           href="/auth/register"
+                          data-ga-event="pricing_cta_click"
+                          data-ga-label={`landing_pricing_card_${tier.title.toLowerCase().replace(/\s+/g, '_')}`}
                           className="inline-flex w-full items-center justify-center rounded-xl bg-[#0088CB] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] transition-colors"
                         >
                           Get Started
@@ -903,6 +928,8 @@ export default function Home() {
                       <div className="mt-6">
                         <Link
                           href="/auth/register"
+                          data-ga-event="pricing_cta_click"
+                          data-ga-label="landing_pricing_featured_ivyway_ai"
                           className="inline-flex w-full items-center justify-center rounded-xl bg-[#0088CB] px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB] transition-colors"
                         >
                           Get Started
@@ -1098,6 +1125,8 @@ export default function Home() {
               <div className="mt-10 flex justify-start">
                 <Link
                   href={primaryCtaHref}
+                  data-ga-event="get_started_click"
+                  data-ga-label="landing_final_cta"
                   className="inline-flex items-center justify-center rounded-xl bg-[#0088CB] px-7 py-3.5 text-base font-semibold text-white shadow-[0_18px_60px_rgba(0,136,203,0.26)] hover:bg-[#0077B3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0088CB]/35 transition-colors"
                 >
                   Get Started
