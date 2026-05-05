@@ -73,17 +73,6 @@ async function regenerateAvailabilitySlots(params: {
   const supabase = getSupabaseAdmin();
   const now = new Date();
 
-  // Remove FUTURE, UNBOOKED slots so we can replace inventory.
-  // Keep booked rows for history; keep past rows untouched.
-  const { error: delErr } = await supabase
-    .from('availability_slots')
-    .delete()
-    .eq('provider_id', providerId)
-    .eq('service_type', slotServiceType)
-    .eq('is_booked', false)
-    .gt('start_time', now.toISOString());
-  if (delErr) throw delErr;
-
   if (normalizedBlocks.length === 0) return;
 
   const durationMinutes = 60; // IvyWay invariant for all services today
@@ -164,16 +153,89 @@ async function regenerateAvailabilitySlots(params: {
     }
   }
 
-  if (slotsToInsert.length === 0) return;
+  const generatedCount = slotsToInsert.length;
+  if (generatedCount === 0) return;
 
-  // Insert concrete inventory (no ON CONFLICT clause). Chunk to avoid request-size limits.
-  const chunkSize = 500;
-  for (let i = 0; i < slotsToInsert.length; i += chunkSize) {
-    const chunk = slotsToInsert.slice(i, i + chunkSize);
-    if (chunk.length === 0) continue;
-    const { error: insErr } = await supabase.from('availability_slots').insert(chunk as any);
-    if (insErr) throw insErr;
+  // De-dupe within the generated payload using the uniqueness key:
+  // (provider_id, start_time, service_type)
+  const seenKeys = new Set<string>();
+  const deduped: typeof slotsToInsert = [];
+  let skippedDuplicateInPayload = 0;
+  for (const s of slotsToInsert) {
+    const k = `${s.provider_id}|${s.service_type}|${s.start_time}`;
+    if (seenKeys.has(k)) {
+      skippedDuplicateInPayload++;
+      continue;
+    }
+    seenKeys.add(k);
+    deduped.push(s);
   }
+
+  // Prevent duplicate insert attempts by filtering out slots that already exist in DB for this provider/service in-range.
+  let skippedExistingInDb = 0;
+  let toInsert = deduped;
+  try {
+    const minStart = deduped.reduce((min, s) => (s.start_time < min ? s.start_time : min), deduped[0].start_time);
+    const maxStart = deduped.reduce((max, s) => (s.start_time > max ? s.start_time : max), deduped[0].start_time);
+
+    const { data: existingRows, error: existingErr } = await supabase
+      .from('availability_slots')
+      .select('start_time')
+      .eq('provider_id', providerId)
+      .eq('service_type', slotServiceType)
+      .gte('start_time', minStart)
+      .lte('start_time', maxStart)
+      .limit(25_000);
+    if (existingErr) throw existingErr;
+
+    const existingStartTimes = new Set(
+      (existingRows ?? [])
+        .map((r: any) => (typeof r?.start_time === 'string' ? r.start_time : ''))
+        .filter(Boolean)
+    );
+
+    toInsert = deduped.filter((s) => !existingStartTimes.has(s.start_time));
+    skippedExistingInDb = deduped.length - toInsert.length;
+  } catch (e) {
+    // If the de-dupe read fails, still proceed with an idempotent UPSERT to avoid breaking saves.
+    console.warn('[AVAILABILITY_SLOTS_EXISTING_CHECK_FAILED]', {
+      providerId,
+      serviceType: slotServiceType,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+
+  // Insert only-new inventory using UPSERT (DO NOTHING on conflict).
+  // Chunk to avoid request-size limits.
+  const chunkSize = 500;
+  let attemptedInsert = 0;
+  let insertedCount = 0;
+
+  for (let i = 0; i < toInsert.length; i += chunkSize) {
+    const chunk = toInsert.slice(i, i + chunkSize);
+    if (chunk.length === 0) continue;
+    attemptedInsert += chunk.length;
+
+    const { error: upsertErr, count } = await supabase.from('availability_slots').upsert(chunk as any, {
+      onConflict: 'provider_id,start_time,service_type',
+      ignoreDuplicates: true,
+      count: 'exact',
+    } as any);
+    if (upsertErr) throw upsertErr;
+    if (typeof count === 'number') insertedCount += count;
+    else insertedCount += chunk.length; // best-effort when count isn't returned
+  }
+
+  console.log('[AVAILABILITY_SLOTS_SAVE]', {
+    providerId,
+    serviceType: slotServiceType,
+    now: now.toISOString(),
+    generated: generatedCount,
+    skipped_duplicates_in_payload: skippedDuplicateInPayload,
+    skipped_existing_in_db: skippedExistingInDb,
+    inserted_attempted: attemptedInsert,
+    inserted_reported: insertedCount,
+  });
 }
 
 export async function GET(request: NextRequest) {

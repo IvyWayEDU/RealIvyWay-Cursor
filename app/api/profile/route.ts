@@ -47,7 +47,7 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
     .limit(10_000);
   if (sourceErr) throw sourceErr;
 
-  console.log("[BACKFILL_SLOTS_FOUND]", (sourceRows ?? []).length);
+  console.log('[AVAILABILITY_BACKFILL_SOURCE_SLOTS_FOUND]', { providerId, count: (sourceRows ?? []).length });
 
   const sourceWindows = (sourceRows ?? [])
     .map((r: any) => {
@@ -72,8 +72,13 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
   const windows = Array.from(uniqueWindowMap.values());
 
   let insertedCount = 0;
+  let generatedTotal = 0;
+  let skippedExistingTotal = 0;
+  let attemptedInsertTotal = 0;
 
   for (const slotServiceType of addedSlotServiceTypes) {
+    generatedTotal += windows.length;
+
     // Explicit duplicate prevention: if (provider_id, start_time, service_type) exists -> skip.
     const { data: existingRows, error: existingErr } = await supabase
       .from('availability_slots')
@@ -109,15 +114,32 @@ async function backfillAvailabilitySlotsForAddedServices(params: {
       });
     }
 
+    skippedExistingTotal += Math.max(0, windows.length - toInsert.length);
+
     const chunkSize = 500;
     for (let i = 0; i < toInsert.length; i += chunkSize) {
       const chunk = toInsert.slice(i, i + chunkSize);
       if (chunk.length === 0) continue;
-      const { error: insErr } = await supabase.from('availability_slots').insert(chunk as any);
-      if (insErr) throw insErr;
-      insertedCount += chunk.length;
+      attemptedInsertTotal += chunk.length;
+      const { error: upsertErr, count } = await supabase.from('availability_slots').upsert(chunk as any, {
+        onConflict: 'provider_id,start_time,service_type',
+        ignoreDuplicates: true,
+        count: 'exact',
+      } as any);
+      if (upsertErr) throw upsertErr;
+      if (typeof count === 'number') insertedCount += count;
+      else insertedCount += chunk.length; // best-effort
     }
   }
+
+  console.log('[AVAILABILITY_BACKFILL_RESULT]', {
+    providerId,
+    serviceTypes: addedSlotServiceTypes,
+    generated: generatedTotal,
+    skipped_existing: skippedExistingTotal,
+    inserted_attempted: attemptedInsertTotal,
+    inserted_reported: insertedCount,
+  });
 
   return { insertedCount };
 }
