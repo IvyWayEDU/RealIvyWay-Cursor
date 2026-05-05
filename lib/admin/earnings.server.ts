@@ -420,7 +420,7 @@ export async function getAdminEarningsAnalytics(): Promise<AdminEarningsAnalytic
       at,
       type: 'completed_session',
       providerId: providerId || undefined,
-      providerName: (s as any)?.providerName || u?.name || u?.email || providerId || undefined,
+      providerName: u?.name || u?.email || (s as any)?.providerName || providerId || undefined,
       providerEmail: u?.email || undefined,
       sessionType: normalizeServiceType(s) || undefined,
       amountCents: calculateProviderPayoutCentsFromSession(s),

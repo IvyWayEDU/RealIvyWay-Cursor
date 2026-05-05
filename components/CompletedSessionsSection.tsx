@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Session } from '@/lib/models/types';
 import { getReviewBySessionId, submitReview, hasReviewForSession } from '@/lib/reviewStore';
@@ -11,6 +11,7 @@ import {
   getCanonicalServiceType,
   getCanonicalTopicLabel,
 } from '@/lib/sessions/sessionDisplay';
+import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
 
 interface StarRatingProps {
   rating: number;
@@ -344,6 +345,15 @@ export default function CompletedSessionsSection({
   const lastJsonRef = useRef<string>('');
   const didInitialLoadRef = useRef<boolean>(false);
 
+  const providerIds = useMemo(
+    () =>
+      sessions
+        .map((s: any) => (typeof s?.providerId === 'string' ? String(s.providerId).trim() : ''))
+        .filter(Boolean),
+    [sessions]
+  );
+  const { displayNames: providerDisplayNames, profileImageUrls: providerProfileImages } = useUserDisplayMap(providerIds);
+
   useEffect(() => {
     const fetchSessions = async () => {
       try {
@@ -457,8 +467,24 @@ export default function CompletedSessionsSection({
                 <CompletedSessionCard
                   key={session.id}
                   session={session}
-                  providerName={String((session as any)?.providerName || '')}
-                  providerProfileImageUrl={(session as any)?.providerProfileImage ?? null}
+                  providerName={(() => {
+                    const providerId =
+                      typeof (session as any)?.providerId === 'string' ? String((session as any).providerId).trim() : '';
+                    const fallbackName = String((session as any)?.providerName || '').trim();
+                    const dynamicName =
+                      (providerId && typeof providerDisplayNames?.[providerId] === 'string' && providerDisplayNames[providerId].trim()
+                        ? providerDisplayNames[providerId].trim()
+                        : '') || fallbackName;
+                    return dynamicName || fallbackName || (providerId ? providerId : 'Provider');
+                  })()}
+                  providerProfileImageUrl={(() => {
+                    const providerId =
+                      typeof (session as any)?.providerId === 'string' ? String((session as any).providerId).trim() : '';
+                    return (
+                      (providerId ? providerProfileImages?.[providerId] ?? null : null) ??
+                      ((session as any)?.providerProfileImage ?? null)
+                    );
+                  })()}
                 />
               ))}
             </div>

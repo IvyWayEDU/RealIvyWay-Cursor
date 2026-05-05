@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Session } from '@/lib/models/types';
 import { isSessionCompleted, isSessionUpcoming } from '@/lib/sessions/lifecycle';
 import { getCurrentUserId } from '@/lib/sessions/actions';
@@ -9,6 +9,7 @@ import { useProviderSessionHeartbeat } from '@/lib/sessions/useProviderSessionHe
 import { getReviewBySessionId, hasReviewForSession } from '@/lib/reviewStore';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
 import ReviewModal from './ReviewModal';
+import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
 
 // Extended session type with provider and student information
 interface SessionWithProvider extends Session {
@@ -59,6 +60,41 @@ export default function SessionsList({ role }: SessionsListProps) {
   const [clockNowMs, setClockNowMs] = useState(() => Date.now());
   const [reviewModalSession, setReviewModalSession] = useState<Session | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  const otherUserIds = useMemo(() => {
+    return (sessions || [])
+      .map((s: any) => (displayRole === 'student' ? s?.providerId : s?.studentId))
+      .map((id: any) => (typeof id === 'string' ? id.trim() : ''))
+      .filter(Boolean);
+  }, [sessions, displayRole]);
+  const { displayNames: otherDisplayNames, profileImageUrls: otherProfileImages } = useUserDisplayMap(otherUserIds);
+
+  function getOtherUserId(s: any): string {
+    const raw = displayRole === 'student' ? s?.providerId : s?.studentId;
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  function getOtherFallbackName(s: any): string {
+    const raw = displayRole === 'student' ? s?.providerName : s?.studentName;
+    return typeof raw === 'string' ? raw.trim() : '';
+  }
+
+  function getOtherDisplayName(s: any): string {
+    const id = getOtherUserId(s);
+    const dynamic = id && typeof otherDisplayNames?.[id] === 'string' ? otherDisplayNames[id].trim() : '';
+    const fallback = getOtherFallbackName(s);
+    return dynamic || fallback || (id ? id : displayRole === 'student' ? 'Provider' : 'Student');
+  }
+
+  function getOtherProfileImage(s: any): string | null {
+    const id = getOtherUserId(s);
+    const dynamic = id ? otherProfileImages?.[id] ?? null : null;
+    const fallback =
+      displayRole === 'student'
+        ? ((s as any)?.providerProfileImage ?? null)
+        : ((s as any)?.studentProfileImage ?? null);
+    return dynamic ?? fallback ?? null;
+  }
 
   useEffect(() => {
     const id = setInterval(() => setClockNowMs(Date.now()), 1000);
@@ -349,44 +385,17 @@ export default function SessionsList({ role }: SessionsListProps) {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
-                      {/* Provider info for students (snapshot from session record) */}
-                      {displayRole === 'student' && (
-                        <div className="mb-3 flex items-center gap-3">
-                          <ProviderAvatar
-                            name={String((session as any)?.providerName || '')}
-                            imageUrl={(session as any)?.providerProfileImage ?? undefined}
-                          />
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {String((session as any)?.providerName || '')}
-                            </div>
+                      <div className="mb-3 flex items-center gap-3">
+                        <ProviderAvatar
+                          name={getOtherDisplayName(session)}
+                          imageUrl={getOtherProfileImage(session) ?? undefined}
+                        />
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {getOtherDisplayName(session)}
                           </div>
                         </div>
-                      )}
-
-                      {/* Student info for providers - always show, with fallback */}
-                      {displayRole === 'provider' && (
-                        <div className="mb-3 flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-[#0088CB] flex items-center justify-center">
-                            <span className="text-white text-sm font-semibold">
-                              {(() => {
-                                const studentName = String((session as any)?.studentName || '');
-                                return studentName
-                                  .split(' ')
-                                  .map((n: string) => n[0])
-                                  .join('')
-                                  .toUpperCase()
-                                  .slice(0, 2) || 'S';
-                              })()}
-                            </span>
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {String((session as any)?.studentName || '')}
-                            </div>
-                          </div>
-                        </div>
-                      )}
+                      </div>
 
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusBadge.className}`}>
@@ -730,33 +739,15 @@ export default function SessionsList({ role }: SessionsListProps) {
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        {/* Provider info for students (snapshot from session record) */}
-                        {displayRole === 'student' && (
-                          <div className="mb-3 flex items-center gap-3">
-                            <ProviderAvatar
-                              name={String((session as any)?.providerName || '')}
-                              imageUrl={(session as any)?.providerProfileImage ?? undefined}
-                            />
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">
-                                {String((session as any)?.providerName || '')}
-                              </div>
-                            </div>
+                        <div className="mb-3 flex items-center gap-3">
+                          <ProviderAvatar
+                            name={getOtherDisplayName(session)}
+                            imageUrl={getOtherProfileImage(session) ?? undefined}
+                          />
+                          <div className="text-sm font-medium text-gray-900">
+                            {getOtherDisplayName(session)}
                           </div>
-                        )}
-
-                        {/* Student info for providers (snapshot from session record) */}
-                        {displayRole === 'provider' && (
-                          <div className="mb-3 flex items-center gap-3">
-                            <ProviderAvatar
-                              name={String((session as any)?.studentName || '')}
-                              imageUrl={(session as any)?.studentProfileImage ?? undefined}
-                            />
-                            <div className="text-sm font-medium text-gray-900">
-                              {String((session as any)?.studentName || '')}
-                            </div>
-                          </div>
-                        )}
+                        </div>
 
                         <div className="flex items-center gap-2 mb-2 flex-wrap">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusBadge.className}`}>

@@ -269,7 +269,27 @@ export default async function AdminUserDetailPage({
                     <div className="min-w-0">
                       <div className="text-sm font-medium text-gray-900 truncate">{s.id}</div>
                       <div className="mt-1 text-xs text-gray-600">
-                        {s.studentName || s.studentId} → {s.providerName || s.providerId}
+                        {(() => {
+                          const studentId = String(s?.studentId || s?.student_id || '').trim();
+                          const providerId = String(s?.providerId || s?.provider_id || '').trim();
+                          const student = studentId ? userById.get(studentId) : null;
+                          const provider = providerId ? userById.get(providerId) : null;
+                          const studentName =
+                            (typeof student?.name === 'string' && student.name.trim() ? student.name.trim() : '') ||
+                            String(s?.studentName || s?.student_name || '').trim() ||
+                            studentId ||
+                            '—';
+                          const providerName =
+                            (typeof provider?.name === 'string' && provider.name.trim() ? provider.name.trim() : '') ||
+                            String(s?.providerName || s?.provider_name || '').trim() ||
+                            providerId ||
+                            '—';
+                          return (
+                            <>
+                              {studentName} → {providerName}
+                            </>
+                          );
+                        })()}
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
                         {s.scheduledStartTime} — {s.scheduledEndTime} • {String(s.status || 'unknown')}

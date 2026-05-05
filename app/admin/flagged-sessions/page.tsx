@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { getSessionsReadOnly } from '@/lib/sessions/storage';
+import { getUsers } from '@/lib/auth/storage';
 
 function normalize(v: unknown): string {
   return typeof v === 'string' ? v.trim().toLowerCase() : '';
@@ -99,8 +100,25 @@ function RowList(props: { title: string; subtitle: string; rows: any[] }) {
 }
 
 export default async function AdminFlaggedSessionsPage() {
-  const sessions = (await getSessionsReadOnly()) as any[];
-  const all = Array.isArray(sessions) ? sessions : [];
+  const [sessions, users] = await Promise.all([getSessionsReadOnly(), getUsers()]);
+  const raw = Array.isArray(sessions) ? (sessions as any[]) : [];
+
+  const nameById = new Map<string, string>();
+  for (const u of (Array.isArray(users) ? (users as any[]) : []) as any[]) {
+    const id = typeof u?.id === 'string' ? u.id.trim() : '';
+    const name = typeof u?.name === 'string' ? u.name.trim() : '';
+    if (id && name) nameById.set(id, name);
+  }
+
+  const hydrate = (s: any) => {
+    const studentId = typeof s?.studentId === 'string' ? s.studentId.trim() : typeof s?.student_id === 'string' ? s.student_id.trim() : '';
+    const providerId = typeof s?.providerId === 'string' ? s.providerId.trim() : typeof s?.provider_id === 'string' ? s.provider_id.trim() : '';
+    const studentName = (studentId && nameById.get(studentId)) || s?.studentName || s?.student_name || s?.studentId || s?.student_id;
+    const providerName = (providerId && nameById.get(providerId)) || s?.providerName || s?.provider_name || s?.providerId || s?.provider_id;
+    return { ...s, studentId, providerId, studentName, providerName };
+  };
+
+  const all = raw.map(hydrate);
 
   const providerNoShows = all.filter(isProviderNoShow).sort((a, b) => sessionSortKeyMs(b) - sessionSortKeyMs(a));
   const studentNoShows = all.filter(isStudentNoShow).sort((a, b) => sessionSortKeyMs(b) - sessionSortKeyMs(a));

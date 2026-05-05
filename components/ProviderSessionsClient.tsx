@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
@@ -11,6 +11,7 @@ import { getCurrentUserId } from '@/lib/sessions/actions';
 import { ensureConversationExistsForPair } from '@/lib/messages/actions';
 import { getReviewForSessionByReviewer } from '@/lib/reviewStore';
 import { canJoinSessionNow } from '@/lib/sessions/uiHelpers';
+import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
 
 interface SessionCardProps {
   session: Session;
@@ -19,6 +20,8 @@ interface SessionCardProps {
   currentUserId?: string | null;
   nowMs?: number;
   statusBadgeOverride?: { label: string; className: string } | null;
+  otherDisplayName?: string;
+  otherProfileImageUrl?: string | null;
   onMessage?: (session: Session) => void;
   onLeaveReview?: (session: Session) => void;
 }
@@ -30,6 +33,8 @@ function SessionCard({
   currentUserId,
   nowMs,
   statusBadgeOverride = null,
+  otherDisplayName,
+  otherProfileImageUrl,
   onMessage,
   onLeaveReview,
 }: SessionCardProps) {
@@ -110,13 +115,16 @@ function SessionCard({
   }
 
   const otherName =
-    viewerRole === 'provider'
-      ? String((session as any)?.studentName || '')
-      : String((session as any)?.providerName || '');
+    (typeof otherDisplayName === 'string' && otherDisplayName.trim()
+      ? otherDisplayName.trim()
+      : viewerRole === 'provider'
+        ? String((session as any)?.studentName || '')
+        : String((session as any)?.providerName || '')) || (viewerRole === 'provider' ? 'Student' : 'Provider');
   const otherProfileImage =
-    viewerRole === 'provider'
+    otherProfileImageUrl ??
+    (viewerRole === 'provider'
       ? ((session as any)?.studentProfileImage ?? null)
-      : ((session as any)?.providerProfileImage ?? null);
+      : ((session as any)?.providerProfileImage ?? null));
 
   const otherUserId = viewerRole === 'provider' ? session.studentId : session.providerId;
   // Reviews are only supported student -> provider. Providers must never review students.
@@ -358,6 +366,35 @@ export default function ProviderSessionsClient({
 
   const refreshSessionsRef = useRef<(() => Promise<void>) | null>(null);
 
+  const otherUserIds = useMemo(() => {
+    const all = ([] as Session[]).concat(upcomingSessions || [], noShowSessions || [], completedSessions || []);
+    const ids = all
+      .map((s: any) => (role === 'provider' ? s?.studentId : s?.providerId))
+      .map((v: any) => (typeof v === 'string' ? v.trim() : ''))
+      .filter(Boolean);
+    return Array.from(new Set(ids));
+  }, [upcomingSessions, noShowSessions, completedSessions, role]);
+
+  const { displayNames: otherDisplayNames, profileImageUrls: otherProfileImages } = useUserDisplayMap(otherUserIds);
+
+  const getOtherDisplayName = (s: any): string => {
+    const idRaw = role === 'provider' ? s?.studentId : s?.providerId;
+    const id = typeof idRaw === 'string' ? idRaw.trim() : '';
+    const dynamic = id && typeof otherDisplayNames?.[id] === 'string' ? otherDisplayNames[id].trim() : '';
+    const fallbackRaw = role === 'provider' ? s?.studentName : s?.providerName;
+    const fallback = typeof fallbackRaw === 'string' ? fallbackRaw.trim() : '';
+    return dynamic || fallback || (id ? id : role === 'provider' ? 'Student' : 'Provider');
+  };
+
+  const getOtherProfileImageUrl = (s: any): string | null => {
+    const idRaw = role === 'provider' ? s?.studentId : s?.providerId;
+    const id = typeof idRaw === 'string' ? idRaw.trim() : '';
+    const dynamic = id ? otherProfileImages?.[id] ?? null : null;
+    const fallback =
+      role === 'provider' ? ((s as any)?.studentProfileImage ?? null) : ((s as any)?.providerProfileImage ?? null);
+    return dynamic ?? fallback ?? null;
+  };
+
   useEffect(() => {
     const fetchSessions = async () => {
       try {
@@ -506,6 +543,8 @@ export default function ProviderSessionsClient({
                       viewerRole={role}
                       currentUserId={currentUserId}
                       nowMs={nowMs}
+                      otherDisplayName={getOtherDisplayName(session)}
+                      otherProfileImageUrl={getOtherProfileImageUrl(session)}
                       onMessage={handleMessage}
                     />
                   ))}
@@ -547,6 +586,8 @@ export default function ProviderSessionsClient({
                         currentUserId={currentUserId}
                         nowMs={nowMs}
                         statusBadgeOverride={badge}
+                        otherDisplayName={getOtherDisplayName(session)}
+                        otherProfileImageUrl={getOtherProfileImageUrl(session)}
                         onMessage={handleMessage}
                       />
                     );
@@ -590,6 +631,8 @@ export default function ProviderSessionsClient({
                       viewerRole={role}
                       currentUserId={currentUserId}
                       nowMs={nowMs}
+                      otherDisplayName={getOtherDisplayName(session)}
+                      otherProfileImageUrl={getOtherProfileImageUrl(session)}
                       onMessage={handleMessage}
                       onLeaveReview={role === 'student' ? handleLeaveReview : undefined}
                     />

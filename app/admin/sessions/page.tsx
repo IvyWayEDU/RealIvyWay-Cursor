@@ -15,10 +15,20 @@ export default async function AdminSessionsPage() {
   });
 
   const enriched = sorted.map((s: any) => {
-    const student = userById.get(String(s?.studentId || s?.student_id || '')) || null;
-    const provider = userById.get(String(s?.providerId || s?.provider_id || '')) || null;
+    const studentId = String(s?.studentId || s?.student_id || '').trim();
+    const providerId = String(s?.providerId || s?.provider_id || '').trim();
+    const student = (studentId && userById.get(studentId)) || null;
+    const provider = (providerId && userById.get(providerId)) || null;
     return {
       ...s,
+      studentName:
+        (typeof student?.name === 'string' && student.name.trim() ? student.name.trim() : undefined) ||
+        (typeof s?.studentName === 'string' && s.studentName.trim() ? s.studentName.trim() : undefined) ||
+        (typeof s?.student_name === 'string' && String(s.student_name).trim() ? String(s.student_name).trim() : undefined),
+      providerName:
+        (typeof provider?.name === 'string' && provider.name.trim() ? provider.name.trim() : undefined) ||
+        (typeof s?.providerName === 'string' && s.providerName.trim() ? s.providerName.trim() : undefined) ||
+        (typeof s?.provider_name === 'string' && String(s.provider_name).trim() ? String(s.provider_name).trim() : undefined),
       studentEmail:
         (typeof s?.studentEmail === 'string' && s.studentEmail) ||
         (typeof s?.student_email === 'string' && s.student_email) ||

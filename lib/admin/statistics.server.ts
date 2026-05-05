@@ -372,9 +372,9 @@ export async function getAdminStatistics(args?: { months?: number }): Promise<Ad
       if (providerId) {
         const existing = providerAgg.get(providerId);
         const fallbackName =
-          (typeof s?.providerName === 'string' && s.providerName.trim()) ||
           (typeof userById.get(providerId)?.name === 'string' && String(userById.get(providerId).name).trim()) ||
           (typeof userById.get(providerId)?.email === 'string' && String(userById.get(providerId).email).trim()) ||
+          (typeof s?.providerName === 'string' && s.providerName.trim()) ||
           providerId;
         const providerName = existing?.providerName || fallbackName;
         const next = existing || {

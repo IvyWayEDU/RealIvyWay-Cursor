@@ -110,9 +110,9 @@ export async function GET(request: NextRequest) {
 
         const u = userById.get(providerId);
         const providerName =
-          (typeof s?.providerName === 'string' && s.providerName.trim()) ||
           (typeof u?.name === 'string' && String(u.name).trim()) ||
           (typeof u?.email === 'string' && String(u.email).trim()) ||
+          (typeof s?.providerName === 'string' && s.providerName.trim()) ||
           providerId;
         const providerEmail = typeof u?.email === 'string' ? u.email : '';
 

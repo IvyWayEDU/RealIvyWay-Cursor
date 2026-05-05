@@ -1,4 +1,5 @@
 import { getSessionsReadOnly } from '@/lib/sessions/storage';
+import { getUsers } from '@/lib/auth/storage';
 import Link from 'next/link';
 
 function isNoShowStatus(status: string): boolean {
@@ -16,8 +17,23 @@ function isNoShowStatus(status: string): boolean {
 }
 
 export default async function AdminReportsFlagsPage() {
-  const sessions = await getSessionsReadOnly();
-  const all = sessions as any[];
+  const [sessions, users] = await Promise.all([getSessionsReadOnly(), getUsers()]);
+  const allRaw = sessions as any[];
+
+  const nameById = new Map<string, string>();
+  for (const u of (Array.isArray(users) ? (users as any[]) : []) as any[]) {
+    const id = typeof u?.id === 'string' ? u.id.trim() : '';
+    const name = typeof u?.name === 'string' ? u.name.trim() : '';
+    if (id && name) nameById.set(id, name);
+  }
+
+  const all = (Array.isArray(allRaw) ? allRaw : []).map((s: any) => {
+    const studentId = typeof s?.studentId === 'string' ? s.studentId.trim() : typeof s?.student_id === 'string' ? s.student_id.trim() : '';
+    const providerId = typeof s?.providerId === 'string' ? s.providerId.trim() : typeof s?.provider_id === 'string' ? s.provider_id.trim() : '';
+    const studentName = (studentId && nameById.get(studentId)) || s?.studentName || s?.student_name || s?.studentId || s?.student_id;
+    const providerName = (providerId && nameById.get(providerId)) || s?.providerName || s?.provider_name || s?.providerId || s?.provider_id;
+    return { ...s, studentId, providerId, studentName, providerName };
+  });
 
   const noShows = all.filter((s) => isNoShowStatus(String(s?.status || '')));
   const flagged = all.filter((s) => String(s?.status || '') === 'flagged' || String(s?.status || '') === 'requires_review');

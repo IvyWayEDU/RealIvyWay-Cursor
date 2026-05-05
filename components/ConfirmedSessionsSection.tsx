@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Session } from '@/lib/models/types';
 import { formatServiceTypeLabel, getCanonicalServiceType, getCanonicalTopicLabel } from '@/lib/sessions/sessionDisplay';
 import { canJoinSessionNow } from '@/lib/sessions/uiHelpers';
+import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
 
 export default function ConfirmedSessionsSection() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -13,6 +14,15 @@ export default function ConfirmedSessionsSection() {
   const didInitialLoadRef = useRef<boolean>(false);
   const router = useRouter();
   const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const providerIds = useMemo(
+    () =>
+      sessions
+        .map((s: any) => (typeof s?.providerId === 'string' ? s.providerId : null))
+        .filter(Boolean) as string[],
+    [sessions]
+  );
+  const { displayNames: providerDisplayNames, profileImageUrls: providerProfileImages } = useUserDisplayMap(providerIds);
 
   function UserAvatar({ name, imageUrl }: { name: string; imageUrl?: string | null }) {
     const [imageError, setImageError] = useState(false);
@@ -174,13 +184,29 @@ export default function ConfirmedSessionsSection() {
                       )}
                     </div>
                     <div className="mb-2 flex items-center gap-2 text-sm">
+                      {(() => {
+                        const providerId = typeof (session as any)?.providerId === 'string' ? String((session as any).providerId).trim() : '';
+                        const fallbackName = String((session as any)?.providerName || '').trim();
+                        const dynamicName =
+                          (providerId && typeof providerDisplayNames?.[providerId] === 'string' && providerDisplayNames[providerId].trim()
+                            ? providerDisplayNames[providerId].trim()
+                            : '') || fallbackName;
+                        const dynamicImage =
+                          (providerId ? providerProfileImages?.[providerId] ?? null : null) ??
+                          ((session as any)?.providerProfileImage ?? null);
+                        const safeName = dynamicName || fallbackName || (providerId ? providerId : 'Provider');
+                        return (
+                          <>
                       <UserAvatar
-                        name={String((session as any)?.providerName || '')}
-                        imageUrl={(session as any)?.providerProfileImage ?? null}
+                            name={safeName}
+                            imageUrl={dynamicImage}
                       />
                       <span className="font-medium text-gray-900">
-                        {String((session as any)?.providerName || '')}
+                            {safeName}
                       </span>
+                          </>
+                        );
+                      })()}
                     </div>
                     {(() => {
                       const subjectRaw = (session as any)?.subject;

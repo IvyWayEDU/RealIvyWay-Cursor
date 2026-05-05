@@ -12,6 +12,7 @@ import ReviewModal from '@/components/ReviewModal';
 import ProviderBadges from '@/components/ProviderBadges';
 import { calculateProviderBadgesClient } from '@/lib/providers/badgeHelpers';
 import type { BadgeType } from '@/lib/providers/badges';
+import { useUserDisplayMap } from '@/lib/sessions/useUserDisplayMap';
 
 // Extended session type with provider and student information
 interface SessionWithDetails extends Session {
@@ -66,6 +67,25 @@ export default function SessionDetailsPage() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [providerBadges, setProviderBadges] = useState<BadgeType[]>([]);
+
+  const otherUserId = userRole === 'student' ? (session?.providerId || '') : (session?.studentId || '');
+  const { displayNames: otherDisplayNames, profileImageUrls: otherProfileImages } = useUserDisplayMap([otherUserId]);
+  const otherDisplayName =
+    (typeof otherUserId === 'string' &&
+    otherUserId.trim() &&
+    typeof otherDisplayNames?.[otherUserId.trim()] === 'string' &&
+    otherDisplayNames[otherUserId.trim()].trim()
+      ? otherDisplayNames[otherUserId.trim()].trim()
+      : '') ||
+    (userRole === 'student'
+      ? (typeof (session as any)?.providerName === 'string' ? String((session as any).providerName).trim() : '')
+      : (typeof (session as any)?.studentName === 'string' ? String((session as any).studentName).trim() : '')) ||
+    (otherUserId ? otherUserId : userRole === 'student' ? 'Provider' : 'Student');
+  const otherProfileImageUrl =
+    (typeof otherUserId === 'string' && otherUserId.trim() ? otherProfileImages?.[otherUserId.trim()] ?? null : null) ??
+    (userRole === 'student'
+      ? ((session as any)?.providerProfileImage ?? null)
+      : ((session as any)?.studentProfileImage ?? null));
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -354,11 +374,11 @@ export default function SessionDetailsPage() {
           <div className="p-6">
             {/* Provider/Student Info */}
             <div className="mb-6">
-              {userRole === 'student' && session.providerName && (
+              {userRole === 'student' && (
                 <div className="flex items-center gap-4 min-w-0">
-                  <ProviderAvatar name={session.providerName} imageUrl={(session as any)?.providerProfileImage ?? undefined} />
+                  <ProviderAvatar name={otherDisplayName} imageUrl={otherProfileImageUrl ?? undefined} />
                   <div className="flex-1 min-w-0">
-                    <h2 className="text-2xl font-semibold text-gray-900 break-words">{session.providerName}</h2>
+                    <h2 className="text-2xl font-semibold text-gray-900 break-words">{otherDisplayName}</h2>
                     <p className="text-sm text-gray-600">Provider</p>
                     {providerBadges.length > 0 && (
                       <div className="mt-2">
@@ -368,20 +388,11 @@ export default function SessionDetailsPage() {
                   </div>
                 </div>
               )}
-              {userRole === 'provider' && session.studentName && (
+              {userRole === 'provider' && (
                 <div className="flex items-center gap-4 min-w-0">
-                  <div className="h-16 w-16 rounded-full bg-[#0088CB] flex items-center justify-center">
-                    <span className="text-white text-lg font-semibold">
-                      {session.studentName
-                        .split(' ')
-                        .map((n: string) => n[0])
-                        .join('')
-                        .toUpperCase()
-                        .slice(0, 2) || 'S'}
-                    </span>
-                  </div>
+                  <ProviderAvatar name={otherDisplayName} imageUrl={otherProfileImageUrl ?? undefined} />
                   <div className="min-w-0">
-                    <h2 className="text-2xl font-semibold text-gray-900 break-words">{session.studentName}</h2>
+                    <h2 className="text-2xl font-semibold text-gray-900 break-words">{otherDisplayName}</h2>
                     <p className="text-sm text-gray-600">Student</p>
                   </div>
                 </div>
