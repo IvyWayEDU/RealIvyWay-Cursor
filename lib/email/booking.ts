@@ -11,6 +11,7 @@ import {
   generateProviderNotificationEmail,
   formatDateTimeInTimezone,
 } from './templates';
+import { getSiteOriginServer } from '@/lib/urls/siteUrl.server';
 
 /**
  * Send confirmation emails for a paid booking
@@ -30,7 +31,7 @@ export async function sendBookingConfirmationEmails(
   let providerEmailSent = false;
 
   // Get base URL for dashboard links (server-only, not exposed to client)
-  const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
+  const baseUrl = getSiteOriginServer();
 
   // Validate required booking data
   if (!booking.zoom_join_url) {

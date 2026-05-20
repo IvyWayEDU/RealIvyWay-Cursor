@@ -4,6 +4,7 @@ import { getAuthContext } from '@/lib/auth/session';
 import { getStripePriceIdForPricingKey } from '@/lib/pricing/stripePriceIds';
 import { getCatalogItemByKey } from '@/lib/pricing/catalog';
 import { handleApiError } from '@/lib/errorHandler';
+import { getSiteOriginServer } from '@/lib/urls/siteUrl.server';
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ url: null, mock: true });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || request.headers.get('origin') || 'http://localhost:3000';
+    const baseUrl = getSiteOriginServer({ requestOrigin: request.headers.get('origin') });
 
     // Source of truth pricing key for monthly counseling subscription
     const pricing_key = 'counseling_monthly' as const;

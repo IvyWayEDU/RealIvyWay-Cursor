@@ -20,6 +20,7 @@ import { handleApiError } from '@/lib/errorHandler';
 import { enforceRateLimit, RATE_LIMIT_MESSAGE } from '@/lib/rateLimit';
 import { assertNoStudentDoubleBooking, DOUBLE_BOOKING_MESSAGE, DoubleBookingError } from '@/lib/sessions/doubleBooking.server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin.server';
+import { getSiteOriginServer } from '@/lib/urls/siteUrl.server';
 
 // Initialize Stripe with secret key from environment variable
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -98,9 +99,8 @@ export async function POST(request: NextRequest) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 });
     }
 
-    // Get base URL for redirect URLs
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
-      (request.headers.get('origin') || 'http://localhost:3000');
+    // Get base URL for redirect URLs (never fall back to localhost in production)
+    const baseUrl = getSiteOriginServer({ requestOrigin: request.headers.get('origin') });
     if (stripeDebug) console.log('CHECKOUT baseUrl:', baseUrl);
 
     // Stripe must be configured for production checkout (no mock fallbacks).

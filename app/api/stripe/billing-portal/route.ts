@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth';
 import { ensureStripeCustomerForUser } from '@/lib/stripe/ensureCustomer.server';
 import { handleApiError } from '@/lib/errorHandler';
+import { getSiteOriginServer } from '@/lib/urls/siteUrl.server';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeSecretKey
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: ensured.error || 'No Stripe customer found' }, { status: 400 });
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || req.headers.get('origin') || 'http://localhost:3000';
+    const baseUrl = getSiteOriginServer({ requestOrigin: req.headers.get('origin') });
 
     const session = await stripe.billingPortal.sessions.create({
       customer: ensured.stripeCustomerId,

@@ -16,9 +16,10 @@ import {
   generateProviderThankYouEmail,
   generateWelcomeEmail,
 } from '@/lib/email/templates';
+import { getSiteOriginServer } from '@/lib/urls/siteUrl.server';
 
 function baseUrl(): string {
-  return process.env.BASE_URL || 'http://localhost:3000';
+  return getSiteOriginServer();
 }
 
 function moneyUsd(cents: number): string {

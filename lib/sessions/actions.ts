@@ -7,6 +7,7 @@ import { getProviderRating } from '@/lib/providers/rating';
 import { getReviewsByProviderId } from '@/lib/reviews/storage.server';
 import crypto from 'crypto';
 import Stripe from 'stripe';
+import { getSiteOriginServer } from '@/lib/urls/siteUrl.server';
 
 export interface CreateSessionResult {
   success: boolean;
@@ -250,7 +251,7 @@ export async function createCheckoutSession(
   const stripe = new Stripe(stripeSecretKey, { apiVersion: '2026-02-25.clover' });
 
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const baseUrl = getSiteOriginServer();
     
     // Determine session name based on type
     const sessionName = sessionType === 'tutoring' 
