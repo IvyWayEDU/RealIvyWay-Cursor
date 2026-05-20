@@ -364,30 +364,21 @@ export default function Home() {
 
   // Check for session cookie on client side
   useEffect(() => {
-    const checkSession = () => {
+    let cancelled = false;
+    (async () => {
       try {
-        const cookies = document.cookie.split(';');
-        const sessionCookie = cookies.find(cookie => 
-          cookie.trim().startsWith('ivyway_session=')
-        );
-        
-        if (sessionCookie) {
-          const sessionValue = sessionCookie.split('=')[1];
-          try {
-            const decodedValue = decodeURIComponent(sessionValue);
-            const parsedSession = JSON.parse(decodedValue);
-            setSession(parsedSession);
-          } catch {
-            const parsedSession = JSON.parse(sessionValue);
-            setSession(parsedSession);
-          }
-        }
+        const res = await fetch('/api/auth/session', { method: 'GET', cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as any;
+        if (cancelled) return;
+        setSession((json?.session as any) || null);
       } catch {
+        if (cancelled) return;
         setSession(null);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-
-    checkSession();
   }, []);
 
   // Handle click outside menu

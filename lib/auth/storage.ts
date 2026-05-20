@@ -122,6 +122,37 @@ export async function getUserById(id: string): Promise<User | null> {
   return ((data as any)?.data as User) || null;
 }
 
+export type UserAuthRow = {
+  id: string;
+  email: string;
+  role: string;
+  data: User | null;
+};
+
+/**
+ * Auth-critical user read.
+ * - Reads the trusted `users.role` column (NOT from cookie payload).
+ * - Includes `data` for non-privileged fields (name, provider subroles, suspension flags).
+ */
+export async function getUserAuthRowById(id: string): Promise<UserAuthRow | null> {
+  const uid = String(id || '').trim();
+  if (!uid) return null;
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from('users')
+    .select('id,email,role,data')
+    .eq('id', uid)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: String((data as any).id || ''),
+    email: String((data as any).email || ''),
+    role: String((data as any).role || ''),
+    data: ((data as any).data as User) || null,
+  };
+}
+
 // Create new user
 // NOTE: We intentionally do NOT type this as `Omit<User, ...>` because `User` includes an
 // index signature (`[key: string]: any`) which makes `Omit<User, ...>` lose required fields

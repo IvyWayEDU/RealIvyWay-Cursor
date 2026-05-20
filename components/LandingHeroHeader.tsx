@@ -9,24 +9,6 @@ import { ArrowRight } from 'lucide-react';
 import { getDashboardRoute } from '@/lib/auth/utils';
 import type { Session } from '@/lib/auth/types';
 
-function readSessionCookie(): Session | null {
-  try {
-    const cookies = document.cookie.split(';');
-    const sessionCookie = cookies.find((cookie) => cookie.trim().startsWith('ivyway_session='));
-    if (!sessionCookie) return null;
-    const sessionValue = sessionCookie.split('=')[1];
-
-    try {
-      const decodedValue = decodeURIComponent(sessionValue);
-      return JSON.parse(decodedValue) as Session;
-    } catch {
-      return JSON.parse(sessionValue) as Session;
-    }
-  } catch {
-    return null;
-  }
-}
-
 export default function LandingHeroHeader() {
   const router = useRouter();
   const pathname = usePathname();
@@ -35,7 +17,21 @@ export default function LandingHeroHeader() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setSession(readSessionCookie());
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/session', { method: 'GET', cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as any;
+        if (cancelled) return;
+        setSession((json?.session as Session) || null);
+      } catch {
+        if (cancelled) return;
+        setSession(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

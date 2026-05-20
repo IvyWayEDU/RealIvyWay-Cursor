@@ -19,36 +19,24 @@ export default function NavigationClient() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Check for session cookie on client side
-    const checkSession = () => {
+    let cancelled = false;
+    (async () => {
       try {
-        const cookies = document.cookie.split(';');
-        const sessionCookie = cookies.find(cookie => 
-          cookie.trim().startsWith('ivyway_session=')
-        );
-        
-        if (sessionCookie) {
-          const sessionValue = sessionCookie.split('=')[1];
-          // Cookie values may be URL encoded, decode if necessary
-          try {
-            const decodedValue = decodeURIComponent(sessionValue);
-            const parsedSession = JSON.parse(decodedValue);
-            setSession(parsedSession);
-          } catch {
-            // Try without decoding if already decoded
-            const parsedSession = JSON.parse(sessionValue);
-            setSession(parsedSession);
-          }
-        }
-      } catch (error) {
-        // Invalid session, ignore
+        const res = await fetch('/api/auth/session', { method: 'GET', cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as any;
+        if (cancelled) return;
+        setSession((json?.session as Session) || null);
+      } catch {
+        if (cancelled) return;
         setSession(null);
       } finally {
+        if (cancelled) return;
         setIsLoading(false);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-
-    checkSession();
   }, []);
 
   useEffect(() => {
