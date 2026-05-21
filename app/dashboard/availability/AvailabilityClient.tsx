@@ -527,7 +527,7 @@ export default function AvailabilityClient() {
           <p className="mt-2 text-sm text-gray-600">
             Set your weekly availability per service type. Availability only changes when you press Save.
           </p>
-          <p className="mt-1 text-sm text-gray-600">Provider availability is set in Eastern Time.</p>
+          <p className="mt-1 text-sm text-gray-600">All booking times are shown in Eastern Time.</p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 w-full sm:w-auto">
           {enabledServices.length > 0 && (
@@ -714,7 +714,7 @@ export default function AvailabilityClient() {
                             <option value="">Select start time</option>
                             {timeOptions.map((time) => (
                               <option key={time} value={time}>
-                                {formatTimeDisplay(time)}
+                                {formatTimeDisplay(time)} (ET)
                               </option>
                             ))}
                           </select>
@@ -737,7 +737,7 @@ export default function AvailabilityClient() {
                             <option value="">Select end time</option>
                             {endTimeOptions.map((time) => (
                               <option key={time} value={time}>
-                                {formatTimeDisplay(time)}
+                                {formatTimeDisplay(time)} (ET)
                               </option>
                             ))}
                           </select>
@@ -755,7 +755,7 @@ export default function AvailabilityClient() {
                       {range.start && range.end && (
                         <div className="flex items-center gap-2">
                           <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-[#0088CB] text-white">
-                            {formatTimeDisplay(range.start)} - {formatTimeDisplay(range.end)}
+                            {formatTimeDisplay(range.start)} - {formatTimeDisplay(range.end)} (ET)
                           </span>
                         </div>
                       )}

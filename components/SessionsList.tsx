@@ -445,7 +445,7 @@ export default function SessionsList({ role }: SessionsListProps) {
                             />
                           </svg>
                           <span>
-                            {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)}
+                            {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} (ET)
                           </span>
                         </div>
                       </div>
@@ -797,7 +797,7 @@ export default function SessionsList({ role }: SessionsListProps) {
                               />
                             </svg>
                             <span>
-                              {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)}
+                              {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} (ET)
                             </span>
                           </div>
                         </div>
@@ -948,7 +948,7 @@ export default function SessionsList({ role }: SessionsListProps) {
                         {statusBadge.label}
                       </span>
                       <span className="text-sm text-gray-600">
-                        {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} on {formatDate(session.scheduledStartTime)}
+                                    {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} (ET) on {formatDate(session.scheduledStartTime)}
                       </span>
                     </div>
                     <div className="text-sm text-gray-700">
@@ -1006,7 +1006,7 @@ export default function SessionsList({ role }: SessionsListProps) {
                         {statusBadge.label}
                       </span>
                       <span className="text-sm text-gray-600">
-                        {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} on {formatDate(session.scheduledStartTime)}
+                        {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} (ET) on {formatDate(session.scheduledStartTime)}
                       </span>
                     </div>
                   </div>
