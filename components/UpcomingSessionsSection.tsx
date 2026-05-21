@@ -229,7 +229,7 @@ export default function UpcomingSessionsSection() {
                             Number.isFinite(start.getTime()) &&
                             Number.isFinite(end.getTime());
                           if (!ok) return <span>—</span>;
-                          return <span>{`${formatTime(start)} - ${formatTime(end)}`}</span>;
+                          return <span>{`${formatTime(start)} - ${formatTime(end)} (ET)`}</span>;
                         })()}
                       </div>
                     </div>

@@ -281,6 +281,7 @@ export default function AvailabilityManagementClient() {
           <p className="mt-1 text-sm text-gray-500">
             Set your available days and times. This schedule applies to all of your services.
           </p>
+          <p className="mt-1 text-sm text-gray-500">All booking times are shown in Eastern Time.</p>
         </div>
         <button
           type="button"
@@ -394,7 +395,7 @@ export default function AvailabilityManagementClient() {
                     {dayData.timeRanges.map((range, rangeIndex) => (
                       <div key={rangeIndex} className="flex items-center gap-3 flex-wrap">
                         <div className="flex items-center gap-2">
-                          <label className="text-sm text-gray-600">From:</label>
+                          <label className="text-sm text-gray-600">From: (ET)</label>
                           <input
                             type="time"
                             value={range.start}
@@ -403,7 +404,7 @@ export default function AvailabilityManagementClient() {
                           />
                         </div>
                         <div className="flex items-center gap-2">
-                          <label className="text-sm text-gray-600">To:</label>
+                          <label className="text-sm text-gray-600">To: (ET)</label>
                           <input
                             type="time"
                             value={range.end}

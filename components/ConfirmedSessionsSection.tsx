@@ -261,7 +261,7 @@ export default function ConfirmedSessionsSection() {
                           const end = getEndIso(session) ? new Date(getEndIso(session)) : null;
                           if (!start || !end) return <span>—</span>;
                           if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return <span>—</span>;
-                          return <span>{`${formatTime(start)} - ${formatTime(end)}`}</span>;
+                          return <span>{`${formatTime(start)} - ${formatTime(end)} (ET)`}</span>;
                         })()}
                       </div>
                     </div>

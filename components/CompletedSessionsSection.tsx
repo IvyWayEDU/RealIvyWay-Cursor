@@ -236,7 +236,7 @@ function CompletedSessionCard({ session, providerName, providerProfileImageUrl }
                 />
               </svg>
               <span>
-                {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)}
+                {formatTime(session.scheduledStartTime)} - {formatTime(session.scheduledEndTime)} (ET)
               </span>
             </div>
           </div>
