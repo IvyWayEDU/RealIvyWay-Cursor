@@ -2128,6 +2128,7 @@ function Step4ChooseTimeSlot({
           <h3 className="text-lg font-semibold text-gray-900">
             Available times for {monthNames[month]} {selectedDate.getDate()}, {year}
           </h3>
+          <p className="text-sm text-gray-600">All booking times are shown in Eastern Time.</p>
 
           {loadingSlots ? (
             <div className="text-center py-8">
@@ -2166,7 +2167,7 @@ function Step4ChooseTimeSlot({
                       <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      <span className="font-medium text-gray-900">{slot.displayTime}</span>
+                      <span className="font-medium text-gray-900">{slot.displayTime} Eastern Time</span>
                       {isSelectedTime && (
                         <svg className="w-5 h-5 text-[#0088CB]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -2195,7 +2196,7 @@ function Step4ChooseTimeSlot({
                       className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3"
                     >
                       <div className="text-sm font-medium text-gray-900">{s.displayDate}</div>
-                      <div className="text-sm text-gray-700">{s.displayTime}</div>
+                      <div className="text-sm text-gray-700">{s.displayTime} Eastern Time</div>
                     </li>
                   ))}
                 </ul>

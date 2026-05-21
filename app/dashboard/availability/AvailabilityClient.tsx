@@ -527,6 +527,7 @@ export default function AvailabilityClient() {
           <p className="mt-2 text-sm text-gray-600">
             Set your weekly availability per service type. Availability only changes when you press Save.
           </p>
+          <p className="mt-1 text-sm text-gray-600">Provider availability is set in Eastern Time.</p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3 w-full sm:w-auto">
           {enabledServices.length > 0 && (
