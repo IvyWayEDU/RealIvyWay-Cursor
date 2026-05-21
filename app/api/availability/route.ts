@@ -517,6 +517,29 @@ export async function POST(request: NextRequest) {
     }
     console.log('[AVAILABILITY_WRITE]', { providerId, serviceTypes: targetSlotServiceTypes, daysCount: days.length });
 
+    // Replace slot inventory: remove future unbooked slots for this provider/serviceType(s).
+    // This ensures removed availability days/ranges stop being bookable immediately.
+    try {
+      const nowIso = new Date().toISOString();
+      for (const slotServiceType of targetSlotServiceTypes) {
+        const { error: delErr } = await supabase
+          .from('availability_slots')
+          .delete()
+          .eq('provider_id', providerId)
+          .eq('service_type', slotServiceType)
+          .eq('is_booked', false)
+          .gt('start_time', nowIso);
+        if (delErr) throw delErr;
+      }
+    } catch (e) {
+      console.error('[AVAILABILITY_SLOTS_SAVE_CLEANUP_FAILED]', {
+        providerId,
+        serviceTypes: targetSlotServiceTypes,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      throw e;
+    }
+
     // SAFE MODE: if request uses service types not on provider, safely refresh derived slot inventory.
     // Must not throw / block request success / change behavior outside inconsistency cases.
     if (invalidServiceTypes.length > 0) {
