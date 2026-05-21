@@ -39,6 +39,10 @@ function SessionCard({
   onLeaveReview,
 }: SessionCardProps) {
   const router = useRouter();
+  const ensureEtSuffix = (label: string): string => {
+    const s = String(label || '');
+    return s.includes('(ET)') ? s : `${s} (ET)`;
+  };
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -205,7 +209,7 @@ function SessionCard({
                 />
               </svg>
               <span>
-                {formatTime(getStart(session))} - {formatTime(getEnd(session))}
+                {ensureEtSuffix(`${formatTime(getStart(session))} - ${formatTime(getEnd(session))}`)}
               </span>
             </div>
             {earnings && (
